@@ -485,7 +485,6 @@ def inject_globals():
 # HOME / REGISTER / LOGIN / LOGOUT
 # ============================================================================
 
-```python
 @app.route("/")
 def index():
     return redirect(url_for("dashboard" if current_user() else "login"))
