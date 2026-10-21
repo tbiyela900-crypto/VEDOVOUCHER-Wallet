@@ -549,13 +549,12 @@ def inject_globals():
     }
 
 
-
 @app.route("/register", methods=["GET", "POST"])
 def register():
     error = None
 
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        # The student number IS the account identifier (no separate username).
         student_number = request.form.get("student_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
         password = request.form.get("password", "")
@@ -567,13 +566,17 @@ def register():
         v = None
         referrer = None
 
-        # Validate student number
-        if not username.isascii() or not username.isdigit() or len(username) != 10:
+        # Validate student number (exactly 10 digits)
+        if (not student_number.isascii()
+                or not student_number.isdigit()
+                or len(student_number) != 10):
             error = "Student number must contain exactly 10 digits."
 
-        # Validate serial number
-        elif not serial_number.isascii() or not serial_number.isdigit() or len(serial_number) != 11:
-            error = "Cereal/serial number must contain exactly 11 digits."
+        # Validate serial number (exactly 11 digits)
+        elif (not serial_number.isascii()
+                or not serial_number.isdigit()
+                or len(serial_number) != 11):
+            error = "Serial number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -612,7 +615,7 @@ def register():
         if not error:
             existing_user = db.execute(
                 "SELECT 1 FROM users WHERE username=?",
-                (username,)
+                (student_number,)
             ).fetchone()
 
             if existing_user:
@@ -626,7 +629,7 @@ def register():
             ).fetchone()
 
             if existing_serial:
-                error = "That cereal/serial number is already registered."
+                error = "That serial number is already registered."
 
         # Display validation errors
         if error:
@@ -634,7 +637,8 @@ def register():
             return page(REGISTER_BODY, form=request.form), 400
 
         try:
-            # Create account
+            # Create account (student number is stored in the `username` column
+            # so login and forgot-password keep working unchanged)
             cur = db.execute(
                 """
                 INSERT INTO users (
@@ -649,7 +653,7 @@ def register():
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    username,
+                    student_number,
                     generate_password_hash(password),
                     v["level"],
                     new_referral_code(db),
@@ -683,13 +687,10 @@ def register():
                     referrer["id"],
                     v["level"] * REFERRAL_BONUS_PER_LEVEL_CENTS,
                     "REFERRAL",
-                    f"Referral: {username} joined"
+                    f"Referral: {student_number} joined"
                 )
 
             db.commit()
-
-            flash("Registration successful. Please log in.", "success")
-            return redirect(url_for("login"))
 
         except sqlite3.IntegrityError:
             db.rollback()
@@ -705,22 +706,29 @@ def register():
             flash("Registration failed due to a server error. Please try again.", "error")
             return redirect(url_for("register"))
 
-    # IMPORTANT: Return the registration page for GET requests.
-    return page(REGISTER_BODY, form={})
-
         # -----------------------------
         # LOG USER IN
         # -----------------------------
-       @app.route("/forgot-password", methods=["GET", "POST"])
+        session.clear()
+        session["uid"] = uid
+
+        flash(f"Welcome! You joined at Level {v['level']}.", "ok")
+        return redirect(url_for("dashboard"))
+
+    # GET request: show the registration page
+    return page(REGISTER_BODY, form={})
+
+
+@app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        student_number = request.form.get("student_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
         new_password = request.form.get("new_password", "")
         confirm_password = request.form.get("confirm_password", "")
 
         error = None
-        if not username.isdigit() or len(username) != 10:
+        if not student_number.isdigit() or len(student_number) != 10:
             error = "Student number must contain exactly 10 digits."
         elif not serial_number.isdigit() or len(serial_number) != 11:
             error = "Serial number must contain exactly 11 digits."
@@ -734,7 +742,7 @@ def forgot_password():
         if not error:
             user = db.execute(
                 "SELECT * FROM users WHERE username = ? AND serial_number = ?",
-                (username, serial_number),
+                (student_number, serial_number),
             ).fetchone()
             if user is None:
                 error = "The student number and serial number do not match an account."
@@ -755,9 +763,9 @@ def forgot_password():
             return redirect(url_for("forgot_password"))
 
         flash("Your password has been reset successfully. You can now log in.", "ok")
-        return redirect(url_for("login"))   # <-- was missing
+        return redirect(url_for("login"))
 
-    return page(FORGOT_BODY)                # <-- was missing (use your template name)
+    return page(FORGOT_BODY)
 
 # ============================================================================
 # DASHBOARD + CHECK-IN
