@@ -54,7 +54,7 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "rewards.db"))
 
-LEVELS = list(range(1, 8))
+LEVELS = list(range(0, 8))
 
 # Total reward per level (daily check-in = total / 24)
 LEVEL_REWARDS_CENTS = {
