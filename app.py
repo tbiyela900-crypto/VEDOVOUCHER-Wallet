@@ -155,9 +155,13 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code TEXT UNIQUE,
     referred_by INTEGER,
     serial_number TEXT NOT NULL UNIQUE,
+
+    last_checkin TEXT,
+    streak INTEGER DEFAULT 0,
+
     is_admin INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
-);
+)
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
@@ -333,7 +337,39 @@ def page(body, **ctx):
 def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
+    def init_db():
+    db = sqlite3.connect(DB_PATH)
+    db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+
+    # ---------------------------------
+    # DATABASE MIGRATION
+    # ---------------------------------
+    user_columns = {
+        row["name"]
+        for row in db.execute(
+            "PRAGMA table_info(users)"
+        ).fetchall()
+    }
+
+    if "serial_number" not in user_columns:
+        db.execute(
+            "ALTER TABLE users ADD COLUMN serial_number TEXT"
+        )
+
+    if "last_checkin" not in user_columns:
+        db.execute(
+            "ALTER TABLE users ADD COLUMN last_checkin TEXT"
+        )
+
+    if "streak" not in user_columns:
+        db.execute(
+            "ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0"
+        )
+
+    # ---------------------------------
+    # EXISTING ADMIN SETUP
+    # ---------------------------------
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
