@@ -567,7 +567,7 @@ def register():
         referrer = None
 
         # Validate student number
-        if not username.isascii() or not username.isdigit() or len(username) != 10:
+        elif not username.isascii() or not username.isdigit() or len(username) != 10:
             error = "Student number must contain exactly 10 digits."
 
         # Validate serial number
