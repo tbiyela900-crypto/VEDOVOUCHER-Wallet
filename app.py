@@ -846,13 +846,12 @@ def login():
         flash("Wrong username or password.", "error")
         return page(LOGIN_BODY), 401
     return page(LOGIN_BODY)
-
-
+ 
 @app.route("/logout", methods=["POST"])
 def logout():
-    session.clear()
-    flash("You have been logged out.", "success")
-    return redirect(url_for("login"))
+     session.clear()
+     flash("You have been logged out.", "success")
+     return redirect(url_for("login"))
 
 # ============================================================================
 # DASHBOARD + CHECK-IN
