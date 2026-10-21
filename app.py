@@ -560,10 +560,15 @@ def index():
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-    if request.method == "POST":
-        # 10 digits = student number / username
-        username = request.form.get("username", "").strip()
+   if request.method == "POST":
+    # Print the data received from the registration form
+    print("FORM DATA:", request.form)
+    username = request.form.get("username", "").strip()
+    # Print the exact value received
+    print("STUDENT NUMBER RECEIVED:", repr(username))
 
+    if not username.isascii() or not username.isdigit() or len(username) != 10:
+        error = "Student number must contain exactly 10 digits."
         # 11 digits = cereal/serial number
         serial_number = request.form.get("serial_number", "").strip()
 
