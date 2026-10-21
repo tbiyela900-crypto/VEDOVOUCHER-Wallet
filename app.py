@@ -833,6 +833,7 @@ def forgot_password():
 
 
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
@@ -840,12 +841,11 @@ def login():
         password = request.form.get("password", "")
 
         user = get_db().execute(
-            "SELECT * FROM users WHERE username=?",
+            "SELECT * FROM users WHERE username = ?",
             (username,)
         ).fetchone()
 
         if user and check_password_hash(user["pw_hash"], password):
-            session.clear()
             session["uid"] = user["id"]
             return redirect(url_for("dashboard"))
 
@@ -853,6 +853,12 @@ def login():
         return page(LOGIN_BODY), 401
 
     return page(LOGIN_BODY)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.pop("uid", None)
+    return redirect(url_for("login"))
  
 @app.route("/logout", methods=["POST"])
 def logout():
