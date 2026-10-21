@@ -161,7 +161,8 @@ CREATE TABLE IF NOT EXISTS users (
 
     is_admin INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
-)
+);
+
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
