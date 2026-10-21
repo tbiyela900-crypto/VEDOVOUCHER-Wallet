@@ -334,25 +334,19 @@ def page(body, **ctx):
 # DATABASE INITIALISATION
 # ============================================================================
 
+
 def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
 
-    # ---------------------------------
-    # DATABASE MIGRATION
-    # ---------------------------------
+    # Add missing columns to existing databases
     user_columns = {
         row["name"]
         for row in db.execute(
             "PRAGMA table_info(users)"
         ).fetchall()
     }
-
-    if "serial_number" not in user_columns:
-        db.execute(
-            "ALTER TABLE users ADD COLUMN serial_number TEXT"
-        )
 
     if "last_checkin" not in user_columns:
         db.execute(
@@ -364,13 +358,13 @@ def init_db():
             "ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0"
         )
 
-    # ---------------------------------
-    # EXISTING ADMIN SETUP
-    # ---------------------------------
+    if "serial_number" not in user_columns:
+        db.execute(
+            "ALTER TABLE users ADD COLUMN serial_number TEXT"
+        )
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
-
     # Create admin account
     if not db.execute(
         "SELECT 1 FROM users WHERE is_admin=1"
