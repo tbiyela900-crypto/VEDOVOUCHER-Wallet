@@ -4,13 +4,13 @@ ZEDAVouchers
 
 
 Features
-  * Accounts, login/logout, members start at Level 1
-  * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
-  * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
-  * Admin approval issues a voucher code to the member
+  * Accounts, login/logout. Sign-up uses an ACCOUNT NUMBER (any number) +
+    11-digit serial number; everyone starts at Level 1 (upgrade later)
   * Daily check-in (level reward / 24) with streak bonus
   * Referral codes and team
   * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
+                          After approval the user must ENTER A VOUCHER
+                          (given by the admin) for the balance to reflect.
                           Admin can edit the demo instruction text.
   * Simulated WITHDRAWALS: user requests a cash-out of  money,
                           admin approves/rejects (rejected = refunded).
@@ -19,8 +19,6 @@ Features
   * SAVINGS POTS        : lock part of the balance for 1-9 weeks and earn a
                           clearly labelled, realistic annual interest rate
                           (simple interest, NOT a multiplier)
-  * PROFILE             : user (and admin) can see the details entered when
-                          the account was created
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
                           pots, a full transaction ledger, and can RESET
                           a member's password
@@ -74,6 +72,12 @@ REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
 
 # Account number rules (any number, digits only)
 ACCOUNT_NUMBER_MAX_LEN = 20
+
+# New members start here; they move up with the Upgrade page
+STARTING_LEVEL = 1
+
+# Voucher format: ONE LETTER followed by this many NUMBERS (e.g. K48291736)
+VOUCHER_DIGITS = 8
 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
@@ -205,10 +209,6 @@ CREATE TABLE IF NOT EXISTS topups (
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
-    voucher_24 TEXT NOT NULL DEFAULT '',
-    voucher_5 TEXT NOT NULL DEFAULT '',
-    voucher_4 TEXT NOT NULL DEFAULT '',
-    voucher_code TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL,
     decided_at TEXT
@@ -276,8 +276,15 @@ def random_block(n):
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
 
-def new_voucher_code(level):
-    return f"L{level}-{random_block(4)}-{random_block(4)}"
+VOUCHER_LETTERS = string.ascii_uppercase.replace("O", "").replace("I", "")
+
+
+def new_voucher_code(letter=None):
+    """Letter first, then numbers. Example: K48291736"""
+    letter = (letter or secrets.choice(VOUCHER_LETTERS)).upper()
+    digits = "".join(secrets.choice(string.digits)
+                     for _ in range(VOUCHER_DIGITS))
+    return letter + digits
 
 
 def new_referral_code(db):
@@ -288,13 +295,17 @@ def new_referral_code(db):
             return code
 
 
-def generate_vouchers(db, level, count):
+def generate_vouchers(db, count, letter=None):
     codes = []
-    for _ in range(count):
-        code = new_voucher_code(level)
+    while len(codes) < count:
+        code = new_voucher_code(letter)
+        if db.execute("SELECT 1 FROM vouchers WHERE code=?",
+                      (code,)).fetchone():
+            continue
+        # `level` column is kept for older databases; it is no longer used.
         db.execute(
             "INSERT INTO vouchers (code, level, created_at) VALUES (?,?,?)",
-            (code, level, now_iso()))
+            (code, 0, now_iso()))
         codes.append(code)
     db.commit()
     return codes
@@ -373,21 +384,6 @@ def init_db():
                 f"ALTER TABLE users ADD COLUMN {column} {definition}"
             )
 
-    topup_columns = {
-        "voucher_24": "TEXT NOT NULL DEFAULT ''",
-        "voucher_5": "TEXT NOT NULL DEFAULT ''",
-        "voucher_4": "TEXT NOT NULL DEFAULT ''",
-        "voucher_code": "TEXT NOT NULL DEFAULT ''",
-    }
-    existing_topup_columns = {
-        row["name"] for row in db.execute("PRAGMA table_info(topups)").fetchall()
-    }
-    for column, definition in topup_columns.items():
-        if column not in existing_topup_columns:
-            db.execute(
-                f"ALTER TABLE topups ADD COLUMN {column} {definition}"
-            )
-
     db.commit()
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
@@ -428,8 +424,43 @@ def init_db():
         print(f"[setup] Admin account created: {admin_user}")
         print(f"[setup] Default admin password: {admin_pass} (change it!)")
 
-    # Level vouchers were moved into the Top-up workflow.
-    # Existing voucher rows are kept so old databases remain compatible.
+    # Create starter vouchers
+    if not db.execute(
+        "SELECT 1 FROM vouchers"
+    ).fetchone():
+
+        print("[setup] Starter voucher codes:")
+
+        for _ in range(5):
+            code = new_voucher_code()
+
+            db.execute(
+                """
+                INSERT INTO vouchers (
+                    code,
+                    level,
+                    created_at
+                )
+                VALUES (?,?,?)
+                """,
+                (
+                    code,
+                    0,
+                    now_iso()
+                )
+            )
+
+            print(f"  {code}")
+
+    # One-time migration to the voucher flow: top-ups approved under the old
+    # flow were already credited, so mark them COMPLETED (not redeemable).
+    if not db.execute(
+        "SELECT 1 FROM settings WHERE key='voucher_flow_v1'"
+    ).fetchone():
+        db.execute(
+            "UPDATE topups SET status='COMPLETED' WHERE status='APPROVED'"
+        )
+        set_setting(db, "voucher_flow_v1", "1")
 
     # Top-up instructions
     if not db.execute(
@@ -528,7 +559,6 @@ def register():
         ref_code = request.form.get("referral", "").strip().upper()
 
         db = get_db()
-        v = None
         referrer = None
 
         # Validate account number (any number: digits only)
@@ -604,7 +634,7 @@ def register():
                 (
                     account_number,
                     generate_password_hash(password),
-                    1,
+                    STARTING_LEVEL,
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
                     serial_number,
@@ -619,7 +649,7 @@ def register():
                 credit(
                     db,
                     referrer["id"],
-                    v["level"] * REFERRAL_BONUS_PER_LEVEL_CENTS,
+                    STARTING_LEVEL * REFERRAL_BONUS_PER_LEVEL_CENTS,
                     "REFERRAL",
                     f"Referral: {account_number} joined"
                 )
@@ -646,7 +676,7 @@ def register():
         session.clear()
         session["uid"] = uid
 
-        flash("Welcome! Your account was created at Level 1.", "ok")
+        flash(f"Welcome! You joined at Level {STARTING_LEVEL}.", "ok")
         return redirect(url_for("dashboard"))
 
     # GET request: show the registration page
@@ -780,24 +810,10 @@ def topup():
         cents = parse_amount(request.form.get("amount"),
                              TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
         note = request.form.get("note", "").strip()[:100]
-        voucher_24 = request.form.get("voucher_24", "").strip()
-        voucher_5 = request.form.get("voucher_5", "").strip().upper()
-        voucher_4 = request.form.get("voucher_4", "").strip().upper()
 
         if cents is None:
             flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
-            return redirect(url_for("topup"))
-
-        # The three reference fields are intentionally visible only to the admin.
-        if not voucher_24.isascii() or not voucher_24.isdigit() or len(voucher_24) != 24:
-            flash("The first voucher field must contain exactly 24 numbers.", "error")
-            return redirect(url_for("topup"))
-        if not voucher_5.isascii() or len(voucher_5) != 5 or not voucher_5.isalnum():
-            flash("The second voucher field must contain exactly 5 letters/numbers.", "error")
-            return redirect(url_for("topup"))
-        if not voucher_4.isascii() or len(voucher_4) != 4 or not voucher_4.isalnum():
-            flash("The third voucher field must contain exactly 4 letters/numbers.", "error")
             return redirect(url_for("topup"))
 
         pending = db.execute(
@@ -808,9 +824,9 @@ def topup():
             return redirect(url_for("topup"))
 
         db.execute(
-            "INSERT INTO topups (user_id, amount, note, voucher_24, voucher_5, voucher_4, "
-            "voucher_code, status, created_at) VALUES (?,?,?,?,?,?,?, 'PENDING', ?)",
-            (user["id"], cents, note, voucher_24, voucher_5, voucher_4, "", now_iso()))
+            "INSERT INTO topups (user_id, amount, note, status, created_at) "
+            "VALUES (?,?,?, 'PENDING', ?)",
+            (user["id"], cents, note, now_iso()))
         db.commit()
         flash(f"Top-up request for {money(cents)} sent to the admin.", "ok")
         return redirect(url_for("topup"))
@@ -818,11 +834,63 @@ def topup():
     history = db.execute(
         "SELECT * FROM topups WHERE user_id=? ORDER BY id DESC",
         (user["id"],)).fetchall()
-    return page(TOPUP_BODY, user=user, history=history,
+    waiting = sum(1 for h in history if h["status"] == "APPROVED")
+    return page(TOPUP_BODY, user=user, history=history, waiting=waiting,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS),
                 TOPUP_MIN_CENTS=TOPUP_MIN_CENTS,
                 TOPUP_MAX_CENTS=TOPUP_MAX_CENTS)
+
+
+@app.route("/topup/<int:topup_id>/redeem", methods=["POST"])
+@login_required
+def topup_redeem(topup_id):
+    """User enters the voucher the admin gave them; only then is the
+    approved top-up added to the balance."""
+    db = get_db()
+    user = current_user()
+    code = request.form.get("voucher", "").strip().upper()
+
+    t = db.execute("SELECT * FROM topups WHERE id=? AND user_id=?",
+                   (topup_id, user["id"])).fetchone()
+    if t is None:
+        abort(404)
+    if t["status"] != "APPROVED":
+        flash("This top-up is not waiting for a voucher.", "error")
+        return redirect(url_for("topup"))
+    if not code:
+        flash("Enter the voucher you were given.", "error")
+        return redirect(url_for("topup"))
+
+    voucher = db.execute("SELECT * FROM vouchers WHERE code=?",
+                         (code,)).fetchone()
+    if voucher is None:
+        flash("That voucher is not valid.", "error")
+        return redirect(url_for("topup"))
+    if voucher["used_by"] is not None:
+        flash("That voucher has already been used.", "error")
+        return redirect(url_for("topup"))
+
+    # Claim the top-up and the voucher together (double-click safe)
+    got_topup = db.execute(
+        "UPDATE topups SET status='COMPLETED' "
+        "WHERE id=? AND user_id=? AND status='APPROVED'",
+        (topup_id, user["id"])).rowcount
+    got_voucher = db.execute(
+        "UPDATE vouchers SET used_by=?, used_at=? "
+        "WHERE code=? AND used_by IS NULL",
+        (user["id"], now_iso(), code)).rowcount
+    if got_topup != 1 or got_voucher != 1:
+        db.rollback()
+        flash("Could not redeem this voucher. Please try again.", "error")
+        return redirect(url_for("topup"))
+
+    credit(db, user["id"], t["amount"], "TOPUP",
+           f"Top-up #{topup_id} credited (voucher {code})")
+    db.commit()
+    flash(f"Voucher accepted! {money(t['amount'])} added to your balance.",
+          "ok")
+    return redirect(url_for("topup"))
 
 
 # ============================================================================
@@ -1040,36 +1108,6 @@ def pot_break(pot_id):
 
 
 # ============================================================================
-# PROFILE
-# ============================================================================
-
-def _profile_page(member, is_self):
-    db = get_db()
-    referrer = None
-    if member["referred_by"]:
-        referrer = db.execute("SELECT username FROM users WHERE id=?",
-                              (member["referred_by"],)).fetchone()
-    return page(PROFILE_BODY, member=member, referrer=referrer,
-                is_self=is_self)
-
-
-@app.route("/profile")
-@login_required
-def profile():
-    return _profile_page(current_user(), True)
-
-
-@app.route("/admin/user/<int:user_id>")
-@admin_required
-def admin_user_profile(user_id):
-    member = get_db().execute("SELECT * FROM users WHERE id=?",
-                              (user_id,)).fetchone()
-    if member is None:
-        abort(404)
-    return _profile_page(member, False)
-
-
-# ============================================================================
 # ADMIN
 # ============================================================================
 
@@ -1079,17 +1117,22 @@ def admin():
     db = get_db()
 
     if request.method == "POST":
+        letter = request.form.get("letter", "").strip().upper()
         try:
-            level = int(request.form.get("level", 0))
             count = int(request.form.get("count", 0))
         except ValueError:
-            level, count = 0, 0
+            count = 0
 
-        if level not in LEVELS or not 1 <= count <= 100:
-            flash("Pick a level 1-7 and a count from 1 to 100.", "error")
+        if letter and not (len(letter) == 1 and letter.isascii()
+                           and letter.isalpha()):
+            flash("The starting letter must be a single letter A-Z "
+                  "(or leave it blank for a random letter).", "error")
+        elif not 1 <= count <= 100:
+            flash("Pick a count from 1 to 100.", "error")
         else:
-            codes = generate_vouchers(db, level, count)
-            flash(f"Created {len(codes)} Level {level} code(s).", "ok")
+            codes = generate_vouchers(db, count, letter or None)
+            flash(f"Created {len(codes)} voucher(s). See the list below.",
+                  "ok")
         return redirect(url_for("admin"))
 
     one = lambda sql: db.execute(sql).fetchone()[0]
@@ -1129,8 +1172,19 @@ def admin():
         "SELECT transactions.*, users.username FROM transactions "
         "JOIN users ON users.id = transactions.user_id "
         "ORDER BY transactions.id DESC LIMIT 60").fetchall()
+    vouchers = db.execute(
+        "SELECT vouchers.*, users.username AS used_by_name FROM vouchers "
+        "LEFT JOIN users ON users.id = vouchers.used_by "
+        "ORDER BY (vouchers.used_by IS NOT NULL), "
+        "vouchers.created_at DESC, vouchers.code LIMIT 300").fetchall()
+    unused_count = one("SELECT COUNT(*) FROM vouchers WHERE used_by IS NULL")
+    used_count = one("SELECT COUNT(*) FROM vouchers "
+                     "WHERE used_by IS NOT NULL")
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
+                vouchers=vouchers, unused_count=unused_count,
+                used_count=used_count,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
@@ -1187,42 +1241,23 @@ def admin_topup(topup_id, action):
         flash("Top-up request not found.", "error")
         return redirect(url_for("admin"))
 
-    if t["status"] != "PENDING":
+    new_status = "APPROVED" if action == "approve" else "REJECTED"
+    claimed = db.execute(
+        "UPDATE topups SET status=?, decided_at=? "
+        "WHERE id=? AND status='PENDING'",
+        (new_status, now_iso(), topup_id)).rowcount
+    if claimed != 1:
+        db.rollback()
         flash("This top-up was already processed.", "error")
         return redirect(url_for("admin"))
 
-    if action == "approve":
-        voucher_code = request.form.get("voucher_code", "").strip().upper()
-        if not voucher_code:
-            flash("Enter the voucher code before approving this top-up.", "error")
-            return redirect(url_for("admin"))
-        if len(voucher_code) > 100:
-            flash("Voucher code is too long.", "error")
-            return redirect(url_for("admin"))
-        new_status = "APPROVED"
-        claimed = db.execute(
-            "UPDATE topups SET status=?, voucher_code=?, decided_at=? "
-            "WHERE id=? AND status='PENDING'",
-            (new_status, voucher_code, now_iso(), topup_id)).rowcount
-        if claimed != 1:
-            db.rollback()
-            flash("This top-up was already processed.", "error")
-            return redirect(url_for("admin"))
-        credit(db, t["user_id"], t["amount"], "TOPUP",
-               f"Top-up #{topup_id} approved (play money)")
-    else:
-        new_status = "REJECTED"
-        claimed = db.execute(
-            "UPDATE topups SET status=?, decided_at=? "
-            "WHERE id=? AND status='PENDING'",
-            (new_status, now_iso(), topup_id)).rowcount
-        if claimed != 1:
-            db.rollback()
-            flash("This top-up was already processed.", "error")
-            return redirect(url_for("admin"))
-
     db.commit()
-    flash(f"Top-up #{topup_id} {new_status.lower()}.", "ok")
+    if action == "approve":
+        flash(f"Top-up #{topup_id} approved. Give the member a voucher: "
+              "the balance is added when they enter it on the Top up page.",
+              "ok")
+    else:
+        flash(f"Top-up #{topup_id} rejected.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -1304,26 +1339,22 @@ th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:
 code{background:var(--bg);padding:2px 6px;border-radius:6px;}
 .muted{color:var(--muted);} .hl{background:#eef0ff;} .small{font-size:.85rem;}
 .note{border-left:4px solid var(--brand);}
-.voucher-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;}
-@media(max-width:700px){.voucher-grid{grid-template-columns:1fr;}}
 .pos{color:var(--ok);} .neg{color:var(--err);}
 .pwbox{width:150px;padding:6px;font-size:.85rem;}
-nav a.active{color:#fff;border-bottom:2px solid #fff;}
-.subnav{background:#e9ebf5;padding:8px 20px;display:flex;gap:18px;flex-wrap:wrap;}
-.subnav a{color:var(--brand);text-decoration:none;font-size:.92rem;}
-.subnav a.active{font-weight:700;text-decoration:underline;}
 </style>
 </head>
 <body>
 <div class="demo">Welcome let's grow together.</div>
-{% set ep = request.endpoint %}
 <nav>
-<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}">My VEDOVOUCHER Wallet</a>
+<span class="brand">My VEDOVOUCHER Wallet</span>
 {% if me %}
-<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">Withdraw</a>
-<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">My Team</a>
-<a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">Admin</a>{% endif %}
+<a href="{{ url_for('dashboard') }}">Dashboard</a>
+<a href="{{ url_for('topup') }}">Top up</a>
+<a href="{{ url_for('withdraw') }}">Withdraw</a>
+<a href="{{ url_for('pots') }}">Savings pots</a>
+<a href="{{ url_for('upgrade') }}">Upgrade</a>
+<a href="{{ url_for('team') }}">My Team</a>
+{% if me['is_admin'] %}<a href="{{ url_for('admin') }}">Admin</a>{% endif %}
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button>Log out ({{ me['username'] }})</button>
@@ -1333,19 +1364,6 @@ nav a.active{color:#fff;border-bottom:2px solid #fff;}
 <a href="{{ url_for('register') }}">Create account</a>
 {% endif %}
 </nav>
-
-{% if me and ep in ['withdraw','topup','upgrade'] %}
-<div class="subnav">
-<a class="{{ 'active' if ep=='withdraw' }}" href="{{ url_for('withdraw') }}">Withdraw</a>
-<a class="{{ 'active' if ep=='topup' }}" href="{{ url_for('topup') }}">Top up</a>
-<a class="{{ 'active' if ep=='upgrade' }}" href="{{ url_for('upgrade') }}">Upgrade</a>
-</div>
-{% elif me and ep in ['team','pots'] %}
-<div class="subnav">
-<a class="{{ 'active' if ep=='team' }}" href="{{ url_for('team') }}">My Team</a>
-<a class="{{ 'active' if ep=='pots' }}" href="{{ url_for('pots') }}">Savings pots</a>
-</div>
-{% endif %}
 <main>
 {% with msgs = get_flashed_messages(with_categories=true) %}
 {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
@@ -1466,33 +1484,20 @@ the daily check-in amount is the level reward divided by 24.</p>
 
 TOPUP_BODY = """
 <div class="card note">
-<h1>Top up</h1>
+<h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
 <h2>Instructions from the admin</h2>
 <p style="white-space:pre-wrap">{{ instructions }}</p>
+<p class="muted small">How it works: send a request below. When the admin approves it,
+a <b>Voucher</b> box appears next to it in your top-up history. Enter the voucher the admin
+gives you and the amount is added to your balance.</p>
+{% if waiting %}<p><b>You have {{ waiting }} approved top-up(s) waiting for a voucher. Scroll down to enter it.</b></p>{% endif %}
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-
-<div class="voucher-grid">
-<div>
-<label>Voucher information 1</label>
-<input name="voucher_24" type="text" inputmode="numeric" maxlength="24" minlength="24" pattern="[0-9]{24}" placeholder="24 numbers" required>
-</div>
-<div>
-<label>Voucher information 2</label>
-<input name="voucher_5" type="text" maxlength="5" minlength="5" pattern="[A-Za-z0-9]{5}" placeholder="5 letters/numbers" required>
-</div>
-<div>
-<label>Voucher information 3</label>
-<input name="voucher_4" type="text" maxlength="4" minlength="4" pattern="[A-Za-z0-9]{4}" placeholder="4 letters/numbers" required>
-</div>
-</div>
-<p class="muted small">These three voucher-information fields are private to the admin. They are not shown in your top-up history.</p>
-
 <label>Note for the admin (optional)</label>
-<input name="note" maxlength="100" placeholder="Optional note">
+<input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
 <button class="primary">Request top-up</button>
 </form>
 </div>
@@ -1504,8 +1509,18 @@ TOPUP_BODY = """
 <tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Voucher</th></tr>
 {% for t in history %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td><td class="muted">{{ t['note'] }}</td>
-<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
-<td>{% if t['status']=='APPROVED' and t['voucher_code'] %}<code>{{ t['voucher_code'] }}</code>{% elif t['status']=='PENDING' %}<span class="muted">Waiting for admin</span>{% else %}<span class="muted">-</span>{% endif %}</td></tr>
+<td><span class="badge {{ 'ok' if t['status'] in ('APPROVED','COMPLETED') else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
+<td>
+{% if t['status'] == 'APPROVED' %}
+<form class="inline" method="post" action="{{ url_for('topup_redeem', topup_id=t['id']) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input class="pwbox" name="voucher" placeholder="e.g. K48291736" maxlength="20" autocomplete="off" required>
+<button class="success">Enter voucher</button>
+</form>
+{% elif t['status'] == 'COMPLETED' %}<span class="muted small">Credited</span>
+{% elif t['status'] == 'PENDING' %}<span class="muted small">Waiting for admin</span>
+{% endif %}
+</td></tr>
 {% endfor %}
 </table>
 {% else %}<p class="muted">No top-up requests yet.</p>{% endif %}
@@ -1669,24 +1684,6 @@ onsubmit="return confirm('Close early? You will lose the interest.');">
 </div>
 """
 
-PROFILE_BODY = """
-<div class="card note">
-<h1>{{ 'My profile' if is_self else 'Member profile' }}</h1>
-<p class="muted">Details entered when the account was created.</p>
-<table>
-<tr><th>Account number</th><td>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</td></tr>
-<tr><th>Serial number</th><td>{{ member['serial_number'] }}</td></tr>
-<tr><th>Level</th><td>Level {{ member['level'] }}</td></tr>
-<tr><th>Balance</th><td>{{ money(member['points']) }}</td></tr>
-<tr><th>Referral code</th><td><code>{{ member['referral_code'] }}</code></td></tr>
-<tr><th>Referred by</th><td>{{ referrer['username'] if referrer else '-' }}</td></tr>
-<tr><th>Day streak</th><td>{{ member['streak'] }}</td></tr>
-<tr><th>Joined</th><td>{{ member['created_at'][:16] }}</td></tr>
-</table>
-{% if not is_self %}<p><a href="{{ url_for('admin') }}">&larr; Back to admin</a></p>{% endif %}
-</div>
-"""
-
 ADMIN_BODY = """
 <div class="card">
 <h2>Overview</h2>
@@ -1711,29 +1708,21 @@ ADMIN_BODY = """
 </div>
 
 <div class="card">
-<h2>Top-up requests & voucher information</h2>
-<p class="muted">Only the admin can see the three voucher-information fields entered by members. When approving, enter the voucher code that should be released to the member. The member sees that voucher only after approval.</p>
+<h2>Top-up requests</h2>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>24 numbers</th><th>5 chars</th><th>4 chars</th><th>Note</th><th>Status / Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
-<tr>
-<td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
-<td><code>{{ t['voucher_24'] }}</code></td><td><code>{{ t['voucher_5'] }}</code></td><td><code>{{ t['voucher_4'] }}</code></td>
+<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
 <td class="muted">{{ t['note'] }}</td>
+<td><span class="badge {{ 'ok' if t['status'] in ('APPROVED','COMPLETED') else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span>
+{% if t['status'] == 'APPROVED' %}<div class="muted small">awaiting voucher</div>{% endif %}</td>
 <td>
 {% if t['status'] == 'PENDING' %}
-<form method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='approve') }}" style="min-width:220px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<input name="voucher_code" type="text" maxlength="100" placeholder="Enter voucher code" required>
-<button class="success" style="margin-top:6px">Approve + issue voucher</button>
-</form>
-<form method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='reject') }}" style="margin-top:6px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button>
-</form>
-{% else %}
-<span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' }}">{{ t['status'] }}</span>
-{% if t['status']=='APPROVED' and t['voucher_code'] %}<br><code>{{ t['voucher_code'] }}</code>{% endif %}
+<form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='approve') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Approve</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='reject') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button></form>
 {% endif %}
 </td></tr>
 {% endfor %}
@@ -1767,7 +1756,7 @@ ADMIN_BODY = """
 <table>
 <tr><th>Account number</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Reset password</th></tr>
 {% for u in users %}
-<tr><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
+<tr><td>{{ u['username'] }}{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>L{{ u['level'] }}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
@@ -1809,7 +1798,38 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 {% else %}<p class="muted">No transactions yet.</p>{% endif %}
 </div>
 
+<div class="card">
+<h2>Voucher generator</h2>
+<p class="muted">Each voucher is <b>one letter followed by 8 numbers</b> (example: K48291736).
+Give a voucher to a member after you approve their top-up; they enter it on the Top up page
+and the balance is added.</p>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>First letter (A-Z) - leave blank for a random letter</label>
+<input name="letter" maxlength="1" pattern="[A-Za-z]" placeholder="e.g. K" style="text-transform:uppercase">
+<label>Then numbers - how many vouchers? (1-100)</label>
+<input name="count" type="number" min="1" max="100" value="5">
+<button class="primary">Generate vouchers</button>
+</form>
+</div>
 
+<div class="card">
+<h2>Vouchers ({{ unused_count }} unused, {{ used_count }} used)</h2>
+{% if vouchers %}
+<table>
+<tr><th>Voucher</th><th>Status</th><th>Used by (account)</th><th>Used on</th><th>Created</th></tr>
+{% for v in vouchers %}
+<tr class="{{ 'hl' if not v['used_by'] }}">
+<td><code>{{ v['code'] }}</code></td>
+<td>{% if v['used_by'] %}<span class="badge err">USED</span>{% else %}<span class="badge ok">UNUSED</span>{% endif %}</td>
+<td>{{ v['used_by_name'] or '-' }}</td>
+<td>{{ v['used_at'][:16] if v['used_at'] else '-' }}</td>
+<td class="muted">{{ v['created_at'][:16] }}</td>
+</tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No vouchers yet. Generate some above.</p>{% endif %}
+</div>
 """
 
 app.jinja_loader = DictLoader({"base": BASE})
