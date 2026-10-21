@@ -341,6 +341,26 @@ def init_db():
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
 
+    # Repair older databases without deleting existing records.
+    required_columns = {
+        "points": "INTEGER NOT NULL DEFAULT 0",
+        "last_checkin": "TEXT",
+        "streak": "INTEGER NOT NULL DEFAULT 0",
+    }
+
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(users)").fetchall()
+    }
+
+    for column, definition in required_columns.items():
+        if column not in existing_columns:
+            db.execute(
+                f"ALTER TABLE users ADD COLUMN {column} {definition}"
+            )
+
+    db.commit()
+
     # Add missing columns to existing databases
     user_columns = {
         row["name"]
