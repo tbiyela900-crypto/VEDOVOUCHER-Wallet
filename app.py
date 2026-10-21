@@ -1,29 +1,31 @@
 """
-ZEDAVouchers
+ZEDAVouchers  -  advanced interface edition
 =================================================================
 
-
 Features
-  * Accounts, login/logout, members start at Level 0
+  * Accounts, login/logout, level code needed to join (levels 1-7)
   * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
-  * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
-  * Admin approval issues a voucher code to the member
   * Daily check-in (level reward / 24) with streak bonus
   * Referral codes and team
-  * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
+  * Simulated TOP-UPS   : user requests money, admin approves/rejects.
                           Admin can edit the demo instruction text.
-  * Simulated WITHDRAWALS: user requests a cash-out of  money,
+  * Simulated WITHDRAWALS: user requests a cash-out of money,
                           admin approves/rejects (rejected = refunded).
   * TEAM VIEW           : each team member's level and points (balance)
   * LEVEL UPGRADES      : spend balance to move up one level, costs are public
   * SAVINGS POTS        : lock part of the balance for 1-9 weeks and earn a
                           clearly labelled, realistic annual interest rate
-                          (simple interest, NOT a multiplier)
-  * PROFILE             : user (and admin) can see the details entered when
-                          the account was created
+  * PROFILE             : details entered when the account was created
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
                           pots, a full transaction ledger, and can RESET
                           a member's password
+
+Interface
+  * Dark market-terminal look with a live reward ticker
+  * Banking-app dashboard: balance card, quick actions, balance ring,
+    level progress, streak dots, activity bars and transaction list
+  * Three main tabs (Withdraw, My Team, Profile) with sub-menus
+  * Bottom tab bar on phones
 
 Run:
   pip install flask
@@ -44,6 +46,7 @@ from flask import (
     request, session, url_for,
 )
 from jinja2 import DictLoader
+from markupsafe import Markup
 from werkzeug.security import check_password_hash, generate_password_hash
 
 
@@ -54,17 +57,17 @@ from werkzeug.security import check_password_hash, generate_password_hash
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get("DB_PATH", os.path.join(BASE_DIR, "rewards.db"))
 
-LEVELS = list(range(0, 8))
+LEVELS = list(range(1, 8))
 
 # Total reward per level (daily check-in = total / 24)
 LEVEL_REWARDS_CENTS = {
-    0: 000, 1: 36000, 2: 120000, 3: 360000, 4: 1200000,
+    1: 36000, 2: 120000, 3: 360000, 4: 1200000,
     5: 2000000, 6: 3000000, 7: 4000000,
 }
 
 DAILY_REWARD_CENTS = {
     lvl: int((Decimal(LEVEL_REWARDS_CENTS[lvl]) / 24).quantize(
-        Decimal("0"), rounding=ROUND_HALF_UP))
+        Decimal("1"), rounding=ROUND_HALF_UP))
     for lvl in LEVELS
 }
 
@@ -80,7 +83,7 @@ ACCOUNT_NUMBER_MAX_LEN = 20
 # two levels' total rewards. One level at a time, paid from balance.
 UPGRADE_COST_CENTS = {
     lvl: (LEVEL_REWARDS_CENTS[lvl] - LEVEL_REWARDS_CENTS[lvl - 1]) // 2
-    for lvl in LEVELS if lvl > 0
+    for lvl in LEVELS if lvl > 1
 }
 
 # --- Top-ups / withdrawals -------------------------------------------------
@@ -107,6 +110,36 @@ POT_MIN_CENTS = 1000            # R10
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+
+
+# ============================================================================
+# ICONS (inline SVG, used in the templates as {{ icon('name') }})
+# ============================================================================
+
+ICONS = {
+    "home": '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
+    "withdraw": '<path d="M7 17L17 7"/><path d="M8 7h9v9"/>',
+    "topup": '<circle cx="12" cy="12" r="9"/><path d="M12 8v8M8 12h8"/>',
+    "upgrade": '<path d="M6 13l6-6 6 6"/><path d="M6 19l6-6 6 6"/>',
+    "team": ('<circle cx="9" cy="8" r="3.5"/>'
+             '<path d="M2.5 20c0-3.6 2.9-6 6.5-6s6.5 2.4 6.5 6"/>'
+             '<path d="M16 4.7a3.5 3.5 0 010 6.6"/>'
+             '<path d="M18 14.3c2.2.7 3.5 2.6 3.5 5.7"/>'),
+    "pots": '<rect x="4" y="10" width="16" height="10" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/>',
+    "profile": '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
+    "admin": '<path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/>',
+    "fingerprint": ('<path d="M3.5 10A9 9 0 0120.5 10"/>'
+                    '<path d="M6 13a6 6 0 0112 0v1.5"/>'
+                    '<path d="M9 20c.6-1.5 1-3 1-5v-3a2 2 0 014 0v3c0 2.5.5 4 1.5 5.5"/>'),
+}
+
+
+def icon(name):
+    body = ICONS.get(name, "")
+    return Markup(
+        '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
+        'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
+        'aria-hidden="true">' + body + "</svg>")
 
 
 # ============================================================================
@@ -205,10 +238,6 @@ CREATE TABLE IF NOT EXISTS topups (
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
-    voucher_24 TEXT NOT NULL DEFAULT '',
-    voucher_5 TEXT NOT NULL DEFAULT '',
-    voucher_4 TEXT NOT NULL DEFAULT '',
-    voucher_code TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL,
     decided_at TEXT
@@ -373,21 +402,6 @@ def init_db():
                 f"ALTER TABLE users ADD COLUMN {column} {definition}"
             )
 
-    topup_columns = {
-        "voucher_24": "TEXT NOT NULL DEFAULT ''",
-        "voucher_5": "TEXT NOT NULL DEFAULT ''",
-        "voucher_4": "TEXT NOT NULL DEFAULT ''",
-        "voucher_code": "TEXT NOT NULL DEFAULT ''",
-    }
-    existing_topup_columns = {
-        row["name"] for row in db.execute("PRAGMA table_info(topups)").fetchall()
-    }
-    for column, definition in topup_columns.items():
-        if column not in existing_topup_columns:
-            db.execute(
-                f"ALTER TABLE topups ADD COLUMN {column} {definition}"
-            )
-
     db.commit()
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
@@ -428,8 +442,33 @@ def init_db():
         print(f"[setup] Admin account created: {admin_user}")
         print(f"[setup] Default admin password: {admin_pass} (change it!)")
 
-    # Level vouchers were moved into the Top-up workflow.
-    # Existing voucher rows are kept so old databases remain compatible.
+    # Create starter vouchers
+    if not db.execute(
+        "SELECT 1 FROM vouchers"
+    ).fetchone():
+
+        print("[setup] Starter voucher codes:")
+
+        for level in LEVELS:
+            code = new_voucher_code(level)
+
+            db.execute(
+                """
+                INSERT INTO vouchers (
+                    code,
+                    level,
+                    created_at
+                )
+                VALUES (?,?,?)
+                """,
+                (
+                    code,
+                    level,
+                    now_iso()
+                )
+            )
+
+            print(f"  Level {level}: {code}")
 
     # Top-up instructions
     if not db.execute(
@@ -507,6 +546,7 @@ def inject_globals():
         "POT_APR_PERCENT": POT_APR_PERCENT,
         "POT_WEEKS": POT_WEEKS,
         "pot_interest": pot_interest_cents,
+        "icon": icon,
     }
 
 
@@ -525,6 +565,7 @@ def register():
         serial_number = request.form.get("serial_number", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
+        voucher = request.form.get("voucher", "").strip().upper()
         ref_code = request.form.get("referral", "").strip().upper()
 
         db = get_db()
@@ -550,6 +591,22 @@ def register():
 
         elif password != confirm:
             error = "Passwords do not match."
+
+        # Validate voucher
+        elif not voucher:
+            error = "A level code is required to join."
+
+        # Check voucher exists and is unused
+        if not error:
+            v = db.execute(
+                "SELECT * FROM vouchers WHERE code=?",
+                (voucher,)
+            ).fetchone()
+
+            if v is None:
+                error = "That level code is not valid."
+            elif v["used_by"] is not None:
+                error = "That level code has already been used."
 
         # Check referral code
         if not error and ref_code:
@@ -604,7 +661,7 @@ def register():
                 (
                     account_number,
                     generate_password_hash(password),
-                    1,
+                    v["level"],
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
                     serial_number,
@@ -613,6 +670,21 @@ def register():
             )
 
             uid = cur.lastrowid
+
+            # Claim voucher only if it is still unused
+            claimed = db.execute(
+                """
+                UPDATE vouchers
+                SET used_by=?, used_at=?
+                WHERE code=? AND used_by IS NULL
+                """,
+                (uid, now_iso(), voucher)
+            ).rowcount
+
+            if claimed != 1:
+                db.rollback()
+                flash("That level code has already been used.", "error")
+                return redirect(url_for("register"))
 
             # Referral bonus
             if referrer:
@@ -646,7 +718,7 @@ def register():
         session.clear()
         session["uid"] = uid
 
-        flash("Welcome! Your account was created at Level 0.", "ok")
+        flash(f"Welcome! You joined at Level {v['level']}.", "ok")
         return redirect(url_for("dashboard"))
 
     # GET request: show the registration page
@@ -780,24 +852,10 @@ def topup():
         cents = parse_amount(request.form.get("amount"),
                              TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
         note = request.form.get("note", "").strip()[:100]
-        voucher_24 = request.form.get("voucher_24", "").strip()
-        voucher_5 = request.form.get("voucher_5", "").strip().upper()
-        voucher_4 = request.form.get("voucher_4", "").strip().upper()
 
         if cents is None:
             flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
-            return redirect(url_for("topup"))
-
-        # The three reference fields are intentionally visible only to the admin.
-        if not voucher_24.isascii() or not voucher_24.isdigit() or len(voucher_24) != 24:
-            flash("The first voucher field must contain exactly 24 numbers.", "error")
-            return redirect(url_for("topup"))
-        if not voucher_5.isascii() or len(voucher_5) != 5 or not voucher_5.isalnum():
-            flash("The second voucher field must contain exactly 5 letters/numbers.", "error")
-            return redirect(url_for("topup"))
-        if not voucher_4.isascii() or len(voucher_4) != 4 or not voucher_4.isalnum():
-            flash("The third voucher field must contain exactly 4 letters/numbers.", "error")
             return redirect(url_for("topup"))
 
         pending = db.execute(
@@ -808,9 +866,9 @@ def topup():
             return redirect(url_for("topup"))
 
         db.execute(
-            "INSERT INTO topups (user_id, amount, note, voucher_24, voucher_5, voucher_4, "
-            "voucher_code, status, created_at) VALUES (?,?,?,?,?,?,?, 'PENDING', ?)",
-            (user["id"], cents, note, voucher_24, voucher_5, voucher_4, "", now_iso()))
+            "INSERT INTO topups (user_id, amount, note, status, created_at) "
+            "VALUES (?,?,?, 'PENDING', ?)",
+            (user["id"], cents, note, now_iso()))
         db.commit()
         flash(f"Top-up request for {money(cents)} sent to the admin.", "ok")
         return redirect(url_for("topup"))
@@ -1129,8 +1187,13 @@ def admin():
         "SELECT transactions.*, users.username FROM transactions "
         "JOIN users ON users.id = transactions.user_id "
         "ORDER BY transactions.id DESC LIMIT 60").fetchall()
+    unused = db.execute(
+        "SELECT * FROM vouchers WHERE used_by IS NULL "
+        "ORDER BY level, created_at").fetchall()
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
+                unused=unused,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
@@ -1187,40 +1250,19 @@ def admin_topup(topup_id, action):
         flash("Top-up request not found.", "error")
         return redirect(url_for("admin"))
 
-    if t["status"] != "PENDING":
+    new_status = "APPROVED" if action == "approve" else "REJECTED"
+    claimed = db.execute(
+        "UPDATE topups SET status=?, decided_at=? "
+        "WHERE id=? AND status='PENDING'",
+        (new_status, now_iso(), topup_id)).rowcount
+    if claimed != 1:
+        db.rollback()
         flash("This top-up was already processed.", "error")
         return redirect(url_for("admin"))
 
     if action == "approve":
-        voucher_code = request.form.get("voucher_code", "").strip().upper()
-        if not voucher_code:
-            flash("Enter the voucher code before approving this top-up.", "error")
-            return redirect(url_for("admin"))
-        if len(voucher_code) > 100:
-            flash("Voucher code is too long.", "error")
-            return redirect(url_for("admin"))
-        new_status = "APPROVED"
-        claimed = db.execute(
-            "UPDATE topups SET status=?, voucher_code=?, decided_at=? "
-            "WHERE id=? AND status='PENDING'",
-            (new_status, voucher_code, now_iso(), topup_id)).rowcount
-        if claimed != 1:
-            db.rollback()
-            flash("This top-up was already processed.", "error")
-            return redirect(url_for("admin"))
         credit(db, t["user_id"], t["amount"], "TOPUP",
                f"Top-up #{topup_id} approved (play money)")
-    else:
-        new_status = "REJECTED"
-        claimed = db.execute(
-            "UPDATE topups SET status=?, decided_at=? "
-            "WHERE id=? AND status='PENDING'",
-            (new_status, now_iso(), topup_id)).rowcount
-        if claimed != 1:
-            db.rollback()
-            flash("This top-up was already processed.", "error")
-            return redirect(url_for("admin"))
-
     db.commit()
     flash(f"Top-up #{topup_id} {new_status.lower()}.", "ok")
     return redirect(url_for("admin"))
@@ -1265,116 +1307,303 @@ BASE = """
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#050c13">
 <title>VEDOVOUCHERS Wallets</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{--bg:#f5f6fa;--card:#fff;--ink:#1d2433;--muted:#6b7385;--brand:#4f46e5;
---ok:#0f9d58;--err:#d93025;--line:#e3e6ef;}
+:root{
+  --bg:#050c13; --s1:#0b1721; --s2:#10212d; --s3:#152c3b; --line:#1a3140;
+  --ink:#e6f0f4; --muted:#7d95a3; --brand:#1fd6a4; --brand-d:#0f766e;
+  --blue:#2b7fff; --up:#27d69b; --down:#ff5c6c; --amber:#f2b84b; --violet:#8b7cf6;
+  --r:20px;
+}
 *{box-sizing:border-box;}
-body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);}
-.demo{background:#fff4cc;color:#6b5400;text-align:center;padding:6px;font-size:.85rem;}
-nav{background:var(--ink);color:#fff;padding:12px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
-nav a{color:#cfd5ff;text-decoration:none;}
-nav a:hover{color:#fff;}
-nav .brand{font-weight:700;color:#fff;margin-right:auto;}
+html{-webkit-text-size-adjust:100%;}
+body{
+  margin:0; min-height:100vh; color:var(--ink);
+  font-family:'Plus Jakarta Sans',system-ui,-apple-system,'Segoe UI',Roboto,sans-serif;
+  font-variant-numeric:tabular-nums; line-height:1.45;
+  background:
+    radial-gradient(1000px 480px at 88% -8%,rgba(31,214,164,.13),transparent 60%),
+    radial-gradient(800px 420px at -8% 6%,rgba(43,127,255,.10),transparent 60%),
+    var(--bg);
+  background-attachment:fixed;
+}
+a{color:var(--brand);}
+.ic{width:22px;height:22px;display:block;}
+
+/* ---------- ticker ---------- */
+.ticker{background:#030a10;border-bottom:1px solid var(--line);overflow:hidden;white-space:nowrap;font-size:.78rem;color:var(--muted);}
+.track{display:inline-flex;width:max-content;animation:tick 42s linear infinite;}
+.ticker:hover .track{animation-play-state:paused;}
+.tk{padding:7px 22px;border-right:1px solid var(--line);}
+.tk b{color:var(--up);font-weight:700;}
+@keyframes tick{to{transform:translateX(-50%);}}
+
+/* ---------- header / tabs ---------- */
+.top{position:sticky;top:0;z-index:30;background:rgba(5,12,19,.82);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-bottom:1px solid var(--line);}
+nav{max-width:1080px;margin:0 auto;padding:10px 16px;display:flex;align-items:center;gap:8px;}
+.brand{display:flex;align-items:center;gap:10px;margin-right:auto;font-weight:800;color:var(--ink);text-decoration:none;letter-spacing:.2px;}
+.logo{width:34px;height:34px;border-radius:11px;display:grid;place-items:center;color:#031016;font-weight:800;background:linear-gradient(135deg,var(--brand),var(--blue));}
+.tabs{display:flex;gap:4px;}
+.tabs a{display:flex;align-items:center;gap:8px;padding:8px 14px;border-radius:12px;color:var(--muted);text-decoration:none;font-weight:600;font-size:.92rem;}
+.tabs a .ic{width:18px;height:18px;}
+.tabs a:hover{color:var(--ink);background:var(--s1);}
+.tabs a.active{color:var(--ink);background:var(--s2);box-shadow:inset 0 -2px 0 var(--brand);}
 nav form{margin:0;}
-nav button{background:none;border:1px solid #556;color:#cfd5ff;border-radius:6px;padding:4px 10px;cursor:pointer;}
-main{max-width:960px;margin:24px auto;padding:0 16px;}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px;overflow-x:auto;}
-h1,h2{margin:0 0 12px;}
-label{display:block;margin:12px 0 4px;font-weight:600;font-size:.9rem;}
-input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:1rem;font-family:inherit;}
-button.primary{margin-top:16px;background:var(--brand);color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:1rem;cursor:pointer;}
-button.primary:disabled{background:#b8bbd6;cursor:not-allowed;}
-button.danger{background:#d93025;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer;}
-button.success{background:#0f9d58;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer;}
+nav button{background:var(--s1);border:1px solid var(--line);color:var(--muted);border-radius:12px;padding:8px 12px;cursor:pointer;font:inherit;font-size:.85rem;}
+nav button:hover{color:var(--ink);}
+nav .auth-link{color:var(--muted);text-decoration:none;font-weight:600;padding:8px 12px;border-radius:12px;}
+nav .auth-link:hover{color:var(--ink);background:var(--s1);}
+
+.subnav{max-width:1080px;margin:16px auto 0;padding:0 16px;}
+.seg{display:inline-flex;gap:4px;background:var(--s1);border:1px solid var(--line);padding:4px;border-radius:999px;max-width:100%;overflow-x:auto;}
+.seg a{padding:7px 16px;border-radius:999px;color:var(--muted);text-decoration:none;font-weight:600;font-size:.88rem;white-space:nowrap;}
+.seg a:hover{color:var(--ink);}
+.seg a.active{background:linear-gradient(135deg,var(--brand),#18b98f);color:#031016;}
+
+main{max-width:1080px;margin:20px auto 40px;padding:0 16px;}
+
+/* ---------- cards & text ---------- */
+.card{background:linear-gradient(180deg,var(--s1),#0a141d);border:1px solid var(--line);border-radius:var(--r);padding:22px;margin-bottom:16px;overflow-x:auto;}
+.card.note{border-left:3px solid var(--brand);}
+h1{margin:0 0 6px;font-size:1.55rem;letter-spacing:-.3px;}
+h2{margin:0 0 14px;font-size:1.08rem;letter-spacing:-.1px;}
+p{margin:0 0 10px;}
+.muted{color:var(--muted);} .small{font-size:.85rem;}
+.pos{color:var(--up);} .neg{color:var(--down);}
+code{background:var(--s2);border:1px solid var(--line);padding:2px 8px;border-radius:8px;color:var(--brand);}
+ul{padding-left:20px;color:var(--muted);} li{margin-bottom:4px;}
+
+/* ---------- forms ---------- */
+label{display:block;margin:14px 0 6px;font-weight:600;font-size:.88rem;color:var(--muted);}
+input,select,textarea{width:100%;padding:12px 14px;background:var(--s2);color:var(--ink);border:1px solid var(--line);border-radius:14px;font-size:1rem;font-family:inherit;}
+input::placeholder,textarea::placeholder{color:#506a7a;}
+input:focus,select:focus,textarea:focus{outline:2px solid var(--brand);outline-offset:1px;border-color:transparent;}
+button.primary{margin-top:18px;background:linear-gradient(135deg,var(--brand),#18b98f);color:#031016;border:0;border-radius:14px;padding:13px 22px;font-size:1rem;font-weight:700;cursor:pointer;font-family:inherit;}
+button.primary:hover{filter:brightness(1.07);}
+button.primary:disabled{background:var(--s3);color:#5f7888;cursor:not-allowed;filter:none;}
+button.danger{background:rgba(255,92,108,.14);color:var(--down);border:1px solid rgba(255,92,108,.35);border-radius:10px;padding:6px 12px;cursor:pointer;font-family:inherit;font-weight:600;}
+button.success{background:rgba(39,214,155,.14);color:var(--up);border:1px solid rgba(39,214,155,.35);border-radius:10px;padding:6px 12px;cursor:pointer;font-family:inherit;font-weight:600;}
+button.ghost{background:var(--s2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:7px 14px;cursor:pointer;font-family:inherit;font-weight:600;}
+button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
 .inline{display:inline-block;margin:0 2px;}
-.flash{padding:10px 14px;border-radius:8px;margin-bottom:12px;}
-.flash.ok{background:#e6f6ec;color:var(--ok);}
-.flash.error{background:#fdeceb;color:var(--err);}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
-.stat{background:var(--bg);border-radius:10px;padding:14px;}
-.stat b{display:block;font-size:1.4rem;}
-.stat span{color:var(--muted);font-size:.85rem;}
-.balance{font-size:2.4rem;font-weight:800;color:var(--brand);}
+.pwbox{width:150px;padding:7px 10px;font-size:.85rem;border-radius:10px;}
+
+/* ---------- flash ---------- */
+.flash{padding:12px 16px;border-radius:14px;margin-bottom:14px;border:1px solid;font-weight:500;}
+.flash.ok{background:rgba(39,214,155,.10);color:var(--up);border-color:rgba(39,214,155,.3);}
+.flash.error{background:rgba(255,92,108,.10);color:var(--down);border-color:rgba(255,92,108,.3);}
+
+/* ---------- tables ---------- */
 table{width:100%;border-collapse:collapse;}
-th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:.92rem;}
-.badge{background:var(--brand);color:#fff;border-radius:999px;padding:2px 10px;font-size:.8rem;}
-.badge.ok{background:var(--ok);} .badge.err{background:var(--err);} .badge.wait{background:#b58900;}
-code{background:var(--bg);padding:2px 6px;border-radius:6px;}
-.muted{color:var(--muted);} .hl{background:#eef0ff;} .small{font-size:.85rem;}
-.note{border-left:4px solid var(--brand);}
-.voucher-grid{display:grid;grid-template-columns:2fr 1fr 1fr;gap:12px;}
-@media(max-width:700px){.voucher-grid{grid-template-columns:1fr;}}
-.pos{color:var(--ok);} .neg{color:var(--err);}
-.pwbox{width:150px;padding:6px;font-size:.85rem;}
-nav a.active{color:#fff;border-bottom:2px solid #fff;}
-.subnav{background:#e9ebf5;padding:8px 20px;display:flex;gap:18px;flex-wrap:wrap;}
-.subnav a{color:var(--brand);text-decoration:none;font-size:.92rem;}
-.subnav a.active{font-weight:700;text-decoration:underline;}
+th{color:var(--muted);font-weight:600;font-size:.8rem;}
+th,td{text-align:left;padding:11px 10px;border-bottom:1px solid var(--line);font-size:.92rem;}
+tr:last-child td{border-bottom:0;}
+tr.hl td{background:rgba(31,214,164,.08);}
+.badge{display:inline-block;background:var(--brand-d);color:#d9fff3;border-radius:999px;padding:2px 11px;font-size:.78rem;font-weight:700;}
+.badge.ok{background:rgba(39,214,155,.18);color:var(--up);}
+.badge.err{background:rgba(255,92,108,.18);color:var(--down);}
+.badge.wait{background:rgba(242,184,75,.18);color:var(--amber);}
+
+/* ---------- stats ---------- */
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
+.stat{background:var(--s2);border:1px solid var(--line);border-radius:16px;padding:16px;}
+.stat b{display:block;font-size:1.35rem;letter-spacing:-.3px;}
+.stat span{color:var(--muted);font-size:.84rem;}
+
+/* ---------- dashboard ---------- */
+.dash{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:16px;}
+.dash .card{margin-bottom:0;}
+.hero{border-radius:26px;padding:24px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
+  background:
+    radial-gradient(500px 220px at 100% 0%,rgba(31,214,164,.35),transparent 65%),
+    linear-gradient(135deg,#0f766e 0%,#0b3d49 55%,#08242f 100%);}
+.hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
+.hello{margin:0 0 18px;font-weight:600;opacity:.9;}
+.lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
+.balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
+.fp{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.25);}
+.fp .ic{width:28px;height:28px;}
+.chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 20px;}
+.chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:600;}
+.actions{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;background:rgba(3,12,18,.45);border-radius:18px;padding:12px 6px;}
+.act{display:flex;flex-direction:column;align-items:center;gap:7px;color:#d9f5ec;text-decoration:none;font-size:.76rem;font-weight:600;}
+.act span{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(31,214,164,.16);color:var(--brand);border:1px solid rgba(31,214,164,.35);}
+.act:hover span{background:var(--brand);color:#031016;}
+
+.donutwrap{position:relative;width:170px;height:170px;margin:4px auto 14px;}
+.donut{width:100%;height:100%;transform:rotate(-90deg);}
+.donut circle{fill:none;stroke-width:11;}
+.donut .ring{stroke:var(--s3);}
+.donut .a1{stroke:var(--brand);}
+.donut .a2{stroke:var(--violet);}
+.donut-mid{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;text-align:center;}
+.donut-mid b{font-size:1.05rem;} .donut-mid span{font-size:.74rem;color:var(--muted);}
+.legend{display:flex;justify-content:space-between;gap:10px;font-size:.84rem;color:var(--muted);margin-bottom:14px;}
+.legend i{display:inline-block;width:9px;height:9px;border-radius:50%;margin-right:6px;}
+.bar{height:9px;border-radius:99px;background:var(--s3);overflow:hidden;}
+.bar b{display:block;height:100%;border-radius:99px;background:linear-gradient(90deg,var(--brand),var(--blue));}
+.progtxt{display:flex;justify-content:space-between;font-size:.82rem;color:var(--muted);margin:0 0 7px;}
+
+.dots{display:flex;gap:8px;margin:6px 0 14px;}
+.dots i{width:30px;height:30px;border-radius:50%;background:var(--s2);border:1px solid var(--line);}
+.dots i.on{background:var(--brand);border-color:var(--brand);box-shadow:0 0 14px rgba(31,214,164,.45);}
+
+.tiles{display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:8px;}
+.tile{border-radius:14px;padding:14px;border:1px solid var(--line);}
+.tile b{display:block;font-size:.8rem;opacity:.85;}
+.tile strong{display:block;font-size:1.05rem;margin:4px 0 2px;}
+.tile span{font-size:.78rem;opacity:.8;}
+.t1{background:rgba(39,214,155,.10);} .t2{background:rgba(39,214,155,.16);} .t3{background:rgba(39,214,155,.23);}
+.t4{background:rgba(39,214,155,.30);} .t5{background:rgba(39,214,155,.38);} .t6{background:rgba(39,214,155,.46);}
+.t7{background:rgba(39,214,155,.56);}
+.tile.me{outline:2px solid #fff;outline-offset:1px;}
+
+.bars{display:flex;align-items:flex-end;gap:6px;height:90px;margin:4px 0 16px;padding:8px;background:var(--s2);border-radius:14px;border:1px solid var(--line);}
+.bars i{flex:1;border-radius:4px 4px 0 0;min-height:6px;}
+.bars i.up{background:var(--up);} .bars i.dn{background:var(--down);}
+.tx{display:flex;align-items:center;gap:12px;padding:11px 0;border-bottom:1px solid var(--line);}
+.tx:last-child{border-bottom:0;}
+.av{width:42px;height:42px;flex:none;border-radius:50%;display:grid;place-items:center;font-weight:800;background:var(--s3);color:var(--brand);}
+.tx .who{flex:1;min-width:0;}
+.tx .who b{display:block;font-size:.95rem;}
+.tx .who span{display:block;color:var(--muted);font-size:.8rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.tx .amt{font-weight:700;white-space:nowrap;}
+
+/* ---------- profile ---------- */
+.phead{display:flex;align-items:center;gap:16px;margin-bottom:18px;}
+.avatar{width:68px;height:68px;border-radius:50%;display:grid;place-items:center;font-size:1.4rem;font-weight:800;color:#031016;background:linear-gradient(135deg,var(--brand),var(--blue));}
+.kv{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:10px;margin:0;}
+.kv div{background:var(--s2);border:1px solid var(--line);border-radius:14px;padding:13px 15px;}
+.kv dt{color:var(--muted);font-size:.8rem;margin-bottom:3px;}
+.kv dd{margin:0;font-weight:700;word-break:break-all;}
+
+/* ---------- team ---------- */
+.refcode{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
+.refcode code{font-size:1.4rem;padding:8px 16px;}
+
+/* ---------- login / register ---------- */
+.auth{max-width:440px;margin:30px auto 0;}
+.auth .logo{width:54px;height:54px;border-radius:17px;font-size:1.4rem;margin-bottom:16px;}
+
+/* ---------- bottom tab bar (phones) ---------- */
+.tabbar{display:none;}
+
+@media (max-width:860px){
+  .dash{grid-template-columns:1fr;}
+}
+@media (max-width:720px){
+  .tabs,.uname{display:none;}
+  body{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px));}
+  .balance{font-size:2.2rem;}
+  .actions{grid-template-columns:repeat(3,1fr);row-gap:14px;}
+  .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;justify-content:space-around;
+    padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
+    background:rgba(8,18,27,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);}
+  .tabbar a{display:flex;flex-direction:column;align-items:center;gap:3px;flex:1;padding:6px 0;color:var(--muted);text-decoration:none;font-size:.7rem;font-weight:600;}
+  .tabbar a .ic{width:22px;height:22px;}
+  .tabbar a.active{color:var(--brand);}
+  .card{padding:18px;}
+}
+@media (prefers-reduced-motion:reduce){
+  .track{animation:none;}
+  .ticker{overflow-x:auto;}
+}
 </style>
 </head>
 <body>
-<div class="demo">Welcome let's grow together.</div>
+<div class="ticker" aria-label="Daily rewards by level"><div class="track">
+{% for k in range(2) %}
+<span class="tk">Welcome, let's grow together.</span>
+{% for l in LEVELS %}<span class="tk">Level {{ l }} <b>{{ daily_reward(l) }}/day</b></span>{% endfor %}
+{% endfor %}
+</div></div>
+
 {% set ep = request.endpoint %}
+<header class="top">
 <nav>
-<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}">My VEDOVOUCHER Wallet</a>
+<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>My VEDOVOUCHER Wallet</span></a>
 {% if me %}
-<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">Withdraw</a>
-<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">My Team</a>
-<a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">Admin</a>{% endif %}
+<div class="tabs">
+<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
+<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
+<a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
+</div>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button>Log out ({{ me['username'] }})</button>
+<button>Log out<span class="uname"> ({{ me['username'] }})</span></button>
 </form>
 {% else %}
-<a href="{{ url_for('login') }}">Log in</a>
-<a href="{{ url_for('register') }}">Create account</a>
+<a class="auth-link" href="{{ url_for('login') }}">Log in</a>
+<a class="auth-link" href="{{ url_for('register') }}">Create account</a>
 {% endif %}
 </nav>
+</header>
 
 {% if me and ep in ['withdraw','topup','upgrade'] %}
-<div class="subnav">
+<div class="subnav"><div class="seg">
 <a class="{{ 'active' if ep=='withdraw' }}" href="{{ url_for('withdraw') }}">Withdraw</a>
 <a class="{{ 'active' if ep=='topup' }}" href="{{ url_for('topup') }}">Top up</a>
 <a class="{{ 'active' if ep=='upgrade' }}" href="{{ url_for('upgrade') }}">Upgrade</a>
-</div>
+</div></div>
 {% elif me and ep in ['team','pots'] %}
-<div class="subnav">
+<div class="subnav"><div class="seg">
 <a class="{{ 'active' if ep=='team' }}" href="{{ url_for('team') }}">My Team</a>
 <a class="{{ 'active' if ep=='pots' }}" href="{{ url_for('pots') }}">Savings pots</a>
-</div>
+</div></div>
 {% endif %}
+
 <main>
 {% with msgs = get_flashed_messages(with_categories=true) %}
 {% for cat, m in msgs %}<div class="flash {{ cat }}">{{ m }}</div>{% endfor %}
 {% endwith %}
 {% block body %}{% endblock %}
 </main>
+
+{% if me %}
+<div class="tabbar">
+<a class="{{ 'active' if ep=='dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('home') }}Home</a>
+<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
+<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
+<a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
+</div>
+{% endif %}
 </body>
 </html>
 """
 
 LOGIN_BODY = """
+<div class="auth">
+<span class="logo">V</span>
 <div class="card">
-<h1>Log in</h1>
+<h1>Welcome back</h1>
+<p class="muted">Log in with your account number.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Account number</label>
-<input name="username" required autofocus>
+<input name="username" inputmode="numeric" required autofocus>
 <label>Password</label>
 <input name="password" type="password" required>
-<button class="primary">Log in</button>
+<button class="primary" style="width:100%">Log in</button>
 </form>
-<p class="muted">No account? <a href="{{ url_for('register') }}">Create one</a>.</p>
+<p class="muted" style="margin-top:16px">No account? <a href="{{ url_for('register') }}">Create one</a> with a level code.</p>
 <p class="muted small">Lost your password? Please contact the admin to reset it.</p>
+</div>
 </div>
 """
 
 REGISTER_BODY = """
+<div class="auth">
+<span class="logo">V</span>
 <div class="card">
 <h1>Create account</h1>
+<p class="muted">You need a level code to join.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Account number (any number)</label>
@@ -1405,31 +1634,81 @@ REGISTER_BODY = """
 <input name="password" type="password" required>
 <label>Confirm password</label>
 <input name="confirm" type="password" required>
+<label>Level code (required) - Level 1 to Level 7</label>
+<input name="voucher" value="{{ form.get('voucher','') }}" placeholder="e.g. L3-ABCD-EFGH" required>
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
-<button class="primary">Join</button>
+<button class="primary" style="width:100%">Join</button>
 </form>
-<p class="muted">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
+<p class="muted" style="margin-top:16px">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
+</div>
 </div>
 """
 
 DASH_BODY = """
-<div class="card">
-<h1>Hi, {{ user['username'] }}</h1>
-<p class="muted">Your balance</p>
+{% set total = user['points'] + locked %}
+{% set pct = (user['points'] / total * 100) if total else 0 %}
+{% set sf = STREAK_DAYS if (user['streak'] > 0 and user['streak'] % STREAK_DAYS == 0) else user['streak'] % STREAK_DAYS %}
+{% set next_cost = UPGRADE_COST_CENTS[user['level'] + 1] if user['level'] < 7 else 0 %}
+{% set lvl_pct = ([(user['points'] / next_cost * 100)|int, 100]|min) if next_cost else 100 %}
+
+<div class="dash">
+<section class="hero">
+<div class="hero-top">
+<div>
+<p class="hello">Hi, {{ user['username'] }}</p>
+<p class="lbl">Available balance</p>
 <div class="balance">{{ money(user['points']) }}</div>
-<div class="stats">
-<div class="stat"><b>Level {{ user['level'] }}</b><span>Your level</span></div>
-<div class="stat"><b>{{ money(user['points']) }}</b><span>Available balance</span></div>
-<div class="stat"><b>{{ money(locked) }}</b><span>Locked in savings pots</span></div>
-<div class="stat"><b>{{ user['streak'] }}</b><span>Day streak</span></div>
 </div>
+<div class="fp">{{ icon('fingerprint') }}</div>
+</div>
+<div class="chips">
+<span class="chip">Level {{ user['level'] }}</span>
+<span class="chip">{{ user['streak'] }} day streak</span>
+<span class="chip">{{ money(locked) }} in pots</span>
+</div>
+<div class="actions">
+<a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
+<a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
+<a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
+<a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Pots</a>
+<a class="act" href="{{ url_for('team') }}"><span>{{ icon('team') }}</span>My Team</a>
+<a class="act" href="{{ url_for('profile') }}"><span>{{ icon('profile') }}</span>Profile</a>
+</div>
+</section>
+
+<section class="card">
+<h2>Where your money is</h2>
+<div class="donutwrap">
+<svg class="donut" viewBox="0 0 100 100" role="img" aria-label="Available versus locked balance">
+<circle class="ring" cx="50" cy="50" r="40"/>
+{% if total %}
+<circle class="a1" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format(pct * 2.5133) }} 251.33"/>
+<circle class="a2" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format((100 - pct) * 2.5133) }} 251.33" stroke-dashoffset="-{{ '%.2f'|format(pct * 2.5133) }}"/>
+{% endif %}
+</svg>
+<div class="donut-mid"><b>{{ money(total) }}</b><span>Total</span></div>
+</div>
+<div class="legend">
+<span><i style="background:var(--brand)"></i>Available {{ money(user['points']) }}</span>
+<span><i style="background:var(--violet)"></i>Locked {{ money(locked) }}</span>
+</div>
+{% if next_cost %}
+<div class="progtxt"><span>Next: Level {{ user['level'] + 1 }}</span><span>{{ lvl_pct }}% of {{ money(next_cost) }}</span></div>
+<div class="bar"><b style="width:{{ lvl_pct }}%"></b></div>
+{% else %}
+<p class="muted small">You are at the highest level.</p>
+{% endif %}
+</section>
 </div>
 
 <div class="card">
 <h2>Daily check-in</h2>
+<div class="dots" aria-label="Streak progress">
+{% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
+</div>
 <p>Today's reward: <strong>{{ money(reward) }}</strong></p>
-{% if bonus %}<p>Streak bonus: <strong>+{{ money(bonus) }}</strong></p>{% endif %}
+{% if bonus %}<p>Streak bonus: <strong class="pos">+{{ money(bonus) }}</strong></p>{% endif %}
 <p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
 the daily check-in amount is the level reward divided by 24.</p>
 <p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
@@ -1441,32 +1720,37 @@ the daily check-in amount is the level reward divided by 24.</p>
 
 <div class="card">
 <h2>Reward by level</h2>
-<table>
-<tr><th>Level</th><th>Level Reward</th><th>Daily Check-in</th></tr>
+<div class="tiles">
 {% for l in LEVELS %}
-<tr class="{{ 'hl' if l == user['level'] }}"><td>Level {{ l }}</td><td>{{ level_reward(l) }}</td><td>{{ daily_reward(l) }}</td></tr>
+<div class="tile t{{ l }} {{ 'me' if l == user['level'] }}">
+<b>Level {{ l }}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} per day</span>
+</div>
 {% endfor %}
-</table>
+</div>
 </div>
 
 <div class="card">
 <h2>Recent activity</h2>
 {% if recent_tx %}
-<table>
-<tr><th>Date</th><th>Type</th><th>Amount</th><th>Details</th></tr>
+{% set txs = recent_tx|reverse|list %}
+{% set mx = txs|map(attribute='amount')|map('abs')|max %}
+<div class="bars" aria-hidden="true">
+{% for t in txs %}<i class="{{ 'up' if t['amount'] > 0 else 'dn' }}" style="height:{{ [((t['amount']|abs) / mx * 100)|round|int, 8]|max }}%"></i>{% endfor %}
+</div>
 {% for t in recent_tx %}
-<tr><td>{{ t['created_at'][:16] }}</td><td>{{ t['kind'] }}</td>
-<td class="{{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</td>
-<td class="muted">{{ t['note'] }}</td></tr>
+<div class="tx">
+<div class="av">{{ t['kind'][:1] }}</div>
+<div class="who"><b>{{ t['kind']|replace('_',' ')|title }}</b><span>{{ t['created_at'][:16] }}{% if t['note'] %} - {{ t['note'] }}{% endif %}</span></div>
+<div class="amt {{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</div>
+</div>
 {% endfor %}
-</table>
-{% else %}<p class="muted">No activity yet.</p>{% endif %}
+{% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
 </div>
 """
 
 TOPUP_BODY = """
 <div class="card note">
-<h1>Top up</h1>
+<h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
 <h2>Instructions from the admin</h2>
 <p style="white-space:pre-wrap">{{ instructions }}</p>
@@ -1474,25 +1758,8 @@ TOPUP_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-
-<div class="voucher-grid">
-<div>
-<label>Voucher information 1</label>
-<input name="voucher_24" type="text" inputmode="numeric" maxlength="24" minlength="24" pattern="[0-9]{24}" placeholder="24 numbers" required>
-</div>
-<div>
-<label>Voucher information 2</label>
-<input name="voucher_5" type="text" maxlength="5" minlength="5" pattern="[A-Za-z0-9]{5}" placeholder="5 letters/numbers" required>
-</div>
-<div>
-<label>Voucher information 3</label>
-<input name="voucher_4" type="text" maxlength="4" minlength="4" pattern="[A-Za-z0-9]{4}" placeholder="4 letters/numbers" required>
-</div>
-</div>
-<p class="muted small">These three voucher-information fields are private to the admin. They are not shown in your top-up history.</p>
-
 <label>Note for the admin (optional)</label>
-<input name="note" maxlength="100" placeholder="Optional note">
+<input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
 <button class="primary">Request top-up</button>
 </form>
 </div>
@@ -1501,11 +1768,10 @@ TOPUP_BODY = """
 <h2>Top-up history</h2>
 {% if history %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Voucher</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th></tr>
 {% for t in history %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td><td class="muted">{{ t['note'] }}</td>
-<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
-<td>{% if t['status']=='APPROVED' and t['voucher_code'] %}<code>{{ t['voucher_code'] }}</code>{% elif t['status']=='PENDING' %}<span class="muted">Waiting for admin</span>{% else %}<span class="muted">-</span>{% endif %}</td></tr>
+<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td></tr>
 {% endfor %}
 </table>
 {% else %}<p class="muted">No top-up requests yet.</p>{% endif %}
@@ -1543,7 +1809,10 @@ out of your balance for the admin to approve. No ban. Rejected requests are refu
 TEAM_BODY = """
 <div class="card">
 <h2>Your referral code</h2>
-<p><code style="font-size:1.3rem">{{ user['referral_code'] }}</code></p>
+<div class="refcode">
+<code>{{ user['referral_code'] }}</code>
+<button type="button" class="ghost" onclick="navigator.clipboard.writeText('{{ user['referral_code'] }}');this.textContent='Copied';">Copy</button>
+</div>
 <p class="muted">New members who enter your code when joining become part of your team.</p>
 {% if referrer %}<p>You joined <b>{{ referrer['username'] }}</b>'s team.</p>{% endif %}
 </div>
@@ -1553,7 +1822,7 @@ TEAM_BODY = """
 <div class="stats" style="margin-bottom:12px">
 <div class="stat"><b>{{ members|length }}</b><span>Members</span></div>
 <div class="stat"><b>{{ money(team_points) }}</b><span>Team total points</span></div>
-<div class="stat"><b>{{ money(earned) }}</b><span>Referral rewards earned</span></div>
+<div class="stat"><b class="pos">{{ money(earned) }}</b><span>Referral rewards earned</span></div>
 </div>
 {% if members %}
 <table>
@@ -1583,15 +1852,19 @@ UPGRADE_BODY = """
 <li>A higher level means a higher daily check-in reward (level reward / 24).</li>
 </ul>
 {% if next_level %}
-<p>Next: <strong>Level {{ next_level }}</strong> costs <strong>{{ money(UPGRADE_COST_CENTS[next_level]) }}</strong>
+{% set cost = UPGRADE_COST_CENTS[next_level] %}
+{% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
+<p>Next: <strong>Level {{ next_level }}</strong> costs <strong>{{ money(cost) }}</strong>
 (daily check-in becomes {{ daily_reward(next_level) }}).</p>
+<div class="progtxt"><span>Your balance</span><span>{{ pct }}%</span></div>
+<div class="bar"><b style="width:{{ pct }}%"></b></div>
 <form method="post" onsubmit="return confirm('Upgrade to Level {{ next_level }}?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="primary" {% if user['points'] < UPGRADE_COST_CENTS[next_level] %}disabled{% endif %}>
+<button class="primary" {% if user['points'] < cost %}disabled{% endif %}>
 Upgrade to Level {{ next_level }}</button>
 </form>
-{% if user['points'] < UPGRADE_COST_CENTS[next_level] %}
-<p class="muted small">Not enough balance. <a href="{{ url_for('topup') }}">Request a top-up</a>.</p>
+{% if user['points'] < cost %}
+<p class="muted small" style="margin-top:10px">Not enough balance. <a href="{{ url_for('topup') }}">Request a top-up</a>.</p>
 {% endif %}
 {% else %}
 <p class="muted">You are already at the highest level.</p>
@@ -1670,20 +1943,25 @@ onsubmit="return confirm('Close early? You will lose the interest.');">
 """
 
 PROFILE_BODY = """
-<div class="card note">
+<div class="card">
+<div class="phead">
+<div class="avatar">{{ member['username'][-2:] }}</div>
+<div>
 <h1>{{ 'My profile' if is_self else 'Member profile' }}</h1>
-<p class="muted">Details entered when the account was created.</p>
-<table>
-<tr><th>Account number</th><td>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</td></tr>
-<tr><th>Serial number</th><td>{{ member['serial_number'] }}</td></tr>
-<tr><th>Level</th><td>Level {{ member['level'] }}</td></tr>
-<tr><th>Balance</th><td>{{ money(member['points']) }}</td></tr>
-<tr><th>Referral code</th><td><code>{{ member['referral_code'] }}</code></td></tr>
-<tr><th>Referred by</th><td>{{ referrer['username'] if referrer else '-' }}</td></tr>
-<tr><th>Day streak</th><td>{{ member['streak'] }}</td></tr>
-<tr><th>Joined</th><td>{{ member['created_at'][:16] }}</td></tr>
-</table>
-{% if not is_self %}<p><a href="{{ url_for('admin') }}">&larr; Back to admin</a></p>{% endif %}
+<p class="muted" style="margin:0">Details entered when the account was created.</p>
+</div>
+</div>
+<dl class="kv">
+<div><dt>Account number</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
+<div><dt>Serial number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
+<div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
+<div><dt>Referral code</dt><dd><code>{{ member['referral_code'] }}</code></dd></div>
+<div><dt>Referred by</dt><dd>{{ referrer['username'] if referrer else '-' }}</dd></div>
+<div><dt>Day streak</dt><dd>{{ member['streak'] }}</dd></div>
+<div><dt>Joined</dt><dd>{{ member['created_at'][:16] }}</dd></div>
+</dl>
+{% if not is_self %}<p style="margin-top:16px"><a href="{{ url_for('admin') }}">&larr; Back to admin</a></p>{% endif %}
 </div>
 """
 
@@ -1711,29 +1989,20 @@ ADMIN_BODY = """
 </div>
 
 <div class="card">
-<h2>Top-up requests & voucher information</h2>
-<p class="muted">Only the admin can see the three voucher-information fields entered by members. When approving, enter the voucher code that should be released to the member. The member sees that voucher only after approval.</p>
+<h2>Top-up requests</h2>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>24 numbers</th><th>5 chars</th><th>4 chars</th><th>Note</th><th>Status / Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
-<tr>
-<td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
-<td><code>{{ t['voucher_24'] }}</code></td><td><code>{{ t['voucher_5'] }}</code></td><td><code>{{ t['voucher_4'] }}</code></td>
+<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
 <td class="muted">{{ t['note'] }}</td>
+<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
 <td>
 {% if t['status'] == 'PENDING' %}
-<form method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='approve') }}" style="min-width:220px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<input name="voucher_code" type="text" maxlength="100" placeholder="Enter voucher code" required>
-<button class="success" style="margin-top:6px">Approve + issue voucher</button>
-</form>
-<form method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='reject') }}" style="margin-top:6px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button>
-</form>
-{% else %}
-<span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' }}">{{ t['status'] }}</span>
-{% if t['status']=='APPROVED' and t['voucher_code'] %}<br><code>{{ t['voucher_code'] }}</code>{% endif %}
+<form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='approve') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Approve</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='reject') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button></form>
 {% endif %}
 </td></tr>
 {% endfor %}
@@ -1809,7 +2078,29 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 {% else %}<p class="muted">No transactions yet.</p>{% endif %}
 </div>
 
+<div class="card">
+<h2>Generate level codes</h2>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Level</label>
+<select name="level">
+{% for l in LEVELS %}<option value="{{ l }}">Level {{ l }} - {{ level_reward(l) }}</option>{% endfor %}
+</select>
+<label>How many (1-100)</label>
+<input name="count" type="number" min="1" max="100" value="5">
+<button class="primary">Generate</button>
+</form>
+</div>
 
+<div class="card">
+<h2>Unused codes ({{ unused|length }})</h2>
+{% if unused %}
+<table>
+<tr><th>Level</th><th>Code</th></tr>
+{% for v in unused %}<tr><td>Level {{ v['level'] }}</td><td><code>{{ v['code'] }}</code></td></tr>{% endfor %}
+</table>
+{% else %}<p class="muted">None left. Generate some above.</p>{% endif %}
+</div>
 """
 
 app.jinja_loader = DictLoader({"base": BASE})
