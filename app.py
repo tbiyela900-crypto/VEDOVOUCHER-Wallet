@@ -58,7 +58,7 @@ LEVELS = list(range(1, 8))
 
 # Total reward per level (daily check-in = total / 24)
 LEVEL_REWARDS_CENTS = {
-    1: 36000, 2: 120000, 3: 360000, 4: 1200000,
+    0: 000, 1: 36000, 2: 120000, 3: 360000, 4: 1200000,
     5: 2000000, 6: 3000000, 7: 4000000,
 }
 
