@@ -789,13 +789,13 @@ def forgot_password():
         # -----------------------------
         # VALIDATE STUDENT NUMBER
         # -----------------------------
-        if not username.isdigit() or len(username) != 10:
+        if not username.isdigit() or len(username) < 10:
             error = "Student number must contain exactly 10 digits."
          
         # -----------------------------
         # VALIDATE SERIAL NUMBER
         # -----------------------------
-        elif not serial_number.isdigit() or len(serial_number) != 11:
+        elif not serial_number.isdigit() or len(serial_number) < 11:
             error = "Cereal/serial number must contain exactly 11 digits."
 
         # -----------------------------
