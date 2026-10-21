@@ -340,6 +340,26 @@ def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+ 
+    # Safely add columns missing from older databases.
+    existing_columns = {
+        row["name"]
+        for row in db.execute("PRAGMA table_info(users)").fetchall()
+    }
+
+    required_columns = {
+        "last_checkin": "TEXT",
+        "streak": "INTEGER DEFAULT 0",
+        "points": "INTEGER NOT NULL DEFAULT 0",
+    }
+
+    for column, definition in required_columns.items():
+        if column not in existing_columns:
+            db.execute(
+                f"ALTER TABLE users ADD COLUMN {column} {definition}"
+            )
+
+    db.commit()
 
     # Repair older databases without deleting existing records.
     required_columns = {
@@ -789,6 +809,7 @@ def forgot_password():
 
         db = get_db()
 
+        
         # -----------------------------
         # FIND USER
         # -----------------------------
@@ -799,18 +820,15 @@ def forgot_password():
                 """
                 SELECT *
                 FROM users
-                WHERE username=?
-                AND serial_number=?
+                WHERE username = ?
+                AND serial_number = ?
                 """,
-                (
-                    username,
-                    serial_number
-                )
+                (username, serial_number)
             ).fetchone()
 
             if user is None:
                 error = (
-                    "The student number and cereal/serial number "
+                    "The student number and serial number "
                     "do not match an account."
                 )
 
@@ -819,11 +837,7 @@ def forgot_password():
         # -----------------------------
         if error:
             flash(error, "error")
-
-            return page(
-                FORGOT_PASSWORD_BODY,
-                form=request.form
-            ), 400
+            return redirect(url_for("forgot_password"))
 
         # -----------------------------
         # UPDATE PASSWORD
@@ -864,10 +878,78 @@ def forgot_password():
             url_for("login")
         )
 
-    return page(
-        FORGOT_PASSWORD_BODY,
-        form={}
-    )
+    
+return """
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title>Reset Password</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background: #f3f4f6;
+            padding: 30px 15px;
+        }
+        .container {
+            max-width: 420px;
+            margin: 30px auto;
+            padding: 25px;
+            background: white;
+            border-radius: 12px;
+        }
+        label {
+            display: block;
+            margin-top: 15px;
+        }
+        input {
+            box-sizing: border-box;
+            width: 100%;
+            padding: 12px;
+            margin-top: 6px;
+        }
+        button {
+            width: 100%;
+            padding: 12px;
+            margin-top: 20px;
+            background: #222;
+            color: white;
+            border: 0;
+            cursor: pointer;
+        }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <h2>Reset Password</h2>
+        <p>Enter your registered account details.</p>
+
+        <form method="POST">
+            <label>Student number (10 digits)</label>
+            <input name="username" inputmode="numeric"
+                   pattern="[0-9]{10}" maxlength="10" required>
+
+            <label>Serial number (11 digits)</label>
+            <input name="serial_number" inputmode="numeric"
+                   pattern="[0-9]{11}" maxlength="11" required>
+
+            <label>New password (at least 8 characters)</label>
+            <input type="password" name="new_password"
+                   minlength="8" required>
+
+            <label>Confirm new password</label>
+            <input type="password" name="confirm_password"
+                   minlength="8" required>
+
+            <button type="submit">Reset Password</button>
+        </form>
+
+        <p><a href="/login">Return to login</a></p>
+    </div>
+</body>
+</html>
+"""
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
