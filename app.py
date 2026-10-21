@@ -64,7 +64,7 @@ DAILY_REWARD_CENTS = {
 
 STREAK_DAYS = 7
 STREAK_BONUS_PER_LEVEL_CENTS = 1000     # R10 x level
-REFERRAL_BONUS_PER_LEVEL_CENTS = 500    # R5 x new member's level
+REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
@@ -149,18 +149,15 @@ def parse_amount(text, minimum, maximum=None):
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
-    username TEXT UNIQUE NOT NULL COLLATE NOCASE,
+    username TEXT NOT NULL UNIQUE,
     pw_hash TEXT NOT NULL,
-    level INTEGER NOT NULL,
-    points INTEGER NOT NULL DEFAULT 0,
-    referral_code TEXT UNIQUE NOT NULL,
-    referred_by INTEGER REFERENCES users(id),
-    streak INTEGER NOT NULL DEFAULT 0,
-    last_checkin TEXT,
-    is_admin INTEGER NOT NULL DEFAULT 0,
+    level INTEGER DEFAULT 1,
+    referral_code TEXT UNIQUE,
+    referred_by INTEGER,
+    serial_number TEXT NOT NULL UNIQUE,
+    is_admin INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
 );
-
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
@@ -341,32 +338,86 @@ def init_db():
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
 
-    if not db.execute("SELECT 1 FROM users WHERE is_admin=1").fetchone():
-        db.execute(
-            "INSERT INTO users (username, pw_hash, level, referral_code, "
-            "is_admin, created_at) VALUES (?,?,?,?,1,?)",
-            (admin_user, generate_password_hash(admin_pass), 7,
-             new_referral_code(db), now_iso()))
-        print(f"[setup] Admin account created: {admin_user}")
-        print(f"[setup] Default admin password: {admin_pass}  (change it!)")
+    # Create admin account
+    if not db.execute(
+        "SELECT 1 FROM users WHERE is_admin=1"
+    ).fetchone():
 
-    if not db.execute("SELECT 1 FROM vouchers").fetchone():
+        # Admin does not use a real student number or serial number
+        admin_student_number = "0000000000"
+        admin_serial_number = "00000000000"
+
+        db.execute(
+            """
+            INSERT INTO users (
+                username,
+                pw_hash,
+                level,
+                referral_code,
+                serial_number,
+                is_admin,
+                created_at
+            )
+            VALUES (?,?,?,?,?,?,?)
+            """,
+            (
+                admin_user,
+                generate_password_hash(admin_pass),
+                7,
+                new_referral_code(db),
+                admin_serial_number,
+                1,
+                now_iso()
+            )
+        )
+
+        print(f"[setup] Admin account created: {admin_user}")
+        print(f"[setup] Default admin password: {admin_pass} (change it!)")
+
+    # Create starter vouchers
+    if not db.execute(
+        "SELECT 1 FROM vouchers"
+    ).fetchone():
+
         print("[setup] Starter voucher codes:")
+
         for level in LEVELS:
             code = new_voucher_code(level)
+
             db.execute(
-                "INSERT INTO vouchers (code, level, created_at) "
-                "VALUES (?,?,?)", (code, level, now_iso()))
+                """
+                INSERT INTO vouchers (
+                    code,
+                    level,
+                    created_at
+                )
+                VALUES (?,?,?)
+                """,
+                (
+                    code,
+                    level,
+                    now_iso()
+                )
+            )
+
             print(f"  Level {level}: {code}")
 
-    if not db.execute("SELECT 1 FROM settings WHERE key='topup_instructions'"
-                      ).fetchone():
-        set_setting(db, "topup_instructions", DEFAULT_TOPUP_INSTRUCTIONS)
+    # Top-up instructions
+    if not db.execute(
+        "SELECT 1 FROM settings WHERE key='topup_instructions'"
+    ).fetchone():
+
+        set_setting(
+            db,
+            "topup_instructions",
+            DEFAULT_TOPUP_INSTRUCTIONS
+        )
 
     db.commit()
     db.close()
-init_db()
 
+
+init_db()
 
 # ============================================================================
 # AUTHENTICATION / CSRF
@@ -434,6 +485,7 @@ def inject_globals():
 # HOME / REGISTER / LOGIN / LOGOUT
 # ============================================================================
 
+```python
 @app.route("/")
 def index():
     return redirect(url_for("dashboard" if current_user() else "login"))
@@ -442,19 +494,44 @@ def index():
 @app.route("/register", methods=["GET", "POST"])
 def register():
     if request.method == "POST":
+        # 10 digits = student number / username
         username = request.form.get("username", "").strip()
+
+        # 11 digits = cereal/serial number
+        serial_number = request.form.get("serial_number", "").strip()
+
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
+
         voucher = request.form.get("voucher", "").strip().upper()
         ref_code = request.form.get("referral", "").strip().upper()
+
         error = None
 
-        if not (3 <= len(username) <= 24) or not username.replace("_", "").isalnum():
-            error = "Username must be 3-24 letters/numbers/underscores."
+        # -----------------------------
+        # VALIDATE STUDENT NUMBER
+        # -----------------------------
+        if not username.isdigit() or len(username) != 10:
+            error = "Student number must contain exactly 10 digits."
+
+        # -----------------------------
+        # VALIDATE CEREAL/SERIAL NUMBER
+        # -----------------------------
+        elif not serial_number.isdigit() or len(serial_number) != 11:
+            error = "Cereal/serial number must contain exactly 11 digits."
+
+        # -----------------------------
+        # VALIDATE PASSWORD
+        # -----------------------------
         elif len(password) < 8:
             error = "Password must be at least 8 characters."
+
         elif password != confirm:
             error = "Passwords do not match."
+
+        # -----------------------------
+        # VALIDATE VOUCHER
+        # -----------------------------
         elif not voucher:
             error = "A level code is required to join."
 
@@ -462,64 +539,290 @@ def register():
         v = None
         referrer = None
 
+        # -----------------------------
+        # CHECK VOUCHER
+        # -----------------------------
         if not error:
-            v = db.execute("SELECT * FROM vouchers WHERE code=?",
-                           (voucher,)).fetchone()
+            v = db.execute(
+                "SELECT * FROM vouchers WHERE code=?",
+                (voucher,)
+            ).fetchone()
+
             if v is None:
                 error = "That level code is not valid."
+
             elif v["used_by"] is not None:
                 error = "That level code has already been used."
 
+        # -----------------------------
+        # CHECK REFERRAL
+        # -----------------------------
         if not error and ref_code:
             referrer = db.execute(
                 "SELECT * FROM users WHERE referral_code=?",
-                (ref_code,)).fetchone()
+                (ref_code,)
+            ).fetchone()
+
             if referrer is None:
                 error = "That referral code does not exist."
 
-        if not error and db.execute(
-                "SELECT 1 FROM users WHERE username=?", (username,)).fetchone():
-            error = "That username is taken."
+        # -----------------------------
+        # CHECK STUDENT NUMBER
+        # -----------------------------
+        if not error:
+            existing_user = db.execute(
+                "SELECT 1 FROM users WHERE username=?",
+                (username,)
+            ).fetchone()
 
+            if existing_user:
+                error = "That student number is already registered."
+
+        # -----------------------------
+        # CHECK SERIAL NUMBER
+        # -----------------------------
+        if not error:
+            existing_serial = db.execute(
+                "SELECT 1 FROM users WHERE serial_number=?",
+                (serial_number,)
+            ).fetchone()
+
+            if existing_serial:
+                error = "That cereal/serial number is already registered."
+
+        # -----------------------------
+        # SHOW ERROR
+        # -----------------------------
         if error:
             flash(error, "error")
-            return page(REGISTER_BODY, form=request.form), 400
+            return page(
+                REGISTER_BODY,
+                form=request.form
+            ), 400
 
         try:
+            # -----------------------------
+            # CREATE USER
+            # -----------------------------
             cur = db.execute(
-                "INSERT INTO users (username, pw_hash, level, referral_code, "
-                "referred_by, created_at) VALUES (?,?,?,?,?,?)",
-                (username, generate_password_hash(password), v["level"],
-                 new_referral_code(db),
-                 referrer["id"] if referrer else None, now_iso()))
+                """
+                INSERT INTO users (
+                    username,
+                    pw_hash,
+                    level,
+                    referral_code,
+                    referred_by,
+                    serial_number,
+                    created_at
+                )
+                VALUES (?,?,?,?,?,?,?)
+                """,
+                (
+                    username,
+                    generate_password_hash(password),
+                    v["level"],
+                    new_referral_code(db),
+                    referrer["id"] if referrer else None,
+                    serial_number,
+                    now_iso()
+                )
+            )
+
             uid = cur.lastrowid
 
+            # -----------------------------
+            # CLAIM VOUCHER
+            # -----------------------------
             claimed = db.execute(
-                "UPDATE vouchers SET used_by=?, used_at=? "
-                "WHERE code=? AND used_by IS NULL",
-                (uid, now_iso(), voucher)).rowcount
+                """
+                UPDATE vouchers
+                SET used_by=?, used_at=?
+                WHERE code=? AND used_by IS NULL
+                """,
+                (
+                    uid,
+                    now_iso(),
+                    voucher
+                )
+            ).rowcount
+
             if claimed != 1:
                 db.rollback()
-                flash("That level code has already been used.", "error")
-                return redirect(url_for("register"))
 
+                flash(
+                    "That level code has already been used.",
+                    "error"
+                )
+
+                return redirect(
+                    url_for("register")
+                )
+
+            # -----------------------------
+            # REFERRAL BONUS
+            # -----------------------------
             if referrer:
-                credit(db, referrer["id"],
-                       v["level"] * REFERRAL_BONUS_PER_LEVEL_CENTS,
-                       "REFERRAL", f"Referral: {username} joined")
+                credit(
+                    db,
+                    referrer["id"],
+                    v["level"] * REFERRAL_BONUS_PER_LEVEL_CENTS,
+                    "REFERRAL",
+                    f"Referral: {username} joined"
+                )
+
             db.commit()
+
         except sqlite3.IntegrityError:
             db.rollback()
-            flash("That username is taken.", "error")
-            return redirect(url_for("register"))
 
+            flash(
+                "That student number or cereal/serial number is already registered.",
+                "error"
+            )
+
+            return redirect(
+                url_for("register")
+            )
+
+        # -----------------------------
+        # LOG USER IN
+        # -----------------------------
         session.clear()
         session["uid"] = uid
-        flash(f"Welcome! You joined at Level {v['level']}.", "ok")
-        return redirect(url_for("dashboard"))
 
-    return page(REGISTER_BODY, form={})
+        flash(
+            f"Welcome! You joined at Level {v['level']}.",
+            "ok"
+        )
 
+        return redirect(
+            url_for("dashboard")
+        )
+
+    return page(
+        REGISTER_BODY,
+        form={}
+    )
+```
+```python
+@app.route("/forgot-password", methods=["GET", "POST"])
+def forgot_password():
+    if request.method == "POST":
+
+        # Student number = 10 digits
+        username = request.form.get("username", "").strip()
+
+        # Cereal/serial number = 11 digits
+        serial_number = request.form.get("serial_number", "").strip()
+
+        new_password = request.form.get("new_password", "")
+        confirm_password = request.form.get("confirm_password", "")
+
+        error = None
+
+        # -----------------------------
+        # VALIDATE STUDENT NUMBER
+        # -----------------------------
+        if not username.isdigit() or len(username) != 10:
+            error = "Student number must contain exactly 10 digits."
+
+        # -----------------------------
+        # VALIDATE SERIAL NUMBER
+        # -----------------------------
+        elif not serial_number.isdigit() or len(serial_number) != 11:
+            error = "Cereal/serial number must contain exactly 11 digits."
+
+        # -----------------------------
+        # VALIDATE NEW PASSWORD
+        # -----------------------------
+        elif len(new_password) < 8:
+            error = "New password must be at least 8 characters."
+
+        elif new_password != confirm_password:
+            error = "Passwords do not match."
+
+        db = get_db()
+
+        # -----------------------------
+        # FIND USER
+        # -----------------------------
+        user = None
+
+        if not error:
+            user = db.execute(
+                """
+                SELECT *
+                FROM users
+                WHERE username=?
+                AND serial_number=?
+                """,
+                (
+                    username,
+                    serial_number
+                )
+            ).fetchone()
+
+            if user is None:
+                error = (
+                    "The student number and cereal/serial number "
+                    "do not match an account."
+                )
+
+        # -----------------------------
+        # SHOW ERROR
+        # -----------------------------
+        if error:
+            flash(error, "error")
+
+            return page(
+                FORGOT_PASSWORD_BODY,
+                form=request.form
+            ), 400
+
+        # -----------------------------
+        # UPDATE PASSWORD
+        # -----------------------------
+        try:
+            db.execute(
+                """
+                UPDATE users
+                SET pw_hash=?
+                WHERE id=?
+                """,
+                (
+                    generate_password_hash(new_password),
+                    user["id"]
+                )
+            )
+
+            db.commit()
+
+        except sqlite3.Error:
+            db.rollback()
+
+            flash(
+                "Unable to reset your password. Please try again.",
+                "error"
+            )
+
+            return redirect(
+                url_for("forgot_password")
+            )
+
+        flash(
+            "Your password has been reset successfully. You can now log in.",
+            "ok"
+        )
+
+        return redirect(
+            url_for("login")
+        )
+
+    return page(
+        FORGOT_PASSWORD_BODY,
+        form={}
+    )
+```
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
@@ -1131,6 +1434,27 @@ REGISTER_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Username</label>
 <input name="username" value="{{ form.get('username','') }}" required autofocus>
+<label>Student Number</label>
+<input
+    type="text"
+    name="username"
+    maxlength="10"
+    minlength="10"
+    inputmode="numeric"
+    placeholder="Enter 10-digit student number"
+    required
+>
+
+<label>Cereal/Serial Number</label>
+<input
+    type="text"
+    name="serial_number"
+    maxlength="11"
+    minlength="11"
+    inputmode="numeric"
+    placeholder="Enter 11-digit cereal/serial number"
+    required
+>
 <label>Password (minimum 8 characters)</label>
 <input name="password" type="password" required>
 <label>Confirm password</label>
@@ -1142,6 +1466,7 @@ REGISTER_BODY = """
 <button class="primary">Join</button>
 </form>
 <p class="muted">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
+<a href="/forgot-password">Forgot Password?</a>
 </div>
 """
 
