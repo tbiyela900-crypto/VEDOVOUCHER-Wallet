@@ -556,6 +556,7 @@ def register():
 
     if request.method == "POST":
         username = request.form.get("username", "").strip()
+        student_number = request.form.get("student_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
@@ -567,7 +568,7 @@ def register():
         referrer = None
 
         # Validate student number
-        elif not username.isascii() or not username.isdigit() or len(username) != 10:
+        if not username.isascii() or not username.isdigit() or len(username) != 10:
             error = "Student number must contain exactly 10 digits."
 
         # Validate serial number
