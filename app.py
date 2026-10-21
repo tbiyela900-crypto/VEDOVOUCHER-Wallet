@@ -549,71 +549,43 @@ def inject_globals():
     }
 
 
-# ============================================================================
-# HOME / REGISTER / LOGIN / LOGOUT
-# ============================================================================
-
-@app.route("/")
-def index():
-    return redirect(url_for("dashboard" if current_user() else "login"))
-
 
 @app.route("/register", methods=["GET", "POST"])
 def register():
-   if request.method == "POST":
-    # Print the data received from the registration form
-    print("FORM DATA:", request.form)
-    username = request.form.get("username", "").strip()
-    # Print the exact value received
-    print("STUDENT NUMBER RECEIVED:", repr(username))
+    error = None
 
-    if not username.isascii() or not username.isdigit() or len(username) != 10:
-        error = "Student number must contain exactly 10 digits."
-        # 11 digits = cereal/serial number
+    if request.method == "POST":
+        username = request.form.get("username", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
-
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
-
         voucher = request.form.get("voucher", "").strip().upper()
         ref_code = request.form.get("referral", "").strip().upper()
 
-        error = None
+        db = get_db()
+        v = None
+        referrer = None
 
-        # -----------------------------
-        # VALIDATE STUDENT NUMBER
-        # -----------------------------
-        if not username.isdigit() or len(username) != 10:
+        # Validate student number
+        if not username.isascii() or not username.isdigit() or len(username) != 10:
             error = "Student number must contain exactly 10 digits."
 
-        # -----------------------------
-        # VALIDATE CEREAL/SERIAL NUMBER
-        # -----------------------------
-        elif not serial_number.isdigit() or len(serial_number) != 11:
+        # Validate serial number
+        elif not serial_number.isascii() or not serial_number.isdigit() or len(serial_number) != 11:
             error = "Cereal/serial number must contain exactly 11 digits."
 
-        # -----------------------------
-        # VALIDATE PASSWORD
-        # -----------------------------
+        # Validate password
         elif len(password) < 8:
             error = "Password must be at least 8 characters."
 
         elif password != confirm:
             error = "Passwords do not match."
 
-        # -----------------------------
-        # VALIDATE VOUCHER
-        # -----------------------------
+        # Validate voucher
         elif not voucher:
             error = "A level code is required to join."
 
-        db = get_db()
-        v = None
-        referrer = None
-
-        # -----------------------------
-        # CHECK VOUCHER
-        # -----------------------------
+        # Check voucher exists and is unused
         if not error:
             v = db.execute(
                 "SELECT * FROM vouchers WHERE code=?",
@@ -622,13 +594,10 @@ def register():
 
             if v is None:
                 error = "That level code is not valid."
-
             elif v["used_by"] is not None:
                 error = "That level code has already been used."
 
-        # -----------------------------
-        # CHECK REFERRAL
-        # -----------------------------
+        # Check referral code
         if not error and ref_code:
             referrer = db.execute(
                 "SELECT * FROM users WHERE referral_code=?",
@@ -638,9 +607,7 @@ def register():
             if referrer is None:
                 error = "That referral code does not exist."
 
-        # -----------------------------
-        # CHECK STUDENT NUMBER
-        # -----------------------------
+        # Check duplicate student number
         if not error:
             existing_user = db.execute(
                 "SELECT 1 FROM users WHERE username=?",
@@ -650,9 +617,7 @@ def register():
             if existing_user:
                 error = "That student number is already registered."
 
-        # -----------------------------
-        # CHECK SERIAL NUMBER
-        # -----------------------------
+        # Check duplicate serial number
         if not error:
             existing_serial = db.execute(
                 "SELECT 1 FROM users WHERE serial_number=?",
@@ -662,20 +627,13 @@ def register():
             if existing_serial:
                 error = "That cereal/serial number is already registered."
 
-        # -----------------------------
-        # SHOW ERROR
-        # -----------------------------
+        # Display validation errors
         if error:
             flash(error, "error")
-            return page(
-                REGISTER_BODY,
-                form=request.form
-            ), 400
+            return page(REGISTER_BODY, form=request.form), 400
 
         try:
-            # -----------------------------
-            # CREATE USER
-            # -----------------------------
+            # Create account
             cur = db.execute(
                 """
                 INSERT INTO users (
@@ -687,7 +645,7 @@ def register():
                     serial_number,
                     created_at
                 )
-                VALUES (?,?,?,?,?,?,?)
+                VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     username,
@@ -702,37 +660,22 @@ def register():
 
             uid = cur.lastrowid
 
-            # -----------------------------
-            # CLAIM VOUCHER
-            # -----------------------------
+            # Claim voucher only if it is still unused
             claimed = db.execute(
                 """
                 UPDATE vouchers
                 SET used_by=?, used_at=?
                 WHERE code=? AND used_by IS NULL
                 """,
-                (
-                    uid,
-                    now_iso(),
-                    voucher
-                )
+                (uid, now_iso(), voucher)
             ).rowcount
 
             if claimed != 1:
                 db.rollback()
+                flash("That level code has already been used.", "error")
+                return redirect(url_for("register"))
 
-                flash(
-                    "That level code has already been used.",
-                    "error"
-                )
-
-                return redirect(
-                    url_for("register")
-                )
-
-            # -----------------------------
-            # REFERRAL BONUS
-            # -----------------------------
+            # Referral bonus
             if referrer:
                 credit(
                     db,
@@ -744,17 +687,25 @@ def register():
 
             db.commit()
 
+            flash("Registration successful. Please log in.", "success")
+            return redirect(url_for("login"))
+
         except sqlite3.IntegrityError:
             db.rollback()
-
             flash(
-                "That student number or cereal/serial number is already registered.",
+                "That student number or serial number is already registered.",
                 "error"
             )
+            return redirect(url_for("register"))
 
-            return redirect(
-                url_for("register")
-            )
+        except Exception:
+            db.rollback()
+            app.logger.exception("Registration failed")
+            flash("Registration failed due to a server error. Please try again.", "error")
+            return redirect(url_for("register"))
+
+    # IMPORTANT: Return the registration page for GET requests.
+    return page(REGISTER_BODY, form={})
 
         # -----------------------------
         # LOG USER IN
