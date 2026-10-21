@@ -4,7 +4,7 @@ ZEDAVouchers
 
 
 Features
-  * Accounts, login/logout, members start at Level 1
+  * Accounts, login/logout, members start at Level 0
   * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
   * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
   * Admin approval issues a voucher code to the member
@@ -64,7 +64,7 @@ LEVEL_REWARDS_CENTS = {
 
 DAILY_REWARD_CENTS = {
     lvl: int((Decimal(LEVEL_REWARDS_CENTS[lvl]) / 24).quantize(
-        Decimal("1"), rounding=ROUND_HALF_UP))
+        Decimal("0"), rounding=ROUND_HALF_UP))
     for lvl in LEVELS
 }
 
@@ -80,7 +80,7 @@ ACCOUNT_NUMBER_MAX_LEN = 20
 # two levels' total rewards. One level at a time, paid from balance.
 UPGRADE_COST_CENTS = {
     lvl: (LEVEL_REWARDS_CENTS[lvl] - LEVEL_REWARDS_CENTS[lvl - 1]) // 2
-    for lvl in LEVELS if lvl > 1
+    for lvl in LEVELS if lvl > 0
 }
 
 # --- Top-ups / withdrawals -------------------------------------------------
