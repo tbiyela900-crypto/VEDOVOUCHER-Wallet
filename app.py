@@ -791,7 +791,7 @@ def forgot_password():
         # -----------------------------
         if not username.isdigit() or len(username) != 10:
             error = "Student number must contain exactly 10 digits."
-
+         
         # -----------------------------
         # VALIDATE SERIAL NUMBER
         # -----------------------------
@@ -1490,12 +1490,9 @@ REGISTER_BODY = """
     type="text"
     name="username"
     maxlength="10"
-    minlength="10"
-    inputmode="numeric"
-    placeholder="Enter 10-digit student number"
+    pattern="[0-9]{10}"
     required
 >
-
 <label>Cereal/Serial Number</label>
 <input
     type="text"
