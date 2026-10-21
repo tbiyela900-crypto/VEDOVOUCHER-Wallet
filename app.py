@@ -862,9 +862,8 @@ def logout():
  
 @app.route("/logout", methods=["POST"])
 def logout():
-    session.clear()
+    session.pop("uid", None)
     return redirect(url_for("login"))
-
 # ============================================================================
 # DASHBOARD + CHECK-IN
 # ============================================================================
