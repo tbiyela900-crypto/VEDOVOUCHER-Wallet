@@ -702,8 +702,7 @@ def register():
         REGISTER_BODY,
         form={}
     )
-```
-```python
+ 
 @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
@@ -821,7 +820,6 @@ def forgot_password():
         FORGOT_PASSWORD_BODY,
         form={}
     )
-```
 
 @app.route("/login", methods=["GET", "POST"])
 def login():
