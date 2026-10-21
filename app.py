@@ -337,9 +337,6 @@ def page(body, **ctx):
 def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
-    def init_db():
-    db = sqlite3.connect(DB_PATH)
-    db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
 
     # ---------------------------------
