@@ -711,148 +711,53 @@ def register():
         # -----------------------------
         # LOG USER IN
         # -----------------------------
-        session.clear()
-        session["uid"] = uid
-
-        flash(
-            f"Welcome! You joined at Level {v['level']}.",
-            "ok"
-        )
-
-        return redirect(
-            url_for("dashboard")
-        )
-
-    return page(
-        REGISTER_BODY,
-        form={}
-    )
- 
-@app.route("/forgot-password", methods=["GET", "POST"])
+       @app.route("/forgot-password", methods=["GET", "POST"])
 def forgot_password():
     if request.method == "POST":
-
-        # Student number = 10 digits
         username = request.form.get("username", "").strip()
-
-        # Cereal/serial number = 11 digits
         serial_number = request.form.get("serial_number", "").strip()
-
         new_password = request.form.get("new_password", "")
         confirm_password = request.form.get("confirm_password", "")
 
         error = None
-
-        # -----------------------------
-        # VALIDATE STUDENT NUMBER
-        # -----------------------------
-        if not username.isdigit() or len(username) < 10:
+        if not username.isdigit() or len(username) != 10:
             error = "Student number must contain exactly 10 digits."
-         
-        # -----------------------------
-        # VALIDATE SERIAL NUMBER
-        # -----------------------------
-        elif not serial_number.isdigit() or len(serial_number) < 11:
-            error = "Cereal/serial number must contain exactly 11 digits."
-
-        # -----------------------------
-        # VALIDATE NEW PASSWORD
-        # -----------------------------
+        elif not serial_number.isdigit() or len(serial_number) != 11:
+            error = "Serial number must contain exactly 11 digits."
         elif len(new_password) < 8:
             error = "New password must be at least 8 characters."
-
         elif new_password != confirm_password:
             error = "Passwords do not match."
 
         db = get_db()
-
-        
-        # -----------------------------
-        # FIND USER
-        # -----------------------------
         user = None
-
         if not error:
             user = db.execute(
-                """
-                SELECT *
-                FROM users
-                WHERE username = ?
-                AND serial_number = ?
-                """,
-                (username, serial_number)
+                "SELECT * FROM users WHERE username = ? AND serial_number = ?",
+                (username, serial_number),
             ).fetchone()
-
             if user is None:
-                error = (
-                    "The student number and serial number "
-                    "do not match an account."
-                )
+                error = "The student number and serial number do not match an account."
 
-        # -----------------------------
-        # SHOW ERROR
-        # -----------------------------
         if error:
             flash(error, "error")
             return redirect(url_for("forgot_password"))
 
-        # -----------------------------
-        # UPDATE PASSWORD
-        # -----------------------------
         try:
             db.execute(
-                """
-                UPDATE users
-                SET pw_hash=?
-                WHERE id=?
-                """,
-                (
-                    generate_password_hash(new_password),
-                    user["id"]
-                )
+                "UPDATE users SET pw_hash = ? WHERE id = ?",
+                (generate_password_hash(new_password), user["id"]),
             )
-
             db.commit()
-
         except sqlite3.Error:
             db.rollback()
+            flash("Unable to reset your password. Please try again.", "error")
+            return redirect(url_for("forgot_password"))
 
-            flash(
-                "Unable to reset your password. Please try again.",
-                "error"
-            )
+        flash("Your password has been reset successfully. You can now log in.", "ok")
+        return redirect(url_for("login"))   # <-- was missing
 
-            return redirect(
-                url_for("forgot_password")
-            )
-
-        flash(
-            "Your password has been reset successfully. You can now log in.",
-            "ok"
-        )
-
-
-
-
-@app.route("/login", methods=["GET", "POST"])
-def login():
-    if request.method == "POST":
-        username = request.form.get("username", "").strip()
-        password = request.form.get("password", "")
-
-        user = get_db().execute(
-            "SELECT * FROM users WHERE username = ?",
-            (username,)
-        ).fetchone()
-
-        if user and check_password_hash(user["pw_hash"], password):
-            session["uid"] = user["id"]
-            return redirect(url_for("dashboard"))
-
-        flash("Wrong username or password.", "error")
-        return page(LOGIN_BODY), 401
-
-    return page(LOGIN_BODY)
+    return page(FORGOT_BODY)                # <-- was missing (use your template name)
 
 # ============================================================================
 # DASHBOARD + CHECK-IN
