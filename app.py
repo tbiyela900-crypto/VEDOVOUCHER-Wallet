@@ -646,7 +646,7 @@ def register():
         session.clear()
         session["uid"] = uid
 
-        flash("Welcome! Your account was created at Level 1.", "ok")
+        flash("Welcome! Your account was created at Level 0.", "ok")
         return redirect(url_for("dashboard"))
 
     # GET request: show the registration page
