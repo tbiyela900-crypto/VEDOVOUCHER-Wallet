@@ -1240,52 +1240,101 @@ BASE = """
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
-<title>VEDOVOUCHERS Wallets</title>
+<title>VumaPay | Digital Wallet</title>
 <style>
-:root{--bg:#f5f6fa;--card:#fff;--ink:#1d2433;--muted:#6b7385;--brand:#4f46e5;
---ok:#0f9d58;--err:#d93025;--line:#e3e6ef;}
-*{box-sizing:border-box;}
-body{margin:0;font-family:system-ui,Segoe UI,Roboto,sans-serif;background:var(--bg);color:var(--ink);}
-.demo{background:#fff4cc;color:#6b5400;text-align:center;padding:6px;font-size:.85rem;}
-nav{background:var(--ink);color:#fff;padding:12px 20px;display:flex;gap:16px;align-items:center;flex-wrap:wrap;}
-nav a{color:#cfd5ff;text-decoration:none;}
-nav a:hover{color:#fff;}
-nav .brand{font-weight:700;color:#fff;margin-right:auto;}
-nav form{margin:0;}
-nav button{background:none;border:1px solid #556;color:#cfd5ff;border-radius:6px;padding:4px 10px;cursor:pointer;}
-main{max-width:960px;margin:24px auto;padding:0 16px;}
-.card{background:var(--card);border:1px solid var(--line);border-radius:12px;padding:20px;margin-bottom:16px;overflow-x:auto;}
-h1,h2{margin:0 0 12px;}
-label{display:block;margin:12px 0 4px;font-weight:600;font-size:.9rem;}
-input,select,textarea{width:100%;padding:10px;border:1px solid var(--line);border-radius:8px;font-size:1rem;font-family:inherit;}
-button.primary{margin-top:16px;background:var(--brand);color:#fff;border:0;border-radius:8px;padding:11px 18px;font-size:1rem;cursor:pointer;}
-button.primary:disabled{background:#b8bbd6;cursor:not-allowed;}
-button.danger{background:#d93025;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer;}
-button.success{background:#0f9d58;color:#fff;border:0;border-radius:8px;padding:6px 10px;cursor:pointer;}
-.inline{display:inline-block;margin:0 2px;}
-.flash{padding:10px 14px;border-radius:8px;margin-bottom:12px;}
-.flash.ok{background:#e6f6ec;color:var(--ok);}
-.flash.error{background:#fdeceb;color:var(--err);}
-.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(170px,1fr));gap:12px;}
-.stat{background:var(--bg);border-radius:10px;padding:14px;}
-.stat b{display:block;font-size:1.4rem;}
-.stat span{color:var(--muted);font-size:.85rem;}
-.balance{font-size:2.4rem;font-weight:800;color:var(--brand);}
-table{width:100%;border-collapse:collapse;}
-th,td{text-align:left;padding:9px;border-bottom:1px solid var(--line);font-size:.92rem;}
-.badge{background:var(--brand);color:#fff;border-radius:999px;padding:2px 10px;font-size:.8rem;}
-.badge.ok{background:var(--ok);} .badge.err{background:var(--err);} .badge.wait{background:#b58900;}
-code{background:var(--bg);padding:2px 6px;border-radius:6px;}
-.muted{color:var(--muted);} .hl{background:#eef0ff;} .small{font-size:.85rem;}
-.note{border-left:4px solid var(--brand);}
-.pos{color:var(--ok);} .neg{color:var(--err);}
-.pwbox{width:150px;padding:6px;font-size:.85rem;}
+:root{
+  --bg:#f4f7fc;--card:#ffffff;--ink:#14213d;--muted:#68758d;
+  --brand:#3157d5;--brand-dark:#203ea8;--accent:#18b6a4;
+  --ok:#138a61;--err:#c93645;--warning:#a96b08;--line:#e5eaf3;
+  --shadow:0 12px 32px rgba(22,34,66,.07);--radius:18px;
+}
+*{box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,"Segoe UI",Roboto,sans-serif;
+  background:radial-gradient(ellipse at top left,#e9efff 0,transparent 42%),var(--bg);
+  color:var(--ink);line-height:1.55;-webkit-font-smoothing:antialiased}
+a{color:var(--brand);text-decoration:none}
+a:hover{text-decoration:underline}
+.demo{background:#e5fbf6;color:#11685f;text-align:center;padding:9px 16px;
+  font-size:.83rem;font-weight:650;letter-spacing:.01em;border-bottom:1px solid #c9f1e8}
+nav{position:sticky;top:0;z-index:20;background:rgba(16,27,59,.97);backdrop-filter:blur(14px);
+  color:#fff;padding:14px clamp(16px,4vw,44px);display:flex;gap:10px 20px;align-items:center;flex-wrap:wrap;
+  box-shadow:0 8px 26px rgba(10,20,48,.13)}
+nav a{color:#dbe5ff;text-decoration:none;font-size:.91rem;font-weight:550;padding:8px 9px;border-radius:9px}
+nav a:hover{color:#fff;background:rgba(255,255,255,.1);text-decoration:none}
+nav .brand{font-size:1.15rem;font-weight:850;letter-spacing:-.035em;color:#fff;margin-right:auto;white-space:nowrap}
+nav .brand:before{content:"V";display:inline-grid;place-items:center;width:32px;height:32px;margin-right:9px;
+  border-radius:10px;background:linear-gradient(135deg,#51ead0,#9af3df);color:#102348;font-weight:900}
+nav form{margin:0}
+nav button{background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.25);color:#fff;
+  border-radius:10px;padding:9px 12px;cursor:pointer;font:inherit;font-size:.88rem}
+nav button:hover{background:rgba(255,255,255,.16)}
+main{width:min(1180px,100%);margin:30px auto;padding:0 clamp(14px,3vw,28px) 50px}
+.card{background:var(--card);border:1px solid rgba(224,231,243,.95);border-radius:var(--radius);
+  padding:clamp(18px,3vw,28px);margin-bottom:20px;box-shadow:var(--shadow);overflow-x:auto}
+h1,h2,h3{margin:0 0 14px;letter-spacing:-.035em;line-height:1.2}
+h1{font-size:clamp(1.6rem,3vw,2.2rem);font-weight:800}
+h2{font-size:clamp(1.15rem,2vw,1.45rem);font-weight:750}
+h3{font-size:1.05rem}
+p{margin:10px 0}
+label{display:block;margin:16px 0 6px;font-weight:650;font-size:.9rem;color:#263451}
+input,select,textarea{width:100%;padding:12px 14px;border:1px solid #d9e1ef;border-radius:11px;
+  background:#fbfcff;color:var(--ink);font-size:1rem;font-family:inherit;transition:border-color .18s,box-shadow .18s}
+input:focus,select:focus,textarea:focus{outline:none;border-color:#7893f3;box-shadow:0 0 0 4px rgba(49,87,213,.12);background:#fff}
+input::placeholder,textarea::placeholder{color:#9aa5b8}
+button{font-family:inherit;font-weight:650;transition:transform .15s,box-shadow .15s,background .15s}
+button:active{transform:translateY(1px)}
+button.primary{margin-top:18px;background:linear-gradient(135deg,var(--brand),#4b6fe8);color:#fff;border:0;
+  border-radius:11px;padding:12px 19px;font-size:.97rem;cursor:pointer;box-shadow:0 7px 16px rgba(49,87,213,.2)}
+button.primary:hover{background:linear-gradient(135deg,var(--brand-dark),var(--brand));box-shadow:0 9px 20px rgba(49,87,213,.25)}
+button.primary:disabled{background:#b9c3db;box-shadow:none;cursor:not-allowed}
+button.danger,button.success{color:#fff;border:0;border-radius:9px;padding:8px 12px;cursor:pointer;font-size:.86rem}
+button.danger{background:#c93645}button.danger:hover{background:#a92432}
+button.success{background:#138a61}button.success:hover{background:#0d6f4d}
+.inline{display:inline-block;margin:3px}
+.flash{padding:13px 16px;border-radius:12px;margin-bottom:14px;border:1px solid transparent;font-weight:550}
+.flash.ok{background:#e9f8f0;color:#116c49;border-color:#c9eedb}
+.flash.error{background:#fff0f0;color:#a32231;border-color:#f5d1d5}
+.stats{display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,190px),1fr));gap:14px;margin-top:16px}
+.stat{background:linear-gradient(145deg,#f8faff,#f0f4fc);border:1px solid #e6ebf5;border-radius:15px;padding:18px}
+.stat b{display:block;font-size:clamp(1.2rem,2.4vw,1.65rem);letter-spacing:-.035em;overflow-wrap:anywhere}
+.stat span{display:block;color:var(--muted);font-size:.84rem;margin-top:5px}
+.balance{font-size:clamp(2.2rem,6vw,3.35rem);font-weight:850;letter-spacing:-.06em;color:var(--brand);line-height:1.15;margin:8px 0 18px}
+table{width:100%;border-collapse:separate;border-spacing:0;min-width:560px}
+th,td{text-align:left;padding:13px 12px;border-bottom:1px solid var(--line);font-size:.9rem;vertical-align:middle}
+th{font-size:.77rem;text-transform:uppercase;letter-spacing:.055em;color:#6a7890;background:#f7f9fd;white-space:nowrap}
+tr:hover td{background:#fafbff}
+th:first-child{border-radius:9px 0 0 0}th:last-child{border-radius:0 9px 0 0}
+.badge{display:inline-flex;align-items:center;background:#e9edff;color:#304bb3;border-radius:999px;padding:4px 10px;font-size:.77rem;font-weight:750;white-space:nowrap}
+.badge.ok{background:#e3f7ed;color:#11764f}.badge.err{background:#ffeaec;color:#b32b3a}.badge.wait{background:#fff3d8;color:#885b06}
+code{background:#f0f3fb;color:#2c438d;padding:5px 8px;border-radius:8px;font-family:ui-monospace,SFMono-Regular,Consolas,monospace;overflow-wrap:anywhere}
+.muted{color:var(--muted)}.hl td{background:#edf2ff!important}.small{font-size:.85rem}
+.note{border-left:4px solid var(--accent)}
+.pos{color:var(--ok);font-weight:700}.neg{color:var(--err);font-weight:700}
+.pwbox{width:160px;padding:9px;font-size:.85rem}
+form{max-width:100%}
+ul{padding-left:22px}li{margin:7px 0}
+:focus-visible{outline:3px solid rgba(49,87,213,.4);outline-offset:3px}
+@media(max-width:760px){
+  nav{position:static;padding:13px 15px;gap:5px 8px}
+  nav .brand{width:100%;margin-bottom:6px;font-size:1.08rem}
+  nav a{font-size:.87rem;padding:8px}
+  nav form{width:100%;margin-top:5px}
+  nav form button{width:100%;text-align:center}
+  main{margin:18px auto;padding:0 12px 32px}
+  .card{border-radius:15px;padding:17px;margin-bottom:14px}
+  th,td{padding:10px 9px;font-size:.84rem}
+  .balance{font-size:2.35rem}
+  button.primary{width:100%}
+  .pwbox{width:100%;min-width:130px}
+}
+@media(prefers-reduced-motion:reduce){*,*::before,*::after{scroll-behavior:auto!important;transition:none!important}}
 </style>
 </head>
 <body>
-<div class="demo">Welcome let's grow together.</div>
+<div class="demo">VumaPay · Your money. Your control.</div>
 <nav>
-<span class="brand">My VEDOVOUCHER Wallet</span>
+<span class="brand">VumaPay</span>
 {% if me %}
 <a href="{{ url_for('dashboard') }}">Dashboard</a>
 <a href="{{ url_for('topup') }}">Top up</a>
