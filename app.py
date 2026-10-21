@@ -832,26 +832,32 @@ def forgot_password():
         )
 
 
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
         username = request.form.get("username", "").strip()
         password = request.form.get("password", "")
-        user = get_db().execute("SELECT * FROM users WHERE username=?",
-                                (username,)).fetchone()
+
+        user = get_db().execute(
+            "SELECT * FROM users WHERE username=?",
+            (username,)
+        ).fetchone()
+
         if user and check_password_hash(user["pw_hash"], password):
             session.clear()
             session["uid"] = user["id"]
             return redirect(url_for("dashboard"))
+
         flash("Wrong username or password.", "error")
         return page(LOGIN_BODY), 401
+
     return page(LOGIN_BODY)
  
 @app.route("/logout", methods=["POST"])
 def logout():
-    flash("You have been logged out.", "success")
-    return redirect(url_for("login"))
     session.clear()
+    return redirect(url_for("login"))
 
 # ============================================================================
 # DASHBOARD + CHECK-IN
