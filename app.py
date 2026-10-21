@@ -5,6 +5,7 @@ ZEDAVouchers
 
 Features
   * Accounts, login/logout, level code needed to join (levels 1-7)
+  * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
   * Daily check-in (level reward / 24) with streak bonus
   * Referral codes and team
   * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
@@ -17,7 +18,8 @@ Features
                           clearly labelled, realistic annual interest rate
                           (simple interest, NOT a multiplier)
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
-                          pots, and a full transaction ledger
+                          pots, a full transaction ledger, and can RESET
+                          a member's password
 
 Run:
   pip install flask
@@ -65,6 +67,9 @@ DAILY_REWARD_CENTS = {
 STREAK_DAYS = 7
 STREAK_BONUS_PER_LEVEL_CENTS = 1000     # R10 x level
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
+
+# Account number rules (any number, digits only)
+ACCOUNT_NUMBER_MAX_LEN = 20
 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
@@ -340,37 +345,18 @@ def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
- 
-    # Safely add columns missing from older databases.
+
+    # Safely add columns missing from older databases (never deletes data).
     existing_columns = {
         row["name"]
         for row in db.execute("PRAGMA table_info(users)").fetchall()
     }
 
     required_columns = {
-        "last_checkin": "TEXT",
-        "streak": "INTEGER DEFAULT 0",
-        "points": "INTEGER NOT NULL DEFAULT 0",
-    }
-
-    for column, definition in required_columns.items():
-        if column not in existing_columns:
-            db.execute(
-                f"ALTER TABLE users ADD COLUMN {column} {definition}"
-            )
-
-    db.commit()
-
-    # Repair older databases without deleting existing records.
-    required_columns = {
-        "points": "INTEGER NOT NULL DEFAULT 0",
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
-    }
-
-    existing_columns = {
-        row["name"]
-        for row in db.execute("PRAGMA table_info(users)").fetchall()
+        "points": "INTEGER NOT NULL DEFAULT 0",
+        "serial_number": "TEXT",
     }
 
     for column, definition in required_columns.items():
@@ -380,39 +366,16 @@ def init_db():
             )
 
     db.commit()
-
-    # Add missing columns to existing databases
-    user_columns = {
-        row["name"]
-        for row in db.execute(
-            "PRAGMA table_info(users)"
-        ).fetchall()
-    }
-
-    if "last_checkin" not in user_columns:
-        db.execute(
-            "ALTER TABLE users ADD COLUMN last_checkin TEXT"
-        )
-
-    if "streak" not in user_columns:
-        db.execute(
-            "ALTER TABLE users ADD COLUMN streak INTEGER DEFAULT 0"
-        )
-
-    if "serial_number" not in user_columns:
-        db.execute(
-            "ALTER TABLE users ADD COLUMN serial_number TEXT"
-        )
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
+
     # Create admin account
     if not db.execute(
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real student number or serial number
-        admin_student_number = "0000000000"
+        # Admin does not use a real serial number
         admin_serial_number = "00000000000"
 
         db.execute(
@@ -549,13 +512,18 @@ def inject_globals():
     }
 
 
+# ============================================================================
+# REGISTER / LOGIN / LOGOUT
+# ============================================================================
+
 @app.route("/register", methods=["GET", "POST"])
 def register():
     error = None
 
     if request.method == "POST":
-        # The student number IS the account identifier (no separate username).
-        student_number = request.form.get("student_number", "").strip()
+        # The ACCOUNT NUMBER is the account identifier (any number).
+        # It is stored in the `username` column so login keeps working.
+        account_number = request.form.get("account_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
@@ -566,11 +534,12 @@ def register():
         v = None
         referrer = None
 
-        # Validate student number (exactly 10 digits)
-        if (not student_number.isascii()
-                or not student_number.isdigit()
-                or len(student_number) != 10):
-            error = "Student number must contain exactly 10 digits."
+        # Validate account number (any number: digits only)
+        if (not account_number.isascii()
+                or not account_number.isdigit()
+                or len(account_number) > ACCOUNT_NUMBER_MAX_LEN):
+            error = (f"Account number must be a number "
+                     f"(digits only, up to {ACCOUNT_NUMBER_MAX_LEN} digits).")
 
         # Validate serial number (exactly 11 digits)
         elif (not serial_number.isascii()
@@ -611,15 +580,15 @@ def register():
             if referrer is None:
                 error = "That referral code does not exist."
 
-        # Check duplicate student number
+        # Check duplicate account number
         if not error:
             existing_user = db.execute(
                 "SELECT 1 FROM users WHERE username=?",
-                (student_number,)
+                (account_number,)
             ).fetchone()
 
             if existing_user:
-                error = "That student number is already registered."
+                error = "That account number is already registered."
 
         # Check duplicate serial number
         if not error:
@@ -637,8 +606,7 @@ def register():
             return page(REGISTER_BODY, form=request.form), 400
 
         try:
-            # Create account (student number is stored in the `username` column
-            # so login and forgot-password keep working unchanged)
+            # Create account
             cur = db.execute(
                 """
                 INSERT INTO users (
@@ -653,7 +621,7 @@ def register():
                 VALUES (?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    student_number,
+                    account_number,
                     generate_password_hash(password),
                     v["level"],
                     new_referral_code(db),
@@ -687,7 +655,7 @@ def register():
                     referrer["id"],
                     v["level"] * REFERRAL_BONUS_PER_LEVEL_CENTS,
                     "REFERRAL",
-                    f"Referral: {student_number} joined"
+                    f"Referral: {account_number} joined"
                 )
 
             db.commit()
@@ -695,7 +663,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That student number or serial number is already registered.",
+                "That account number or serial number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -719,53 +687,39 @@ def register():
     return page(REGISTER_BODY, form={})
 
 
-@app.route("/forgot-password", methods=["GET", "POST"])
-def forgot_password():
+@app.route("/login", methods=["GET", "POST"])
+def login():
     if request.method == "POST":
-        student_number = request.form.get("student_number", "").strip()
-        serial_number = request.form.get("serial_number", "").strip()
-        new_password = request.form.get("new_password", "")
-        confirm_password = request.form.get("confirm_password", "")
+        username = request.form.get("username", "").strip()
+        password = request.form.get("password", "")
 
-        error = None
-        if not student_number.isdigit() or len(student_number) != 10:
-            error = "Student number must contain exactly 10 digits."
-        elif not serial_number.isdigit() or len(serial_number) != 11:
-            error = "Serial number must contain exactly 11 digits."
-        elif len(new_password) < 8:
-            error = "New password must be at least 8 characters."
-        elif new_password != confirm_password:
-            error = "Passwords do not match."
+        user = get_db().execute(
+            "SELECT * FROM users WHERE username = ?",
+            (username,)
+        ).fetchone()
 
-        db = get_db()
-        user = None
-        if not error:
-            user = db.execute(
-                "SELECT * FROM users WHERE username = ? AND serial_number = ?",
-                (student_number, serial_number),
-            ).fetchone()
-            if user is None:
-                error = "The student number and serial number do not match an account."
+        if user and check_password_hash(user["pw_hash"], password):
+            session["uid"] = user["id"]
+            return redirect(url_for("dashboard"))
 
-        if error:
-            flash(error, "error")
-            return redirect(url_for("forgot_password"))
+        flash("Wrong account number or password.", "error")
+        return page(LOGIN_BODY), 401
 
-        try:
-            db.execute(
-                "UPDATE users SET pw_hash = ? WHERE id = ?",
-                (generate_password_hash(new_password), user["id"]),
-            )
-            db.commit()
-        except sqlite3.Error:
-            db.rollback()
-            flash("Unable to reset your password. Please try again.", "error")
-            return redirect(url_for("forgot_password"))
+    return page(LOGIN_BODY)
 
-        flash("Your password has been reset successfully. You can now log in.", "ok")
-        return redirect(url_for("login"))
 
-    return page(FORGOT_BODY)
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
+
+
+@app.route("/")
+def index():
+    if current_user():
+        return redirect(url_for("dashboard"))
+    return redirect(url_for("login"))
+
 
 # ============================================================================
 # DASHBOARD + CHECK-IN
@@ -1192,6 +1146,31 @@ def admin_instructions():
     return redirect(url_for("admin"))
 
 
+@app.route("/admin/user/<int:user_id>/reset-password", methods=["POST"])
+@admin_required
+def admin_reset_password(user_id):
+    """Admin sets a NEW password for a member (replaces 'forgot password').
+    Passwords are never stored or shown in readable form."""
+    new_password = request.form.get("new_password", "")
+    if len(new_password) < 8:
+        flash("New password must be at least 8 characters.", "error")
+        return redirect(url_for("admin"))
+
+    db = get_db()
+    target = db.execute("SELECT id, username FROM users WHERE id=?",
+                        (user_id,)).fetchone()
+    if target is None:
+        flash("Member not found.", "error")
+        return redirect(url_for("admin"))
+
+    db.execute("UPDATE users SET pw_hash=? WHERE id=?",
+               (generate_password_hash(new_password), user_id))
+    db.commit()
+    flash(f"Password for account {target['username']} was reset. "
+          "Give them the new password.", "ok")
+    return redirect(url_for("admin"))
+
+
 @app.route("/admin/topup/<int:topup_id>/<action>", methods=["POST"])
 @admin_required
 def admin_topup(topup_id, action):
@@ -1300,6 +1279,7 @@ code{background:var(--bg);padding:2px 6px;border-radius:6px;}
 .muted{color:var(--muted);} .hl{background:#eef0ff;} .small{font-size:.85rem;}
 .note{border-left:4px solid var(--brand);}
 .pos{color:var(--ok);} .neg{color:var(--err);}
+.pwbox{width:150px;padding:6px;font-size:.85rem;}
 </style>
 </head>
 <body>
@@ -1338,13 +1318,14 @@ LOGIN_BODY = """
 <h1>Log in</h1>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Username</label>
+<label>Account number</label>
 <input name="username" required autofocus>
 <label>Password</label>
 <input name="password" type="password" required>
 <button class="primary">Log in</button>
 </form>
 <p class="muted">No account? <a href="{{ url_for('register') }}">Create one</a> with a level code.</p>
+<p class="muted small">Lost your password? Please contact the admin to reset it.</p>
 </div>
 """
 
@@ -1353,23 +1334,27 @@ REGISTER_BODY = """
 <h1>Create account</h1>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Username</label>
-<input name="username" value="{{ form.get('username','') }}" required autofocus>
-<label>Student Number</label>
+<label>Account number (any number)</label>
 <input
     type="text"
-    name="username"
-    maxlength="10"
-    pattern="[0-9]{10}"
+    name="account_number"
+    value="{{ form.get('account_number','') }}"
+    maxlength="20"
+    inputmode="numeric"
+    pattern="[0-9]+"
+    placeholder="Enter your account number"
     required
+    autofocus
 >
 <label>Cereal/Serial Number</label>
 <input
     type="text"
     name="serial_number"
+    value="{{ form.get('serial_number','') }}"
     maxlength="11"
     minlength="11"
     inputmode="numeric"
+    pattern="[0-9]{11}"
     placeholder="Enter 11-digit cereal/serial number"
     required
 >
@@ -1384,7 +1369,6 @@ REGISTER_BODY = """
 <button class="primary">Join</button>
 </form>
 <p class="muted">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
-<a href="/forgot-password">Forgot Password?</a>
 </div>
 """
 
@@ -1695,11 +1679,19 @@ ADMIN_BODY = """
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>User</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th></tr>
+<tr><th>Account number</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td>{{ u['username'] }}{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>L{{ u['level'] }}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
-<td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td></tr>
+<td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_reset_password', user_id=u['id']) }}"
+onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input class="pwbox" name="new_password" type="text" minlength="8" placeholder="New password" autocomplete="off" required>
+<button class="danger">Reset</button>
+</form>
+</td></tr>
 {% endfor %}
 </table>
 </div>
