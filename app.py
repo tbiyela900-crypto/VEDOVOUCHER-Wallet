@@ -41,13 +41,14 @@ import os
 import secrets
 import sqlite3
 import string
+import time
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
 
 from flask import (
-    Flask, abort, flash, g, redirect, render_template_string,
-    request, session, url_for,
+    Flask, abort, flash, g, jsonify, redirect, render_template_string,
+    request, send_from_directory, session, url_for,
 )
 from jinja2 import DictLoader
 from markupsafe import Markup
@@ -140,8 +141,14 @@ POT_APR_PERCENT = {
 POT_WEEKS = sorted(POT_APR_PERCENT)
 POT_MIN_CENTS = 1000            # R10
 
+# --- Check-in tasks / admin photos ----------------------------------------
+TASK_WAIT_SECONDS = 5           # each tap loads for 5 seconds
+UPLOAD_DIR = os.path.abspath(os.environ.get(
+    "UPLOAD_DIR", os.path.join(os.path.dirname(DB_PATH), "uploads")))
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024     # photo uploads
 
 
 # ============================================================================
@@ -193,6 +200,23 @@ def level_reward(level):
 
 def daily_reward(level):
     return money(daily_reward_cents(level))
+
+
+def tasks_for_level(level):
+    """Check-in taps per day: 3 at Level 1, plus 2 more for every level up."""
+    level = int(level)
+    return 3 + 2 * (level - 1) if level >= 1 else 0
+
+
+def task_reward_cents(level, task_no):
+    """Reward of one tap. The daily reward is split evenly over the taps;
+    the last tap also takes any leftover cents so the total is exact."""
+    total = daily_reward_cents(level)
+    n = tasks_for_level(level)
+    if n == 0:
+        return 0
+    base = total // n
+    return base + (total - base * n if task_no == n else 0)
 
 
 def pot_interest_cents(principal_cents, weeks):
@@ -305,6 +329,24 @@ CREATE TABLE IF NOT EXISTS transactions (
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS checkin_tasks (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    day TEXT NOT NULL,
+    task_no INTEGER NOT NULL,
+    started_ts REAL,
+    completed_at TEXT,
+    reward INTEGER NOT NULL DEFAULT 0,
+    UNIQUE(user_id, day, task_no)
+);
+
+CREATE TABLE IF NOT EXISTS admin_posts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    image TEXT NOT NULL,
+    caption TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
 );
 """
 
@@ -857,52 +899,229 @@ def dashboard():
     bonus = (user["level"] * STREAK_BONUS_PER_LEVEL_CENTS
              if next_streak % STREAK_DAYS == 0 else 0)
 
-    return page(DASH_BODY, user=user, done=done, next_streak=next_streak,
+    task_total = tasks_for_level(user["level"])
+    task_done = db.execute(
+        "SELECT COUNT(*) AS n FROM checkin_tasks WHERE user_id=? AND day=? "
+        "AND completed_at IS NOT NULL",
+        (user["id"], today().isoformat())).fetchone()["n"]
+
+    return page(DASH_BODY, task_total=task_total, task_done=task_done, user=user, done=done, next_streak=next_streak,
                 history=history, recent_tx=recent_tx, locked=locked,
                 reward=reward, bonus=bonus, STREAK_DAYS=STREAK_DAYS)
 
 
-@app.route("/checkin", methods=["POST"])
+@app.route("/checkin")
 @login_required
 def checkin():
+    """Check-in page: one tap per task, each tap loads for 5 seconds."""
     db = get_db()
     user = current_user()
-    done, streak = checkin_state(user)
 
     if user["level"] == 0:
         flash("Top up and move to Level 1 to start earning.", "error")
         return redirect(url_for("dashboard"))
 
-    if done:
-        flash("You already checked in today. Come back tomorrow!", "error")
-        return redirect(url_for("dashboard"))
-
-    reward = daily_reward_cents(user["level"])
-    bonus = (user["level"] * STREAK_BONUS_PER_LEVEL_CENTS
-             if streak % STREAK_DAYS == 0 else 0)
+    done, _streak = checkin_state(user)
     day = today().isoformat()
+    total = tasks_for_level(user["level"])
 
-    try:
-        db.execute(
-            "INSERT INTO checkins (user_id, day, reward, bonus) "
-            "VALUES (?,?,?,?)", (user["id"], day, reward, bonus))
-    except sqlite3.IntegrityError:
+    rows = db.execute(
+        "SELECT task_no, reward FROM checkin_tasks "
+        "WHERE user_id=? AND day=? AND completed_at IS NOT NULL",
+        (user["id"], day)).fetchall()
+    paid = {r["task_no"]: r["reward"] for r in rows}
+
+    tasks = [
+        {"no": i,
+         "reward": task_reward_cents(user["level"], i),
+         "done": i in paid}
+        for i in range(1, total + 1)
+    ]
+    posts = db.execute(
+        "SELECT * FROM admin_posts ORDER BY id DESC LIMIT 20").fetchall()
+
+    return page(CHECKIN_BODY, user=user, done=done, total=total,
+                tasks=tasks, completed_n=len(paid),
+                earned=sum(paid.values()),
+                daily=daily_reward_cents(user["level"]),
+                posts=posts, wait=TASK_WAIT_SECONDS)
+
+
+def _task_guard(user, n):
+    """Return an error message if this task cannot be used, else None."""
+    if user["level"] == 0:
+        return "Top up and move to Level 1 to start earning."
+    done, _streak = checkin_state(user)
+    if done:
+        return "You already checked in today. Come back tomorrow!"
+    if not 1 <= n <= tasks_for_level(user["level"]):
+        return "That task does not exist."
+    return None
+
+
+@app.route("/checkin/<int:n>/start", methods=["POST"])
+@login_required
+def checkin_start(n):
+    db = get_db()
+    user = current_user()
+
+    error = _task_guard(user, n)
+    if error:
+        return jsonify(ok=False, error=error), 400
+
+    day = today().isoformat()
+    now = time.time()
+
+    # Only one task may be loading at a time.
+    loading = db.execute(
+        "SELECT 1 FROM checkin_tasks WHERE user_id=? AND day=? "
+        "AND task_no<>? AND completed_at IS NULL AND started_ts>?",
+        (user["id"], day, n, now - TASK_WAIT_SECONDS)).fetchone()
+    if loading:
+        return jsonify(ok=False,
+                       error="Wait for the loading task to finish first."), 400
+
+    existing = db.execute(
+        "SELECT completed_at FROM checkin_tasks "
+        "WHERE user_id=? AND day=? AND task_no=?",
+        (user["id"], day, n)).fetchone()
+    if existing and existing["completed_at"]:
+        return jsonify(ok=False, error="You already did this task."), 400
+
+    db.execute(
+        "INSERT INTO checkin_tasks (user_id, day, task_no, started_ts) "
+        "VALUES (?,?,?,?) "
+        "ON CONFLICT(user_id, day, task_no) DO UPDATE "
+        "SET started_ts=excluded.started_ts "
+        "WHERE checkin_tasks.completed_at IS NULL",
+        (user["id"], day, n, now))
+    db.commit()
+    return jsonify(ok=True, wait=TASK_WAIT_SECONDS)
+
+
+@app.route("/checkin/<int:n>/complete", methods=["POST"])
+@login_required
+def checkin_complete(n):
+    db = get_db()
+    user = current_user()
+
+    error = _task_guard(user, n)
+    if error:
+        return jsonify(ok=False, error=error), 400
+
+    day = today().isoformat()
+    total = tasks_for_level(user["level"])
+    reward = task_reward_cents(user["level"], n)
+
+    row = db.execute(
+        "SELECT * FROM checkin_tasks WHERE user_id=? AND day=? AND task_no=?",
+        (user["id"], day, n)).fetchone()
+    if row is None or row["started_ts"] is None:
+        return jsonify(ok=False, error="Tap the task first."), 400
+    if row["completed_at"] is not None:
+        return jsonify(ok=False, error="You already did this task."), 400
+    if time.time() - row["started_ts"] < TASK_WAIT_SECONDS:
+        return jsonify(ok=False,
+                       error="The task is still loading. Please wait."), 400
+
+    claimed = db.execute(
+        "UPDATE checkin_tasks SET completed_at=?, reward=? "
+        "WHERE user_id=? AND day=? AND task_no=? AND completed_at IS NULL",
+        (now_iso(), reward, user["id"], day, n)).rowcount
+    if claimed != 1:
         db.rollback()
-        flash("You already checked in today.", "error")
-        return redirect(url_for("dashboard"))
+        return jsonify(ok=False, error="You already did this task."), 400
 
-    db.execute("UPDATE users SET streak=?, last_checkin=? WHERE id=?",
-               (streak, day, user["id"]))
-    credit(db, user["id"], reward, "CHECKIN", f"Daily check-in {day}")
-    if bonus:
-        credit(db, user["id"], bonus, "CHECKIN", f"{streak}-day streak bonus")
+    # Each finished task adds its reward to the balance straight away.
+    credit(db, user["id"], reward, "CHECKIN",
+           f"Check-in task {n}/{total} ({day})")
+
+    summary = db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(SUM(reward),0) AS s "
+        "FROM checkin_tasks WHERE user_id=? AND day=? "
+        "AND completed_at IS NOT NULL", (user["id"], day)).fetchone()
+    completed, earned = summary["n"], summary["s"]
+
+    finished = False
+    bonus = 0
+    if completed >= total:
+        # All tasks done: the day counts as checked in (streak, history).
+        _done, streak = checkin_state(user)
+        bonus = (user["level"] * STREAK_BONUS_PER_LEVEL_CENTS
+                 if streak % STREAK_DAYS == 0 else 0)
+        inserted = db.execute(
+            "INSERT OR IGNORE INTO checkins (user_id, day, reward, bonus) "
+            "VALUES (?,?,?,?)", (user["id"], day, earned, bonus)).rowcount
+        if inserted == 1:
+            finished = True
+            db.execute("UPDATE users SET streak=?, last_checkin=? WHERE id=?",
+                       (streak, day, user["id"]))
+            if bonus:
+                credit(db, user["id"], bonus, "CHECKIN",
+                       f"{streak}-day streak bonus")
+        else:
+            bonus = 0
     db.commit()
 
-    msg = f"Checked in! +{money(reward)} added to your play balance."
-    if bonus:
-        msg += f" Streak bonus: +{money(bonus)}."
-    flash(msg, "ok")
-    return redirect(url_for("dashboard"))
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
+    return jsonify(ok=True, reward_text=money(reward),
+                   balance=money(points), completed=completed, total=total,
+                   earned_text=money(earned), done=finished,
+                   bonus=bonus, bonus_text=money(bonus))
+
+
+# ---------------------------------------------------------------------------
+# Admin photo posts (shown on the check-in page)
+# ---------------------------------------------------------------------------
+
+def _image_ext(data):
+    """Detect the real image type from the file bytes (never trust names)."""
+    if data.startswith(b"\x89PNG\r\n\x1a\n"):
+        return "png"
+    if data[:3] == b"\xff\xd8\xff":
+        return "jpg"
+    if data[:6] in (b"GIF87a", b"GIF89a"):
+        return "gif"
+    if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
+        return "webp"
+    return None
+
+
+@app.route("/admin/post", methods=["POST"])
+@admin_required
+def admin_post():
+    caption = request.form.get("caption", "").strip()[:300]
+    photo = request.files.get("photo")
+
+    if photo is None or not photo.filename:
+        flash("Choose a photo to post.", "error")
+        return redirect(url_for("checkin"))
+
+    data = photo.read()
+    ext = _image_ext(data)
+    if not data or ext is None:
+        flash("The photo must be a PNG, JPG, GIF or WEBP image.", "error")
+        return redirect(url_for("checkin"))
+
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    name = f"{secrets.token_hex(12)}.{ext}"
+    with open(os.path.join(UPLOAD_DIR, name), "wb") as fh:
+        fh.write(data)
+
+    db = get_db()
+    db.execute(
+        "INSERT INTO admin_posts (image, caption, created_at) VALUES (?,?,?)",
+        (name, caption, now_iso()))
+    db.commit()
+    flash("Photo posted.", "ok")
+    return redirect(url_for("checkin"))
+
+
+@app.route("/media/<path:filename>")
+@login_required
+def media(filename):
+    return send_from_directory(UPLOAD_DIR, filename)
 
 
 # ============================================================================
@@ -1634,6 +1853,23 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .refcode{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin-bottom:10px;}
 .refcode code{font-size:1.4rem;padding:8px 16px;}
 
+/* ---------- check-in tasks & admin posts ---------- */
+.taskgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px;}
+.task{position:relative;overflow:hidden;text-align:left;background:var(--s2);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;font-family:inherit;font-size:.95rem;}
+.task:hover{border-color:var(--brand);}
+.task .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(31,214,164,.28);}
+.task .tl{position:relative;display:flex;flex-direction:column;gap:4px;}
+.task .tr{color:var(--muted);font-size:.85rem;}
+.task.loading .tr{color:var(--brand);}
+.task.done{background:rgba(39,214,155,.12);border-color:rgba(39,214,155,.4);cursor:default;}
+.task.done .tr{color:var(--up);}
+.task.locked{opacity:.45;cursor:not-allowed;}
+.posts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:16px;}
+.post{margin:0;background:var(--s2);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.post img{display:block;width:100%;height:auto;}
+.post figcaption{padding:10px 12px;font-size:.9rem;display:flex;flex-direction:column;gap:4px;}
+input[type=file]{padding:10px;}
+
 /* ---------- login / register ---------- */
 .auth{max-width:440px;margin:30px auto 0;}
 .auth .logo{width:54px;height:54px;border-radius:17px;font-size:1.4rem;margin-bottom:16px;}
@@ -1861,9 +2097,9 @@ DASH_BODY = """
 <p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
 the daily check-in amount is the level reward divided by 24.</p>
 <p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
-<form method="post" action="{{ url_for('checkin') }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="primary" {% if done or user['level'] == 0 %}disabled{% endif %}>{{ 'Checked in today ✓' if done else ('Top up to start earning' if user['level'] == 0 else 'Check in now') }}</button>
+{% if task_total %}<p class="muted">Today's reward is earned by finishing {{ task_total }} tasks, each loading for 5 seconds.</p>{% endif %}
+<form method="get" action="{{ url_for('checkin') }}">
+<button class="primary" {% if done or user['level'] == 0 %}disabled{% endif %}>{{ 'Checked in today ✓' if done else ('Top up to start earning' if user['level'] == 0 else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now')) }}</button>
 </form>
 </div>
 
@@ -1895,6 +2131,142 @@ the daily check-in amount is the level reward divided by 24.</p>
 {% endfor %}
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
 </div>
+"""
+
+CHECKIN_BODY = """
+<div class="card note">
+<h1>Daily check-in</h1>
+<p class="muted"><a href="{{ url_for('dashboard') }}">&larr; Back to dashboard</a></p>
+{% if done %}
+<p><strong class="pos">All {{ total }} tasks are done for today.</strong> You earned {{ money(earned) }}. Come back tomorrow!</p>
+{% else %}
+{% set pct = (completed_n / total * 100)|int %}
+<p>Level {{ user['level'] }}: finish all <strong>{{ total }}</strong> tasks to earn today's <strong>{{ money(daily) }}</strong>.
+Tap a task and wait 5 seconds while it loads. Every finished task adds its reward to your balance straight away.</p>
+<p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
+<div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
+<div class="bar"><b id="progbar" style="width:{{ pct }}%"></b></div>
+<div id="msg" style="margin-top:14px"></div>
+<div class="taskgrid">
+{% for t in tasks %}
+<button type="button" class="task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
+data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}">
+<span class="fill"></span>
+<span class="tl"><b>Task {{ t.no }}</b><span class="tr">{{ 'Done \u2713' if t.done else '+' ~ money(t.reward) }}</span></span>
+</button>
+{% endfor %}
+</div>
+<script>
+(function () {
+  var CSRF = "{{ csrf_token() }}";
+  var WAIT_MS = {{ wait }} * 1000;
+  var busy = false;
+  var buttons = document.querySelectorAll('.task');
+  var msg = document.getElementById('msg');
+
+  function say(text, kind) {
+    msg.innerHTML = '';
+    if (!text) { return; }
+    var d = document.createElement('div');
+    d.className = 'flash ' + kind;
+    d.textContent = text;
+    msg.appendChild(d);
+  }
+
+  function post(url) {
+    var fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    return fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: 'Something went wrong. Reload the page and try again.' }; });
+  }
+
+  function lockOthers(on, current) {
+    buttons.forEach(function (b) {
+      if (b !== current && !b.classList.contains('done')) { b.classList.toggle('locked', on); }
+    });
+  }
+
+  function reset(btn) {
+    var f = btn.querySelector('.fill');
+    btn.classList.remove('loading');
+    f.style.transition = 'none';
+    f.style.width = '0%';
+    btn.querySelector('.tr').textContent = btn.getAttribute('data-label');
+    busy = false;
+    lockOthers(false, btn);
+  }
+
+  buttons.forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      if (busy || btn.classList.contains('done')) { return; }
+      busy = true;
+      lockOthers(true, btn);
+      say('', 'ok');
+
+      post(btn.getAttribute('data-start')).then(function (res) {
+        if (!res.ok) { reset(btn); say(res.error, 'error'); return; }
+
+        var f = btn.querySelector('.fill');
+        btn.classList.add('loading');
+        btn.querySelector('.tr').textContent = 'Loading...';
+        f.style.transition = 'none';
+        f.style.width = '0%';
+        void f.offsetWidth;
+        f.style.transition = 'width ' + (WAIT_MS / 1000) + 's linear';
+        f.style.width = '100%';
+
+        setTimeout(function () {
+          post(btn.getAttribute('data-complete')).then(function (r) {
+            if (!r.ok) { reset(btn); say(r.error, 'error'); return; }
+            btn.classList.remove('loading');
+            btn.classList.add('done');
+            btn.querySelector('.tr').textContent = 'Done \u2713';
+            busy = false;
+            lockOthers(false, btn);
+            document.getElementById('progtxt').textContent = r.completed + ' of ' + r.total + ' tasks done';
+            document.getElementById('progbar').style.width = Math.round(r.completed / r.total * 100) + '%';
+            document.getElementById('earned').textContent = r.earned_text;
+            document.getElementById('bal').textContent = r.balance;
+            var text = '+' + r.reward_text + ' added to your balance.';
+            if (r.bonus) { text += ' Streak bonus: +' + r.bonus_text + '.'; }
+            if (r.done) { text += ' All tasks done for today!'; }
+            say(text, 'ok');
+            if (r.done) { setTimeout(function () { window.location.reload(); }, 2500); }
+          });
+        }, WAIT_MS + 300);
+      });
+    });
+  });
+})();
+</script>
+{% endif %}
+</div>
+
+<div class="card">
+<h2>From the admin</h2>
+{% if me['is_admin'] %}
+<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
+<label>Caption</label>
+<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
+<button class="primary">Post photo</button>
+</form>
+{% endif %}
+{% if posts %}
+<div class="posts">
+{% for p in posts %}
+<figure class="post">
+<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}" loading="lazy">
+<figcaption>{{ p['caption'] }}<span class="muted small">{{ p['created_at'][:10] }}</span></figcaption>
+</figure>
+{% endfor %}
+</div>
+{% else %}<p class="muted" style="margin-top:12px">No posts yet.</p>{% endif %}
+</div>
+
 """
 
 TOPUP_BODY = """
