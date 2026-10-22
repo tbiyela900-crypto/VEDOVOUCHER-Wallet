@@ -904,8 +904,11 @@ def dashboard():
         "SELECT COUNT(*) AS n FROM checkin_tasks WHERE user_id=? AND day=? "
         "AND completed_at IS NOT NULL",
         (user["id"], today().isoformat())).fetchone()["n"]
+    posts = db.execute(
+        "SELECT * FROM admin_posts ORDER BY id DESC LIMIT 20").fetchall()
 
-    return page(DASH_BODY, task_total=task_total, task_done=task_done, user=user, done=done, next_streak=next_streak,
+    return page(DASH_BODY, task_total=task_total, task_done=task_done,
+                posts=posts, user=user, done=done, next_streak=next_streak,
                 history=history, recent_tx=recent_tx, locked=locked,
                 reward=reward, bonus=bonus, STREAK_DAYS=STREAK_DAYS)
 
@@ -913,13 +916,9 @@ def dashboard():
 @app.route("/checkin")
 @login_required
 def checkin():
-    """Check-in page: one tap per task, each tap loads for 5 seconds."""
+    """Check-in page: reward by level; tapping your own level opens the tasks."""
     db = get_db()
     user = current_user()
-
-    if user["level"] == 0:
-        flash("Top up and move to Level 1 to start earning.", "error")
-        return redirect(url_for("dashboard"))
 
     done, _streak = checkin_state(user)
     day = today().isoformat()
@@ -937,14 +936,12 @@ def checkin():
          "done": i in paid}
         for i in range(1, total + 1)
     ]
-    posts = db.execute(
-        "SELECT * FROM admin_posts ORDER BY id DESC LIMIT 20").fetchall()
 
     return page(CHECKIN_BODY, user=user, done=done, total=total,
                 tasks=tasks, completed_n=len(paid),
                 earned=sum(paid.values()),
                 daily=daily_reward_cents(user["level"]),
-                posts=posts, wait=TASK_WAIT_SECONDS)
+                wait=TASK_WAIT_SECONDS)
 
 
 def _task_guard(user, n):
@@ -1096,13 +1093,13 @@ def admin_post():
 
     if photo is None or not photo.filename:
         flash("Choose a photo to post.", "error")
-        return redirect(url_for("checkin"))
+        return redirect(url_for("dashboard"))
 
     data = photo.read()
     ext = _image_ext(data)
     if not data or ext is None:
         flash("The photo must be a PNG, JPG, GIF or WEBP image.", "error")
-        return redirect(url_for("checkin"))
+        return redirect(url_for("dashboard"))
 
     os.makedirs(UPLOAD_DIR, exist_ok=True)
     name = f"{secrets.token_hex(12)}.{ext}"
@@ -1115,7 +1112,7 @@ def admin_post():
         (name, caption, now_iso()))
     db.commit()
     flash("Photo posted.", "ok")
-    return redirect(url_for("checkin"))
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/admin/post/<int:post_id>/delete", methods=["POST"])
@@ -1126,7 +1123,7 @@ def admin_post_delete(post_id):
                       (post_id,)).fetchone()
     if post is None:
         flash("Post not found.", "error")
-        return redirect(url_for("checkin"))
+        return redirect(url_for("dashboard"))
 
     db.execute("DELETE FROM admin_posts WHERE id=?", (post_id,))
     db.commit()
@@ -1135,7 +1132,7 @@ def admin_post_delete(post_id):
     except OSError:
         pass
     flash("Post deleted.", "ok")
-    return redirect(url_for("checkin"))
+    return redirect(url_for("dashboard"))
 
 
 @app.route("/media/<path:filename>")
@@ -1884,18 +1881,40 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .task.done{background:rgba(39,214,155,.12);border-color:rgba(39,214,155,.4);cursor:default;}
 .task.done .tr{color:var(--up);}
 .task.locked{opacity:.45;cursor:not-allowed;}
-.slider{position:relative;background:var(--s2);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
-.slide{display:none;margin:0;}
-.slide.active{display:block;animation:fadein .6s;}
-.slide img{display:block;width:100%;height:clamp(200px,45vw,380px);object-fit:contain;background:#03090e;}
-.slide figcaption{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px 30px;font-size:.95rem;}
-.slide figcaption form{margin:0;}
-.snav{position:absolute;top:calc(clamp(200px,45vw,380px) / 2 - 20px);width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(3,10,16,.6);color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;}
-.snav.prev{left:10px;} .snav.next{right:10px;}
-.sdots{position:absolute;left:0;right:0;bottom:10px;display:flex;justify-content:center;gap:7px;}
-.sdots i{width:8px;height:8px;border-radius:50%;background:var(--s3);cursor:pointer;}
-.sdots i.on{background:var(--brand);}
-@keyframes fadein{from{opacity:0;}to{opacity:1;}}
+button.tile{font-family:inherit;font-size:inherit;color:var(--ink);text-align:left;cursor:pointer;width:100%;}
+button.tile:hover{border-color:var(--brand);}
+button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
+@keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(31,214,164,.55);}50%{box-shadow:0 0 0 9px rgba(31,214,164,0);}}
+#lvlmsg:empty{display:none;}
+#lvlmsg{margin-bottom:14px;}
+.feedhead{display:flex;align-items:center;justify-content:space-between;gap:10px;margin-bottom:14px;}
+.feedhead h2{margin:0;}
+.pill{background:var(--s2);border:1px solid var(--line);color:var(--muted);padding:3px 12px;border-radius:999px;font-size:.78rem;font-weight:700;}
+.hs{--dur:5s;position:relative;border-radius:18px;overflow:hidden;background:#03090e;border:1px solid var(--line);outline:none;}
+.hs:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
+.hs-stage{position:relative;height:clamp(220px,48vw,420px);}
+.hs-slide{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .7s ease,visibility .7s;}
+.hs-slide.active{opacity:1;visibility:visible;}
+.hs-bg{position:absolute;inset:-24px;background-size:cover;background-position:center;filter:blur(24px) brightness(.5) saturate(1.25);}
+.hs-slide img{position:relative;display:block;width:100%;height:100%;object-fit:contain;transform:scale(1);transition:transform 7s ease-out;}
+.hs-slide.active img{transform:scale(1.05);}
+.hs-shade{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(3,10,16,.55) 0%,transparent 26%,transparent 50%,rgba(3,10,16,.9) 100%);}
+.hs-count{position:absolute;top:12px;left:12px;background:rgba(3,10,16,.62);border:1px solid rgba(255,255,255,.2);color:#fff;padding:3px 11px;border-radius:999px;font-size:.78rem;font-weight:700;}
+.hs-del{position:absolute;top:10px;right:10px;margin:0;}
+.hs figcaption{position:absolute;left:0;right:0;bottom:0;padding:16px 20px 30px;display:flex;flex-direction:column;gap:4px;pointer-events:none;}
+.hs figcaption small{color:var(--brand);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.72rem;}
+.hs figcaption strong{font-size:1.2rem;line-height:1.3;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.7);}
+.hs-nav{position:absolute;top:calc(clamp(220px,48vw,420px) / 2 - 20px);width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(3,10,16,.55);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.hs-nav:hover{background:rgba(31,214,164,.5);}
+.hs-nav.prev{left:10px;} .hs-nav.next{right:10px;}
+.hs-bars{position:absolute;left:16px;right:16px;bottom:12px;display:flex;gap:6px;}
+.hs-bars i{flex:1;height:4px;border-radius:99px;background:rgba(255,255,255,.28);overflow:hidden;cursor:pointer;}
+.hs-bars b{display:block;height:100%;width:0;background:var(--brand);}
+.hs-bars i.done b{width:100%;}
+.hs-bars i.active b{animation:hsfill var(--dur) linear forwards;}
+.hs.paused .hs-bars i.active b{animation-play-state:paused;}
+@keyframes hsfill{from{width:0;}to{width:100%;}}
+.hs-empty{padding:34px 16px;text-align:center;color:var(--muted);background:var(--s2);border:1px dashed var(--line);border-radius:14px;}
 input[type=file]{padding:10px;}
 
 /* ---------- login / register ---------- */
@@ -1923,7 +1942,8 @@ input[type=file]{padding:10px;}
 }
 @media (prefers-reduced-motion:reduce){
   .track{animation:none;}
-  .slide.active{animation:none;}
+  .hs-slide img,.hs-slide.active img{transition:none;transform:none;}
+  button.tile.pulse{animation:none;}
   .ticker{overflow-x:auto;}
 }
 </style>
@@ -2126,21 +2146,106 @@ DASH_BODY = """
 <p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
 the daily check-in amount is the level reward divided by 24.</p>
 <p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
-{% if task_total %}<p class="muted">Today's reward is earned by finishing {{ task_total }} tasks, each loading for 5 seconds.</p>{% endif %}
+{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks (5 seconds each) to earn today's reward.</p>{% endif %}
 <form method="get" action="{{ url_for('checkin') }}">
-<button class="primary" {% if done or user['level'] == 0 %}disabled{% endif %}>{{ 'Checked in today ✓' if done else ('Top up to start earning' if user['level'] == 0 else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now')) }}</button>
+<button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
 </form>
 </div>
 
 <div class="card">
-<h2>Reward by level</h2>
-<div class="tiles">
-{% for l in LEVELS %}
-<div class="tile t{{ l }} {{ 'me' if l == user['level'] }}">
-<b>Level {{ l }}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} per day</span>
+<div class="feedhead">
+<h2>Latest from the admin</h2>
+{% if posts %}<span class="pill">{{ posts|length }} post{{ 's' if posts|length > 1 }}</span>{% endif %}
 </div>
+{% if posts %}
+<div class="hs" id="hs" tabindex="0" aria-roledescription="carousel" aria-label="Posts from the admin">
+<div class="hs-stage">
+{% for p in posts %}
+<figure class="hs-slide{{ ' active' if loop.first }}">
+<div class="hs-bg" style="background-image:url('{{ url_for('media', filename=p['image']) }}')"></div>
+<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}">
+<div class="hs-shade"></div>
+<span class="hs-count">{{ loop.index }} / {{ posts|length }}</span>
+{% if me['is_admin'] %}
+<form class="hs-del" method="post" action="{{ url_for('admin_post_delete', post_id=p['id']) }}" onsubmit="return confirm('Delete this post?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="danger">Delete</button>
+</form>
+{% endif %}
+<figcaption>
+<small>{{ p['created_at'][:10] }}</small>
+{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% endif %}
+</figcaption>
+</figure>
 {% endfor %}
 </div>
+{% if posts|length > 1 %}
+<button type="button" class="hs-nav prev" aria-label="Previous post">&#8249;</button>
+<button type="button" class="hs-nav next" aria-label="Next post">&#8250;</button>
+<div class="hs-bars">{% for p in posts %}<i><b></b></i>{% endfor %}</div>
+{% endif %}
+</div>
+<script>
+(function () {
+  var hs = document.getElementById('hs');
+  if (!hs) { return; }
+  var slides = hs.querySelectorAll('.hs-slide');
+  var bars = hs.querySelectorAll('.hs-bars i');
+  if (slides.length < 2) { return; }
+  var i = 0;
+
+  function show(n) {
+    slides[i].classList.remove('active');
+    i = (n + slides.length) % slides.length;
+    slides[i].classList.add('active');
+    bars.forEach(function (bar, k) {
+      bar.classList.remove('active');
+      bar.classList.toggle('done', k < i);
+    });
+    void hs.offsetWidth;
+    bars[i].classList.add('active');
+  }
+
+  hs.addEventListener('animationend', function (e) {
+    if (e.animationName === 'hsfill') { show(i + 1); }
+  });
+  hs.querySelector('.prev').addEventListener('click', function () { show(i - 1); });
+  hs.querySelector('.next').addEventListener('click', function () { show(i + 1); });
+  bars.forEach(function (bar, k) { bar.addEventListener('click', function () { show(k); }); });
+
+  hs.addEventListener('mouseenter', function () { hs.classList.add('paused'); });
+  hs.addEventListener('mouseleave', function () { hs.classList.remove('paused'); });
+  hs.addEventListener('keydown', function (e) {
+    if (e.key === 'ArrowLeft') { show(i - 1); }
+    if (e.key === 'ArrowRight') { show(i + 1); }
+  });
+
+  var x0 = null;
+  hs.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; hs.classList.add('paused'); }, { passive: true });
+  hs.addEventListener('touchend', function (e) {
+    hs.classList.remove('paused');
+    if (x0 === null) { return; }
+    var dx = e.changedTouches[0].clientX - x0;
+    x0 = null;
+    if (Math.abs(dx) > 40) { show(dx < 0 ? i + 1 : i - 1); }
+  });
+
+  show(0);
+})();
+</script>
+{% else %}
+<div class="hs-empty">No posts yet. News and photos from the admin will show up here.</div>
+{% endif %}
+{% if me['is_admin'] %}
+<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Post a photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
+<label>Caption</label>
+<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
+<button class="primary">Post photo</button>
+</form>
+{% endif %}
 </div>
 
 <div class="card">
@@ -2163,77 +2268,34 @@ the daily check-in amount is the level reward divided by 24.</p>
 """
 
 CHECKIN_BODY = """
-<div class="card">
-<h2>From the admin</h2>
-{% if posts %}
-<div class="slider" id="slider">
-<div class="slides">
-{% for p in posts %}
-<figure class="slide{{ ' active' if loop.first }}">
-<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}">
-<figcaption>
-<span class="cap">{{ p['caption'] }}</span>
-{% if me['is_admin'] %}
-<form method="post" action="{{ url_for('admin_post_delete', post_id=p['id']) }}" onsubmit="return confirm('Delete this post?');">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="danger">Delete</button>
-</form>
-{% endif %}
-</figcaption>
-</figure>
-{% endfor %}
-</div>
-{% if posts|length > 1 %}
-<button type="button" class="snav prev" aria-label="Previous post">&#8249;</button>
-<button type="button" class="snav next" aria-label="Next post">&#8250;</button>
-<div class="sdots">{% for p in posts %}<i class="{{ 'on' if loop.first }}"></i>{% endfor %}</div>
-{% endif %}
-</div>
-<script>
-(function () {
-  var s = document.getElementById('slider');
-  if (!s) { return; }
-  var slides = s.querySelectorAll('.slide');
-  var dots = s.querySelectorAll('.sdots i');
-  if (slides.length < 2) { return; }
-  var i = 0;
-  var paused = false;
-  function show(n) {
-    slides[i].classList.remove('active');
-    dots[i].classList.remove('on');
-    i = (n + slides.length) % slides.length;
-    slides[i].classList.add('active');
-    dots[i].classList.add('on');
-  }
-  s.querySelector('.prev').addEventListener('click', function () { show(i - 1); });
-  s.querySelector('.next').addEventListener('click', function () { show(i + 1); });
-  dots.forEach(function (d, n) { d.addEventListener('click', function () { show(n); }); });
-  s.addEventListener('mouseenter', function () { paused = true; });
-  s.addEventListener('mouseleave', function () { paused = false; });
-  setInterval(function () { if (!paused) { show(i + 1); } }, 4000);
-})();
-</script>
-{% else %}<p class="muted">No posts yet.</p>{% endif %}
-{% if me['is_admin'] %}
-<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Post a photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
-<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
-<label>Caption</label>
-<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
-<button class="primary">Post photo</button>
-</form>
-{% endif %}
-</div>
-
 <div class="card note">
 <h1>Daily check-in</h1>
 <p class="muted"><a href="{{ url_for('dashboard') }}">&larr; Back to dashboard</a></p>
+{% if user['level'] == 0 %}
+<p>You are at <strong>Level 0</strong>. Top up and move up to Level 1 to start earning check-in rewards.</p>
+{% else %}
+<p>Tap <strong>Level {{ user['level'] }}</strong>, your level, below to open today's tasks.</p>
+{% endif %}
+<div id="lvlmsg"></div>
+<h2>Reward by level</h2>
+<div class="tiles">
+{% for l in LEVELS %}
+<button type="button" class="tile t{{ l }}{{ ' me' if l == user['level'] }}{{ ' pulse' if l == user['level'] and not done }}" data-level="{{ l }}">
+<b>Level {{ l }}{% if l == user['level'] %} - your level{% endif %}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} per day</span>
+</button>
+{% endfor %}
+</div>
+</div>
+
+{% if user['level'] >= 1 %}
+<div class="card" id="taskpanel" hidden>
 {% if done %}
-<p><strong class="pos">All {{ total }} tasks are done for today.</strong> You earned {{ money(earned) }}. Come back tomorrow!</p>
+<h2>Today's tasks</h2>
+<p><strong class="pos">Today's check-in is complete.</strong> You earned {{ money(earned) }}. Come back tomorrow!</p>
 {% else %}
 {% set pct = (completed_n / total * 100)|int %}
-<p>Level {{ user['level'] }}: finish all <strong>{{ total }}</strong> tasks to earn today's <strong>{{ money(daily) }}</strong>.
+<h2>Today's tasks - Level {{ user['level'] }}</h2>
+<p>Finish all <strong>{{ total }}</strong> tasks to earn today's <strong>{{ money(daily) }}</strong>.
 Tap a task and wait 5 seconds while it loads. Every finished task adds its reward to your balance straight away.</p>
 <p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
 <div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
@@ -2334,7 +2396,44 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
 </script>
 {% endif %}
 </div>
+{% endif %}
 
+<script>
+(function () {
+  var myLevel = {{ user['level'] }};
+  var panel = document.getElementById('taskpanel');
+  var lm = document.getElementById('lvlmsg');
+
+  function note(text, kind) {
+    lm.innerHTML = '';
+    if (!text) { return; }
+    var d = document.createElement('div');
+    d.className = 'flash ' + kind;
+    d.textContent = text;
+    lm.appendChild(d);
+  }
+
+  document.querySelectorAll('button.tile').forEach(function (t) {
+    t.addEventListener('click', function () {
+      var lvl = parseInt(t.getAttribute('data-level'), 10);
+      if (myLevel === 0) {
+        note('You are at Level 0. Top up and move up to Level 1 to start earning.', 'error');
+        return;
+      }
+      if (lvl !== myLevel) {
+        note('That is not your level. Tap Level ' + myLevel + ' to open your tasks.', 'error');
+        return;
+      }
+      note('', 'ok');
+      t.classList.remove('pulse');
+      if (panel) {
+        panel.hidden = false;
+        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
+      }
+    });
+  });
+})();
+</script>
 """
 
 TOPUP_BODY = """
