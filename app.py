@@ -1,7 +1,7 @@
 """
 ZEDAVouchers  -  advanced interface edition
 =================================================================
- 
+
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
   * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
@@ -23,20 +23,20 @@ Features
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
                           pots, a full transaction ledger, and can RESET
                           a member's password
- 
+
 Interface
   * Dark market-terminal look with a live reward ticker
   * Banking-app dashboard: balance card, quick actions, balance ring,
     level progress, streak dots, activity bars and transaction list
   * Three main tabs (Withdraw, My Team, Profile) with sub-menus
   * Bottom tab bar on phones
- 
+
 Run:
   pip install flask
   python app.py
   http://127.0.0.1:5000
 """
- 
+
 import os
 import secrets
 import sqlite3
@@ -44,7 +44,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
- 
+
 from flask import (
     Flask, abort, flash, g, redirect, render_template_string,
     request, session, url_for,
@@ -52,64 +52,64 @@ from flask import (
 from jinja2 import DictLoader
 from markupsafe import Markup
 from werkzeug.security import check_password_hash, generate_password_hash
- 
- 
+
+
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
- 
+
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get(
     "DB_PATH",
     os.path.join(BASE_DIR, "rewards.db")
 )
- 
+
 def backup_database():
     """Create a consistent SQLite backup on persistent storage."""
     backup_dir = "/var/data/backups"
     os.makedirs(backup_dir, exist_ok=True)
- 
+
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(
             f"Database not found: {DB_PATH}"
         )
- 
+
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(
         backup_dir, f"rewards_{stamp}.db"
     )
- 
+
     source = sqlite3.connect(DB_PATH, timeout=30)
     destination = sqlite3.connect(backup_path)
- 
+
     try:
         source.backup(destination)
     finally:
         destination.close()
         source.close()
- 
+
     return backup_path
 LEVELS = list(range(1, 8))
- 
+
 # Total reward per level (daily check-in = total / 24)
 LEVEL_REWARDS_CENTS = {
     0: 0, 1: 36000, 2: 120000, 3: 360000, 4: 1200000,
     5: 2000000, 6: 3000000, 7: 4000000,
 }
- 
+
 DAILY_REWARD_CENTS = {
     lvl: int((Decimal(LEVEL_REWARDS_CENTS[lvl]) / 24).quantize(
         Decimal("1"), rounding=ROUND_HALF_UP))
     for lvl in LEVELS
 }
- 
+
 STREAK_DAYS = 7
 STREAK_BONUS_PER_LEVEL_CENTS = 1000     # R10 x level
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
- 
+
 # Account number rules (digits only, exactly 10)
 ACCOUNT_NUMBER_LEN = 10
- 
+
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
 # two levels' total rewards. One level at a time, paid from balance.
@@ -117,18 +117,18 @@ UPGRADE_COST_CENTS = {
     lvl: (LEVEL_REWARDS_CENTS[lvl] - LEVEL_REWARDS_CENTS[lvl - 1]) // 2
     for lvl in LEVELS
 }
- 
+
 # --- Top-ups / withdrawals -------------------------------------------------
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
 WITHDRAW_MIN_CENTS = 1000       # R10
- 
+
 DEFAULT_TOPUP_INSTRUCTIONS = (
     "Enter Amount"
     "like and submit the request. An admin will review it and approve or "
     "reject it."
 )
- 
+
 # --- Savings pots ----------------------------------------------------------
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
@@ -139,15 +139,15 @@ POT_APR_PERCENT = {
 }
 POT_WEEKS = sorted(POT_APR_PERCENT)
 POT_MIN_CENTS = 1000            # R10
- 
+
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
- 
- 
+
+
 # ============================================================================
 # ICONS (inline SVG, used in the templates as {{ icon('name') }})
 # ============================================================================
- 
+
 ICONS = {
     "home": '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
     "withdraw": '<path d="M7 17L17 7"/><path d="M8 7h9v9"/>',
@@ -164,43 +164,43 @@ ICONS = {
                     '<path d="M6 13a6 6 0 0112 0v1.5"/>'
                     '<path d="M9 20c.6-1.5 1-3 1-5v-3a2 2 0 014 0v3c0 2.5.5 4 1.5 5.5"/>'),
 }
- 
- 
+
+
 def icon(name):
     body = ICONS.get(name, "")
     return Markup(
         '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
         'aria-hidden="true">' + body + "</svg>")
- 
- 
+
+
 # ============================================================================
 # MONEY HELPERS
 # ============================================================================
- 
+
 def money(cents):
     amount = Decimal(int(cents or 0)) / Decimal(100)
     return f"R{amount:,.2f}"
- 
- 
+
+
 def daily_reward_cents(level):
     return DAILY_REWARD_CENTS.get(int(level), 0)
- 
- 
+
+
 def level_reward(level):
     return money(LEVEL_REWARDS_CENTS.get(int(level), 0))
- 
- 
+
+
 def daily_reward(level):
     return money(daily_reward_cents(level))
- 
- 
+
+
 def pot_interest_cents(principal_cents, weeks):
     apr = POT_APR_PERCENT[int(weeks)]
     value = Decimal(int(principal_cents)) * apr / 100 * int(weeks) / 52
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
- 
- 
+
+
 def parse_amount(text, minimum, maximum=None):
     """Parse a Rand amount string into cents. Returns None if invalid."""
     try:
@@ -214,12 +214,12 @@ def parse_amount(text, minimum, maximum=None):
     if maximum is not None and cents > maximum:
         return None
     return cents
- 
- 
+
+
 # ============================================================================
 # DATABASE
 # ============================================================================
- 
+
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,14 +229,14 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code TEXT UNIQUE,
     referred_by INTEGER,
     serial_number TEXT NOT NULL UNIQUE,
- 
+
     last_checkin TEXT,
     streak INTEGER DEFAULT 0,
- 
+
     is_admin INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
 );
- 
+
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS vouchers (
     issued_to INTEGER,
     created_at TEXT NOT NULL
 );
- 
+
 CREATE TABLE IF NOT EXISTS checkins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS checkins (
     bonus INTEGER NOT NULL DEFAULT 0,
     UNIQUE(user_id, day)
 );
- 
+
 CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL
 );
- 
+
 CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS topups (
     voucher_alpha4 TEXT NOT NULL DEFAULT '',
     issued_code TEXT
 );
- 
+
 CREATE TABLE IF NOT EXISTS savings_pots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS savings_pots (
     status TEXT NOT NULL DEFAULT 'LOCKED',
     closed_at TEXT
 );
- 
+
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -301,59 +301,59 @@ CREATE TABLE IF NOT EXISTS transactions (
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
- 
+
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 """
- 
- 
+
+
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
- 
- 
+
+
 @app.teardown_appcontext
 def close_db(_exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
- 
- 
+
+
 # ============================================================================
 # GENERAL HELPERS
 # ============================================================================
- 
+
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
- 
- 
+
+
 def today():
     return datetime.now(timezone.utc).date()
- 
- 
+
+
 def random_block(n):
     alphabet = (string.ascii_uppercase.replace("O", "").replace("I", "")
                 + "23456789")
     return "".join(secrets.choice(alphabet) for _ in range(n))
- 
- 
+
+
 def new_voucher_code(level):
     return f"L{level}-{random_block(4)}-{random_block(4)}"
- 
- 
+
+
 def new_referral_code(db):
     while True:
         code = "REF-" + random_block(6)
         if not db.execute("SELECT 1 FROM users WHERE referral_code=?",
                           (code,)).fetchone():
             return code
- 
- 
+
+
 def generate_vouchers(db, level, count):
     codes = []
     for _ in range(count):
@@ -364,35 +364,35 @@ def generate_vouchers(db, level, count):
         codes.append(code)
     db.commit()
     return codes
- 
- 
+
+
 def get_setting(db, key, default=""):
     row = db.execute("SELECT value FROM settings WHERE key=?",
                      (key,)).fetchone()
     return row["value"] if row else default
- 
- 
+
+
 def set_setting(db, key, value):
     db.execute(
         "INSERT INTO settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value))
- 
- 
+
+
 def add_tx(db, user_id, kind, amount_cents, note=""):
     """Write a ledger line (positive = credit, negative = debit)."""
     db.execute(
         "INSERT INTO transactions (user_id, kind, amount, note, created_at) "
         "VALUES (?,?,?,?,?)",
         (user_id, kind, int(amount_cents), note, now_iso()))
- 
- 
+
+
 def credit(db, user_id, cents, kind, note=""):
     db.execute("UPDATE users SET points = points + ? WHERE id=?",
                (cents, user_id))
     add_tx(db, user_id, kind, cents, note)
- 
- 
+
+
 def debit(db, user_id, cents, kind, note=""):
     """Atomic debit. Returns False (and changes nothing) if funds are short."""
     done = db.execute(
@@ -402,51 +402,51 @@ def debit(db, user_id, cents, kind, note=""):
         return False
     add_tx(db, user_id, kind, -cents, note)
     return True
- 
- 
+
+
 def pay_referral_bonus(db, user, new_level):
     """Pay the referrer once, when a member first leaves Level 0."""
     if user["level"] == 0 and user["referred_by"] and new_level > 0:
         credit(db, user["referred_by"],
                new_level * REFERRAL_BONUS_PER_LEVEL_CENTS, "REFERRAL",
                f"Referral: {user['username']} reached Level {new_level}")
- 
- 
+
+
 def page(body, **ctx):
     return render_template_string(
         "{% extends 'base' %}{% block body %}" + body + "{% endblock %}",
         **ctx)
- 
- 
+
+
 # ============================================================================
 # DATABASE INITIALISATION
 # ============================================================================
- 
- 
+
+
 def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
- 
+
     # Safely add columns missing from older databases (never deletes data).
     existing_columns = {
         row["name"]
         for row in db.execute("PRAGMA table_info(users)").fetchall()
     }
- 
+
     required_columns = {
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
         "points": "INTEGER NOT NULL DEFAULT 0",
         "serial_number": "TEXT",
     }
- 
+
     for column, definition in required_columns.items():
         if column not in existing_columns:
             db.execute(
                 f"ALTER TABLE users ADD COLUMN {column} {definition}"
             )
- 
+
     # Same safe upgrade for the top-up voucher information and issued codes.
     extra_columns = {
         "topups": {
@@ -464,20 +464,20 @@ def init_db():
             if column not in have:
                 db.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
- 
+
     db.commit()
- 
+
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
- 
+
     # Create admin account
     if not db.execute(
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
- 
+
         # Admin does not use a real serial number
         admin_serial_number = "00000000000"
- 
+
         db.execute(
             """
             INSERT INTO users (
@@ -501,20 +501,20 @@ def init_db():
                 now_iso()
             )
         )
- 
+
         print(f"[setup] Admin account created: {admin_user}")
         print(f"[setup] Default admin password: {admin_pass} (change it!)")
- 
+
     # Create starter vouchers
     if not db.execute(
         "SELECT 1 FROM vouchers"
     ).fetchone():
- 
+
         print("[setup] Starter voucher codes:")
- 
+
         for level in LEVELS:
             code = new_voucher_code(level)
- 
+
             db.execute(
                 """
                 INSERT INTO vouchers (
@@ -530,24 +530,24 @@ def init_db():
                     now_iso()
                 )
             )
- 
+
             print(f"  Level {level}: {code}")
- 
+
     # Top-up instructions
     if not db.execute(
         "SELECT 1 FROM settings WHERE key='topup_instructions'"
     ).fetchone():
- 
+
         set_setting(
             db,
             "topup_instructions",
             DEFAULT_TOPUP_INSTRUCTIONS
         )
- 
+
     db.commit()
     db.close()
- 
- 
+
+
 init_db()
 
 # ============================================================================
@@ -1279,35 +1279,49 @@ def admin():
                                    "WHERE status='PENDING'"),
     }
 
-    users = db.execute(
+    # Search box: filters members, top-ups, withdrawals, pots and ledger
+    q = request.args.get("q", "").strip()[:30]
+    like = f"%{q}%"
+    where = "WHERE users.username LIKE ? " if q else ""
+    args = (like,) if q else ()
+
+    users_sql = (
         "SELECT u.*, r.username AS referrer FROM users u "
-        "LEFT JOIN users r ON r.id = u.referred_by "
-        "ORDER BY u.is_admin DESC, u.level DESC, u.points DESC").fetchall()
+        "LEFT JOIN users r ON r.id = u.referred_by ")
+    if q:
+        users_sql += ("WHERE u.username LIKE ? OR u.serial_number LIKE ? "
+                      "OR u.referral_code LIKE ? ")
+        users_args = (like, like, like)
+    else:
+        users_args = ()
+    users_sql += "ORDER BY u.is_admin DESC, u.level DESC, u.points DESC"
+    users = db.execute(users_sql, users_args).fetchall()
+
     topups = db.execute(
         "SELECT topups.*, users.username, users.level AS user_level FROM topups "
-        "JOIN users ON users.id = topups.user_id "
+        "JOIN users ON users.id = topups.user_id " + where +
         "ORDER BY (topups.status='PENDING') DESC, topups.id DESC "
-        "LIMIT 50").fetchall()
+        "LIMIT 50", args).fetchall()
     withdrawals = db.execute(
         "SELECT withdrawals.*, users.username FROM withdrawals "
-        "JOIN users ON users.id = withdrawals.user_id "
+        "JOIN users ON users.id = withdrawals.user_id " + where +
         "ORDER BY (withdrawals.status='PENDING') DESC, withdrawals.id DESC "
-        "LIMIT 50").fetchall()
+        "LIMIT 50", args).fetchall()
     pot_rows = db.execute(
         "SELECT savings_pots.*, users.username FROM savings_pots "
-        "JOIN users ON users.id = savings_pots.user_id "
-        "ORDER BY savings_pots.id DESC LIMIT 50").fetchall()
+        "JOIN users ON users.id = savings_pots.user_id " + where +
+        "ORDER BY savings_pots.id DESC LIMIT 50", args).fetchall()
     ledger = db.execute(
         "SELECT transactions.*, users.username FROM transactions "
-        "JOIN users ON users.id = transactions.user_id "
-        "ORDER BY transactions.id DESC LIMIT 60").fetchall()
+        "JOIN users ON users.id = transactions.user_id " + where +
+        "ORDER BY transactions.id DESC LIMIT 60", args).fetchall()
     unused = db.execute(
         "SELECT * FROM vouchers WHERE used_by IS NULL "
         "ORDER BY level, created_at").fetchall()
 
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
-                unused=unused,
+                unused=unused, q=q,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
@@ -1737,18 +1751,19 @@ REGISTER_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Create account</h1>
-<p class="muted">You start at Level 0 and earn after your first top-up.</p>
+<p class="muted">You start at Level 0, or at the level of your level code from the admin.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Account number (any number)</label>
+<label>Account number (exactly 10 digits)</label>
 <input
     type="text"
     name="account_number"
     value="{{ form.get('account_number','') }}"
-    maxlength="20"
+    maxlength="10"
+    minlength="10"
     inputmode="numeric"
-    pattern="[0-9]+"
-    placeholder="Enter your account number"
+    pattern="[0-9]{10}"
+    placeholder="Enter your 10-digit account number"
     required
     autofocus
 >
@@ -1770,6 +1785,8 @@ REGISTER_BODY = """
 <input name="confirm" type="password" required>
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
+<label>Level code from the admin (optional)</label>
+<input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. L3-ABCD-EFGH" autocomplete="off">
 <button class="primary" style="width:100%">Join</button>
 </form>
 <p class="muted" style="margin-top:16px">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
@@ -1950,7 +1967,18 @@ TEAM_BODY = """
 <code>{{ user['referral_code'] }}</code>
 <button type="button" class="ghost" onclick="navigator.clipboard.writeText('{{ user['referral_code'] }}');this.textContent='Copied';">Copy</button>
 </div>
-<p class="muted">New members who enter your code when joining become part of your team.</p>
+<h2 style="margin-top:14px">Your referral link</h2>
+<div class="refcode">
+<code id="reflink" data-path="{{ url_for('register', ref=user['referral_code']) }}" style="font-size:.95rem;word-break:break-all">{{ url_for('register', ref=user['referral_code']) }}</code>
+<button type="button" class="ghost" onclick="navigator.clipboard.writeText(document.getElementById('reflink').textContent);this.textContent='Copied';">Copy link</button>
+</div>
+<script>
+(function(){
+  var el = document.getElementById('reflink');
+  el.textContent = window.location.origin + el.getAttribute('data-path');
+})();
+</script>
+<p class="muted">Anyone who opens your link gets your code filled in automatically and joins your team.</p>
 {% if referrer %}<p>You joined <b>{{ referrer['username'] }}</b>'s team.</p>{% endif %}
 </div>
 
@@ -2115,6 +2143,16 @@ PROFILE_BODY = """
 
 ADMIN_BODY = """
 <div class="card">
+<h2>Search users</h2>
+<form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Account number, serial number or referral code" style="flex:1;min-width:220px">
+<button class="primary" style="margin-top:0">Search</button>
+{% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
+</form>
+{% if q %}<p class="muted small" style="margin:10px 0 0">Showing results for <b>{{ q }}</b> in members, top-ups, withdrawals, pots and the ledger.</p>{% endif %}
+</div>
+
+<div class="card">
 <h2>Overview</h2>
 <div class="stats">
 <div class="stat"><b>{{ summary.users }}</b><span>Members</span></div>
@@ -2201,6 +2239,7 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 </td></tr>
 {% endfor %}
 </table>
+{% if not users %}<p class="muted">No members match your search.</p>{% endif %}
 </div>
 
 <div class="card">
