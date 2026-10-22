@@ -59,8 +59,36 @@ from werkzeug.security import check_password_hash, generate_password_hash
 # ============================================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get("DB_PATH", "/var/data/rewards.db")
+DB_PATH = os.environ.get(
+    "DB_PATH",
+    os.path.join(BASE_DIR, "rewards.db")
+)
 
+def backup_database():
+    """Create a consistent SQLite backup on persistent storage."""
+    backup_dir = "/var/data/backups"
+    os.makedirs(backup_dir, exist_ok=True)
+
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(
+            f"Database not found: {DB_PATH}"
+        )
+
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(
+        backup_dir, f"rewards_{stamp}.db"
+    )
+
+    source = sqlite3.connect(DB_PATH, timeout=30)
+    destination = sqlite3.connect(backup_path)
+
+    try:
+        source.backup(destination)
+    finally:
+        destination.close()
+        source.close()
+
+    return backup_path
 LEVELS = list(range(1, 8))
 
 # Total reward per level (daily check-in = total / 24)
