@@ -1,7 +1,7 @@
 """
 ZEDAVouchers  -  advanced interface edition
 =================================================================
-
+ 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
   * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
@@ -23,20 +23,20 @@ Features
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
                           pots, a full transaction ledger, and can RESET
                           a member's password
-
+ 
 Interface
   * Dark market-terminal look with a live reward ticker
   * Banking-app dashboard: balance card, quick actions, balance ring,
     level progress, streak dots, activity bars and transaction list
   * Three main tabs (Withdraw, My Team, Profile) with sub-menus
   * Bottom tab bar on phones
-
+ 
 Run:
   pip install flask
   python app.py
   http://127.0.0.1:5000
 """
-
+ 
 import os
 import secrets
 import sqlite3
@@ -44,7 +44,7 @@ import string
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
-
+ 
 from flask import (
     Flask, abort, flash, g, redirect, render_template_string,
     request, session, url_for,
@@ -52,64 +52,64 @@ from flask import (
 from jinja2 import DictLoader
 from markupsafe import Markup
 from werkzeug.security import check_password_hash, generate_password_hash
-
-
+ 
+ 
 # ============================================================================
 # CONFIGURATION
 # ============================================================================
-
+ 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.environ.get(
     "DB_PATH",
     os.path.join(BASE_DIR, "rewards.db")
 )
-
+ 
 def backup_database():
     """Create a consistent SQLite backup on persistent storage."""
     backup_dir = "/var/data/backups"
     os.makedirs(backup_dir, exist_ok=True)
-
+ 
     if not os.path.exists(DB_PATH):
         raise FileNotFoundError(
             f"Database not found: {DB_PATH}"
         )
-
+ 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
     backup_path = os.path.join(
         backup_dir, f"rewards_{stamp}.db"
     )
-
+ 
     source = sqlite3.connect(DB_PATH, timeout=30)
     destination = sqlite3.connect(backup_path)
-
+ 
     try:
         source.backup(destination)
     finally:
         destination.close()
         source.close()
-
+ 
     return backup_path
 LEVELS = list(range(1, 8))
-
+ 
 # Total reward per level (daily check-in = total / 24)
 LEVEL_REWARDS_CENTS = {
     0: 0, 1: 36000, 2: 120000, 3: 360000, 4: 1200000,
     5: 2000000, 6: 3000000, 7: 4000000,
 }
-
+ 
 DAILY_REWARD_CENTS = {
     lvl: int((Decimal(LEVEL_REWARDS_CENTS[lvl]) / 24).quantize(
         Decimal("1"), rounding=ROUND_HALF_UP))
     for lvl in LEVELS
 }
-
+ 
 STREAK_DAYS = 7
 STREAK_BONUS_PER_LEVEL_CENTS = 1000     # R10 x level
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
-
-# Account number rules (any number, digits only)
-ACCOUNT_NUMBER_MAX_LEN = 20
-
+ 
+# Account number rules (digits only, exactly 10)
+ACCOUNT_NUMBER_LEN = 10
+ 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
 # two levels' total rewards. One level at a time, paid from balance.
@@ -117,18 +117,18 @@ UPGRADE_COST_CENTS = {
     lvl: (LEVEL_REWARDS_CENTS[lvl] - LEVEL_REWARDS_CENTS[lvl - 1]) // 2
     for lvl in LEVELS
 }
-
+ 
 # --- Top-ups / withdrawals -------------------------------------------------
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
 WITHDRAW_MIN_CENTS = 1000       # R10
-
+ 
 DEFAULT_TOPUP_INSTRUCTIONS = (
     "Enter Amount"
     "like and submit the request. An admin will review it and approve or "
     "reject it."
 )
-
+ 
 # --- Savings pots ----------------------------------------------------------
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
@@ -139,15 +139,15 @@ POT_APR_PERCENT = {
 }
 POT_WEEKS = sorted(POT_APR_PERCENT)
 POT_MIN_CENTS = 1000            # R10
-
+ 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
-
-
+ 
+ 
 # ============================================================================
 # ICONS (inline SVG, used in the templates as {{ icon('name') }})
 # ============================================================================
-
+ 
 ICONS = {
     "home": '<path d="M3 11l9-8 9 8"/><path d="M5 10v10h14V10"/>',
     "withdraw": '<path d="M7 17L17 7"/><path d="M8 7h9v9"/>',
@@ -164,43 +164,43 @@ ICONS = {
                     '<path d="M6 13a6 6 0 0112 0v1.5"/>'
                     '<path d="M9 20c.6-1.5 1-3 1-5v-3a2 2 0 014 0v3c0 2.5.5 4 1.5 5.5"/>'),
 }
-
-
+ 
+ 
 def icon(name):
     body = ICONS.get(name, "")
     return Markup(
         '<svg class="ic" viewBox="0 0 24 24" fill="none" stroke="currentColor" '
         'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" '
         'aria-hidden="true">' + body + "</svg>")
-
-
+ 
+ 
 # ============================================================================
 # MONEY HELPERS
 # ============================================================================
-
+ 
 def money(cents):
     amount = Decimal(int(cents or 0)) / Decimal(100)
     return f"R{amount:,.2f}"
-
-
+ 
+ 
 def daily_reward_cents(level):
     return DAILY_REWARD_CENTS.get(int(level), 0)
-
-
+ 
+ 
 def level_reward(level):
     return money(LEVEL_REWARDS_CENTS.get(int(level), 0))
-
-
+ 
+ 
 def daily_reward(level):
     return money(daily_reward_cents(level))
-
-
+ 
+ 
 def pot_interest_cents(principal_cents, weeks):
     apr = POT_APR_PERCENT[int(weeks)]
     value = Decimal(int(principal_cents)) * apr / 100 * int(weeks) / 52
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
-
-
+ 
+ 
 def parse_amount(text, minimum, maximum=None):
     """Parse a Rand amount string into cents. Returns None if invalid."""
     try:
@@ -214,12 +214,12 @@ def parse_amount(text, minimum, maximum=None):
     if maximum is not None and cents > maximum:
         return None
     return cents
-
-
+ 
+ 
 # ============================================================================
 # DATABASE
 # ============================================================================
-
+ 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS users (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -229,14 +229,14 @@ CREATE TABLE IF NOT EXISTS users (
     referral_code TEXT UNIQUE,
     referred_by INTEGER,
     serial_number TEXT NOT NULL UNIQUE,
-
+ 
     last_checkin TEXT,
     streak INTEGER DEFAULT 0,
-
+ 
     is_admin INTEGER DEFAULT 0,
     created_at TEXT NOT NULL
 );
-
+ 
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
@@ -245,7 +245,7 @@ CREATE TABLE IF NOT EXISTS vouchers (
     issued_to INTEGER,
     created_at TEXT NOT NULL
 );
-
+ 
 CREATE TABLE IF NOT EXISTS checkins (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -254,7 +254,7 @@ CREATE TABLE IF NOT EXISTS checkins (
     bonus INTEGER NOT NULL DEFAULT 0,
     UNIQUE(user_id, day)
 );
-
+ 
 CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -265,7 +265,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL
 );
-
+ 
 CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -279,7 +279,7 @@ CREATE TABLE IF NOT EXISTS topups (
     voucher_alpha4 TEXT NOT NULL DEFAULT '',
     issued_code TEXT
 );
-
+ 
 CREATE TABLE IF NOT EXISTS savings_pots (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -292,7 +292,7 @@ CREATE TABLE IF NOT EXISTS savings_pots (
     status TEXT NOT NULL DEFAULT 'LOCKED',
     closed_at TEXT
 );
-
+ 
 CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -301,59 +301,59 @@ CREATE TABLE IF NOT EXISTS transactions (
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
-
+ 
 CREATE TABLE IF NOT EXISTS settings (
     key TEXT PRIMARY KEY,
     value TEXT NOT NULL
 );
 """
-
-
+ 
+ 
 def get_db():
     if "db" not in g:
         g.db = sqlite3.connect(DB_PATH)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
     return g.db
-
-
+ 
+ 
 @app.teardown_appcontext
 def close_db(_exc):
     db = g.pop("db", None)
     if db is not None:
         db.close()
-
-
+ 
+ 
 # ============================================================================
 # GENERAL HELPERS
 # ============================================================================
-
+ 
 def now_iso():
     return datetime.now(timezone.utc).strftime("%Y-%m-%d %H:%M:%S")
-
-
+ 
+ 
 def today():
     return datetime.now(timezone.utc).date()
-
-
+ 
+ 
 def random_block(n):
     alphabet = (string.ascii_uppercase.replace("O", "").replace("I", "")
                 + "23456789")
     return "".join(secrets.choice(alphabet) for _ in range(n))
-
-
+ 
+ 
 def new_voucher_code(level):
     return f"L{level}-{random_block(4)}-{random_block(4)}"
-
-
+ 
+ 
 def new_referral_code(db):
     while True:
         code = "REF-" + random_block(6)
         if not db.execute("SELECT 1 FROM users WHERE referral_code=?",
                           (code,)).fetchone():
             return code
-
-
+ 
+ 
 def generate_vouchers(db, level, count):
     codes = []
     for _ in range(count):
@@ -364,35 +364,35 @@ def generate_vouchers(db, level, count):
         codes.append(code)
     db.commit()
     return codes
-
-
+ 
+ 
 def get_setting(db, key, default=""):
     row = db.execute("SELECT value FROM settings WHERE key=?",
                      (key,)).fetchone()
     return row["value"] if row else default
-
-
+ 
+ 
 def set_setting(db, key, value):
     db.execute(
         "INSERT INTO settings (key, value) VALUES (?, ?) "
         "ON CONFLICT(key) DO UPDATE SET value=excluded.value",
         (key, value))
-
-
+ 
+ 
 def add_tx(db, user_id, kind, amount_cents, note=""):
     """Write a ledger line (positive = credit, negative = debit)."""
     db.execute(
         "INSERT INTO transactions (user_id, kind, amount, note, created_at) "
         "VALUES (?,?,?,?,?)",
         (user_id, kind, int(amount_cents), note, now_iso()))
-
-
+ 
+ 
 def credit(db, user_id, cents, kind, note=""):
     db.execute("UPDATE users SET points = points + ? WHERE id=?",
                (cents, user_id))
     add_tx(db, user_id, kind, cents, note)
-
-
+ 
+ 
 def debit(db, user_id, cents, kind, note=""):
     """Atomic debit. Returns False (and changes nothing) if funds are short."""
     done = db.execute(
@@ -402,51 +402,51 @@ def debit(db, user_id, cents, kind, note=""):
         return False
     add_tx(db, user_id, kind, -cents, note)
     return True
-
-
+ 
+ 
 def pay_referral_bonus(db, user, new_level):
     """Pay the referrer once, when a member first leaves Level 0."""
     if user["level"] == 0 and user["referred_by"] and new_level > 0:
         credit(db, user["referred_by"],
                new_level * REFERRAL_BONUS_PER_LEVEL_CENTS, "REFERRAL",
                f"Referral: {user['username']} reached Level {new_level}")
-
-
+ 
+ 
 def page(body, **ctx):
     return render_template_string(
         "{% extends 'base' %}{% block body %}" + body + "{% endblock %}",
         **ctx)
-
-
+ 
+ 
 # ============================================================================
 # DATABASE INITIALISATION
 # ============================================================================
-
-
+ 
+ 
 def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
-
+ 
     # Safely add columns missing from older databases (never deletes data).
     existing_columns = {
         row["name"]
         for row in db.execute("PRAGMA table_info(users)").fetchall()
     }
-
+ 
     required_columns = {
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
         "points": "INTEGER NOT NULL DEFAULT 0",
         "serial_number": "TEXT",
     }
-
+ 
     for column, definition in required_columns.items():
         if column not in existing_columns:
             db.execute(
                 f"ALTER TABLE users ADD COLUMN {column} {definition}"
             )
-
+ 
     # Same safe upgrade for the top-up voucher information and issued codes.
     extra_columns = {
         "topups": {
@@ -464,20 +464,20 @@ def init_db():
             if column not in have:
                 db.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
+ 
     db.commit()
-
+ 
     admin_user = os.environ.get("ADMIN_USER", "admin")
     admin_pass = os.environ.get("ADMIN_PASS", "admin12345")
-
+ 
     # Create admin account
     if not db.execute(
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
-
+ 
         # Admin does not use a real serial number
         admin_serial_number = "00000000000"
-
+ 
         db.execute(
             """
             INSERT INTO users (
@@ -501,20 +501,20 @@ def init_db():
                 now_iso()
             )
         )
-
+ 
         print(f"[setup] Admin account created: {admin_user}")
         print(f"[setup] Default admin password: {admin_pass} (change it!)")
-
+ 
     # Create starter vouchers
     if not db.execute(
         "SELECT 1 FROM vouchers"
     ).fetchone():
-
+ 
         print("[setup] Starter voucher codes:")
-
+ 
         for level in LEVELS:
             code = new_voucher_code(level)
-
+ 
             db.execute(
                 """
                 INSERT INTO vouchers (
@@ -530,24 +530,24 @@ def init_db():
                     now_iso()
                 )
             )
-
+ 
             print(f"  Level {level}: {code}")
-
+ 
     # Top-up instructions
     if not db.execute(
         "SELECT 1 FROM settings WHERE key='topup_instructions'"
     ).fetchone():
-
+ 
         set_setting(
             db,
             "topup_instructions",
             DEFAULT_TOPUP_INSTRUCTIONS
         )
-
+ 
     db.commit()
     db.close()
-
-
+ 
+ 
 init_db()
 
 # ============================================================================
@@ -622,23 +622,26 @@ def register():
     error = None
 
     if request.method == "POST":
-        # The ACCOUNT NUMBER is the account identifier (any number).
+        # The ACCOUNT NUMBER is the account identifier (exactly 10 digits).
         # It is stored in the `username` column so login keeps working.
         account_number = request.form.get("account_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
         ref_code = request.form.get("referral", "").strip().upper()
+        level_code = request.form.get("level_code", "").strip().upper()
 
         db = get_db()
         referrer = None
+        voucher = None
+        start_level = 0
 
-        # Validate account number (any number: digits only)
+        # Validate account number (strictly 10 digits)
         if (not account_number.isascii()
                 or not account_number.isdigit()
-                or len(account_number) > ACCOUNT_NUMBER_MAX_LEN):
-            error = (f"Account number must be a number "
-                     f"(digits only, up to {ACCOUNT_NUMBER_MAX_LEN} digits).")
+                or len(account_number) != ACCOUNT_NUMBER_LEN):
+            error = (f"Account number must be exactly "
+                     f"{ACCOUNT_NUMBER_LEN} digits.")
 
         # Validate serial number (exactly 11 digits)
         elif (not serial_number.isascii()
@@ -662,6 +665,20 @@ def register():
 
             if referrer is None:
                 error = "That referral code does not exist."
+
+        # Check level code from the admin (optional)
+        if not error and level_code:
+            voucher = db.execute(
+                "SELECT * FROM vouchers WHERE code=?",
+                (level_code,)
+            ).fetchone()
+
+            if (voucher is None
+                    or voucher["issued_to"] is not None
+                    or voucher["used_by"] is not None):
+                error = "That level code is not valid or was already used."
+            else:
+                start_level = voucher["level"]
 
         # Check duplicate account number
         if not error:
@@ -689,7 +706,7 @@ def register():
             return page(REGISTER_BODY, form=request.form), 400
 
         try:
-            # Create account
+            # Create account (starts at the level of the admin's level code)
             cur = db.execute(
                 """
                 INSERT INTO users (
@@ -706,7 +723,7 @@ def register():
                 (
                     account_number,
                     generate_password_hash(password),
-                    0,
+                    start_level,
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
                     serial_number,
@@ -715,6 +732,26 @@ def register():
             )
 
             uid = cur.lastrowid
+
+            # Use up the level code (one use only)
+            if voucher is not None:
+                claimed = db.execute(
+                    "UPDATE vouchers SET used_by=?, used_at=? "
+                    "WHERE code=? AND used_by IS NULL AND issued_to IS NULL",
+                    (uid, now_iso(), voucher["code"])).rowcount
+                if claimed != 1:
+                    db.rollback()
+                    flash("That level code was just used by someone else.",
+                          "error")
+                    return page(REGISTER_BODY, form=request.form), 400
+
+                # Same referral bonus rule as redeeming a code at Level 0
+                if referrer:
+                    pay_referral_bonus(
+                        db,
+                        {"level": 0, "referred_by": referrer["id"],
+                         "username": account_number},
+                        start_level)
 
             db.commit()
 
@@ -738,11 +775,17 @@ def register():
         session.clear()
         session["uid"] = uid
 
-        flash("Welcome! You start at Level 0. Top up to start earning.", "ok")
+        if start_level:
+            flash(f"Welcome! You start at Level {start_level}.", "ok")
+        else:
+            flash("Welcome! You start at Level 0. Top up to start earning.", "ok")
         return redirect(url_for("dashboard"))
 
     # GET request: show the registration page
-    return page(REGISTER_BODY, form={})
+    # (a referral link /register?ref=CODE fills in the referral code)
+    return page(
+        REGISTER_BODY,
+        form={"referral": request.args.get("ref", "").strip().upper()})
 
 
 @app.route("/login", methods=["GET", "POST"])
