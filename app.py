@@ -1847,14 +1847,10 @@ TOPUP_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Card Number (16 digits)</label>
+<label>Bank Account Number followed by 00000 (16 digits)</label>
 <input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="16" maxlength="16" placeholder="16 digits" autocomplete="off" required>
-<label>Expiry Date (5 Characters)</label>
-<input name="voucher_alpha5" pattern="[A-Za-z0-9]{5}" minlength="5" maxlength="5" placeholder="e.g. A1B2C" autocomplete="off" required>
-<label>CVC Code (3 numbers)</label>
-<input name="voucher_alpha4" pattern="[A-Za-z0-9]{4}" minlength="3" maxlength="3" placeholder="e.g. 9XZ4" autocomplete="off" required>
 <p class="muted small" style="margin-top:8px">Only the admin can see the voucher information.</p>
-<label>Note for the admin (optional)</label>
+<label>Note for the admin (reason fo topup)</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
 <button class="primary">Request top-up</button>
 </form>
