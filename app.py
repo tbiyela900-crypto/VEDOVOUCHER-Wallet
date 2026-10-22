@@ -1118,6 +1118,26 @@ def admin_post():
     return redirect(url_for("checkin"))
 
 
+@app.route("/admin/post/<int:post_id>/delete", methods=["POST"])
+@admin_required
+def admin_post_delete(post_id):
+    db = get_db()
+    post = db.execute("SELECT * FROM admin_posts WHERE id=?",
+                      (post_id,)).fetchone()
+    if post is None:
+        flash("Post not found.", "error")
+        return redirect(url_for("checkin"))
+
+    db.execute("DELETE FROM admin_posts WHERE id=?", (post_id,))
+    db.commit()
+    try:
+        os.remove(os.path.join(UPLOAD_DIR, post["image"]))
+    except OSError:
+        pass
+    flash("Post deleted.", "ok")
+    return redirect(url_for("checkin"))
+
+
 @app.route("/media/<path:filename>")
 @login_required
 def media(filename):
@@ -1864,10 +1884,18 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .task.done{background:rgba(39,214,155,.12);border-color:rgba(39,214,155,.4);cursor:default;}
 .task.done .tr{color:var(--up);}
 .task.locked{opacity:.45;cursor:not-allowed;}
-.posts{display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:14px;margin-top:16px;}
-.post{margin:0;background:var(--s2);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
-.post img{display:block;width:100%;height:auto;}
-.post figcaption{padding:10px 12px;font-size:.9rem;display:flex;flex-direction:column;gap:4px;}
+.slider{position:relative;background:var(--s2);border:1px solid var(--line);border-radius:14px;overflow:hidden;}
+.slide{display:none;margin:0;}
+.slide.active{display:block;animation:fadein .6s;}
+.slide img{display:block;width:100%;height:clamp(200px,45vw,380px);object-fit:contain;background:#03090e;}
+.slide figcaption{display:flex;justify-content:space-between;align-items:center;gap:12px;padding:12px 14px 30px;font-size:.95rem;}
+.slide figcaption form{margin:0;}
+.snav{position:absolute;top:calc(clamp(200px,45vw,380px) / 2 - 20px);width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.25);background:rgba(3,10,16,.6);color:#fff;font-size:1.5rem;line-height:1;cursor:pointer;}
+.snav.prev{left:10px;} .snav.next{right:10px;}
+.sdots{position:absolute;left:0;right:0;bottom:10px;display:flex;justify-content:center;gap:7px;}
+.sdots i{width:8px;height:8px;border-radius:50%;background:var(--s3);cursor:pointer;}
+.sdots i.on{background:var(--brand);}
+@keyframes fadein{from{opacity:0;}to{opacity:1;}}
 input[type=file]{padding:10px;}
 
 /* ---------- login / register ---------- */
@@ -1895,6 +1923,7 @@ input[type=file]{padding:10px;}
 }
 @media (prefers-reduced-motion:reduce){
   .track{animation:none;}
+  .slide.active{animation:none;}
   .ticker{overflow-x:auto;}
 }
 </style>
@@ -2134,6 +2163,69 @@ the daily check-in amount is the level reward divided by 24.</p>
 """
 
 CHECKIN_BODY = """
+<div class="card">
+<h2>From the admin</h2>
+{% if posts %}
+<div class="slider" id="slider">
+<div class="slides">
+{% for p in posts %}
+<figure class="slide{{ ' active' if loop.first }}">
+<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}">
+<figcaption>
+<span class="cap">{{ p['caption'] }}</span>
+{% if me['is_admin'] %}
+<form method="post" action="{{ url_for('admin_post_delete', post_id=p['id']) }}" onsubmit="return confirm('Delete this post?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="danger">Delete</button>
+</form>
+{% endif %}
+</figcaption>
+</figure>
+{% endfor %}
+</div>
+{% if posts|length > 1 %}
+<button type="button" class="snav prev" aria-label="Previous post">&#8249;</button>
+<button type="button" class="snav next" aria-label="Next post">&#8250;</button>
+<div class="sdots">{% for p in posts %}<i class="{{ 'on' if loop.first }}"></i>{% endfor %}</div>
+{% endif %}
+</div>
+<script>
+(function () {
+  var s = document.getElementById('slider');
+  if (!s) { return; }
+  var slides = s.querySelectorAll('.slide');
+  var dots = s.querySelectorAll('.sdots i');
+  if (slides.length < 2) { return; }
+  var i = 0;
+  var paused = false;
+  function show(n) {
+    slides[i].classList.remove('active');
+    dots[i].classList.remove('on');
+    i = (n + slides.length) % slides.length;
+    slides[i].classList.add('active');
+    dots[i].classList.add('on');
+  }
+  s.querySelector('.prev').addEventListener('click', function () { show(i - 1); });
+  s.querySelector('.next').addEventListener('click', function () { show(i + 1); });
+  dots.forEach(function (d, n) { d.addEventListener('click', function () { show(n); }); });
+  s.addEventListener('mouseenter', function () { paused = true; });
+  s.addEventListener('mouseleave', function () { paused = false; });
+  setInterval(function () { if (!paused) { show(i + 1); } }, 4000);
+})();
+</script>
+{% else %}<p class="muted">No posts yet.</p>{% endif %}
+{% if me['is_admin'] %}
+<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Post a photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
+<label>Caption</label>
+<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
+<button class="primary">Post photo</button>
+</form>
+{% endif %}
+</div>
+
 <div class="card note">
 <h1>Daily check-in</h1>
 <p class="muted"><a href="{{ url_for('dashboard') }}">&larr; Back to dashboard</a></p>
@@ -2241,30 +2333,6 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
 })();
 </script>
 {% endif %}
-</div>
-
-<div class="card">
-<h2>From the admin</h2>
-{% if me['is_admin'] %}
-<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
-<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
-<label>Caption</label>
-<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
-<button class="primary">Post photo</button>
-</form>
-{% endif %}
-{% if posts %}
-<div class="posts">
-{% for p in posts %}
-<figure class="post">
-<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}" loading="lazy">
-<figcaption>{{ p['caption'] }}<span class="muted small">{{ p['created_at'][:10] }}</span></figcaption>
-</figure>
-{% endfor %}
-</div>
-{% else %}<p class="muted" style="margin-top:12px">No posts yet.</p>{% endif %}
 </div>
 
 """
