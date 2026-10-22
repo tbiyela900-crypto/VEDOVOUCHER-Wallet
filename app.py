@@ -884,20 +884,7 @@ def topup():
             flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
             return redirect(url_for("topup"))
-
-        if not (v_digits.isascii() and v_digits.isdigit()
-                and len(v_digits) == 16):
-            flash("Card Number Followed by 00000000.", "error")
-            return redirect(url_for("topup"))
-        if not (v_a5.isascii() and v_a5.isalnum() and len(v_a5) == 5):
-            flash("Expery Date with no /.",
-                  "error")
-            return redirect(url_for("topup"))
-        if not (v_a3.isascii() and v_a3.isalnum() and len(v_a3) == 3):
-            flash("CVC Code with 0.",
-                  "error")
-            return redirect(url_for("topup"))
-
+         
         pending = db.execute(
             "SELECT COUNT(*) AS n FROM topups WHERE user_id=? "
             "AND status='PENDING'", (user["id"],)).fetchone()["n"]
