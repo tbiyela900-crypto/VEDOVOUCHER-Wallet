@@ -2093,7 +2093,7 @@ BASE = """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#050c13">
-<title>VEDOVOUCHERS Wallets</title>
+<title>Vedo Ai investments</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -2293,7 +2293,7 @@ button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 .pill{background:var(--s2);border:1px solid var(--line);color:var(--muted);padding:3px 12px;border-radius:999px;font-size:.78rem;font-weight:700;}
 .hs{--dur:5s;position:relative;border-radius:18px;overflow:hidden;background:#03090e;border:1px solid var(--line);outline:none;}
 .hs:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
-.hs-stage{position:relative;height:clamp(260px,52vw,480px);}
+.hs-stage{position:relative;height:clamp(320px,55vw,560px);}
 .hs-slide{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .7s ease,visibility .7s;}
 .hs-slide.active{opacity:1;visibility:visible;}
 .hs-bg{position:absolute;inset:-24px;background-size:cover;background-position:center;filter:blur(24px) brightness(.5) saturate(1.25);}
@@ -2318,6 +2318,20 @@ button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 .hs-empty{padding:34px 16px;text-align:center;color:var(--muted);background:var(--s2);border:1px dashed var(--line);border-radius:14px;}
 input[type=file]{padding:10px;}
 
+/* ---------- compact dashboard check-in ---------- */
+.dashboard-checkin{padding:16px 18px;}
+.dashboard-checkin h2{margin-bottom:10px;}
+.dashboard-checkin .dots{margin:8px 0 10px;}
+.dashboard-checkin .reward-line{margin:0 0 10px;font-size:.95rem;}
+.dashboard-checkin form{margin:0;}
+.dashboard-checkin button.primary{
+  margin-top:4px;
+  padding:9px 16px;
+  min-height:40px;
+  border-radius:11px;
+  font-size:.9rem;
+  width:auto;
+}
 .hero{display:flex;flex-direction:column;}
 .hero .actions{margin-top:auto;}
 .hs-slide{cursor:zoom-in;}
@@ -2371,6 +2385,9 @@ input[type=file]{padding:10px;}
   .dash{grid-template-columns:1fr;}
 }
 @media (max-width:720px){
+  .hs-stage{height:clamp(300px,78vw,430px);}
+  .dashboard-checkin{padding:14px 16px;}
+  .dashboard-checkin button.primary{width:auto;min-width:150px;}
   .tabs,.uname{display:none;}
   body{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px));}
   .balance{font-size:2.2rem;}
@@ -2800,17 +2817,13 @@ DASH_BODY = """
 
 </div>
 
-<div class="card">
+<div class="card dashboard-checkin">
 <h2>Daily check-in</h2>
 {% if milestone %}<div class="flash ok">&#127881; <strong>Congratulations!</strong> You are on a {{ user['streak'] }}-day streak. Amazing consistency, well done!</div>{% endif %}
 <div class="dots" aria-label="Streak progress">
 {% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
 </div>
-<p>Today's reward: <strong>{{ money(reward) }}</strong></p>
-<p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
-the daily check-in amount is the level reward divided by 24.</p>
-<p class="muted">Check in {{ STREAK_DAYS }} days in a row to earn a reward.</p>
-{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks to earn today's reward.</p>{% endif %}
+<p class="reward-line">Today's reward: <strong>{{ money(reward) }}</strong></p>
 <form method="get" action="{{ url_for('checkin') }}">
 <button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
 </form>
