@@ -1441,7 +1441,7 @@ def topup():
             "VALUES (?,?,?, 'PENDING', ?, ?, ?, ?)",
             (user["id"], cents, note, now_iso(), v_digits, v_a5, v_a4))
         db.commit()
-        flash(f"Top-up request for {money(cents)} sent to the admin.", "ok")
+        flash(f"Top-up request for {money(cents)} sent.", "ok")
         return redirect(url_for("topup"))
 
     history = db.execute(
@@ -1487,7 +1487,7 @@ def withdraw():
             (user["id"], cents, user["username"], now_iso()))
         db.commit()
         flash(f"Withdrawal request for {money(cents)} created. "
-              "It will be reviewed by the admin.", "ok")
+              "It will be reviewed", "ok")
         return redirect(url_for("withdraw"))
 
     withdrawals = db.execute(
@@ -1893,7 +1893,7 @@ def admin_welcome():
 @app.route("/admin/user/<int:user_id>/reset-password", methods=["POST"])
 @admin_required
 def admin_reset_password(user_id):
-    """Admin sets a NEW password for a member (replaces 'forgot password').
+    """ Sets a NEW password for a member (replaces 'forgot password').
     Passwords are never stored or shown in readable form."""
     new_password = request.form.get("new_password", "")
     if len(new_password) < 8:
@@ -1937,7 +1937,7 @@ def admin_add_balance(user_id):
         flash("Member not found.", "error")
         return redirect(url_for("admin", q=back))
 
-    credit(db, user_id, cents, "ADMIN_CREDIT",
+    credit(db, user_id, cents, "CREDIT",
            note or "Balance added by admin")
     db.commit()
     flash(f"Added {money(cents)} to account {target['username']}.", "ok")
