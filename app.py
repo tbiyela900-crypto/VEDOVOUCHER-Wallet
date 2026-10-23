@@ -7,13 +7,12 @@ Features
   * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID (no account number).
-  * TOP-UP page looks like the check-in page: the member enters an amount and
-    a reason, then taps a level tile. The tiles close and a WHITE details tab
-    opens for 10 minutes showing the Bank Name, PayShap, Amount
-    number, PayShap and Account number, a small school flag and a red
-    message. ALL of that information is entered by the admin only (Admin
-    page >Top-up details, for everyone or for one member). The member
-    can copy every line.
+  * TOP-UP page looks like the check-in page: the member taps a level tile,
+    enters an amount and presses Enter. The tiles close and a WHITE details
+    tab opens for 10 minutes showing the Bank Name, Reference, Amount,
+    PayShap and Account number, a small school flag and a red message. ALL of
+    that information is entered by the admin only (Admin page > Top-up
+    details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
     money to the balance.
   * The balance only grows through the daily check-in tasks (and referral
@@ -295,7 +294,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
-    used_by INTEGER PayShapS users(id),
+    used_by INTEGER REFERENCES users(id),
     used_at TEXT,
     issued_to INTEGER,
     created_at TEXT NOT NULL
@@ -333,7 +332,7 @@ CREATE TABLE IF NOT EXISTS topups (
 );
 
 CREATE TABLE IF NOT EXISTS topup_details (
-    user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
+    user_id INTEGER PRIMARY KEY,
     Bank_name TEXT NOT NULL DEFAULT '',
     Reference TEXT NOT NULL DEFAULT '',
     Amount TEXT NOT NULL DEFAULT '',
@@ -3373,7 +3372,7 @@ TOPUP_BODY = """
   tick();
   function copyText(text,btn){var old=btn.textContent;function done(){btn.textContent='Copied';setTimeout(function(){btn.textContent=old;},1500);}function fallback(){var ta=document.createElement('textarea');ta.value=text;ta.style.position='fixed';ta.style.opacity='0';document.body.appendChild(ta);ta.select();try{document.execCommand('copy');}catch(e){}document.body.removeChild(ta);done();}if(navigator.clipboard&&window.isSecureContext){navigator.clipboard.writeText(text).then(done,fallback);}else{fallback();}}
   panel.querySelectorAll('.sc-row .sc-copy').forEach(function(b){b.addEventListener('click',function(){copyText(b.getAttribute('data-copy'),b);});});
-  document.getElementById('scall').addEventListener('click',function(){var lines=[];panel.querySelectorAll('.sc-row').forEach(function(row){lines.push(row.querySelector('small').textContent+': '+row.querySelector('b').textContent);});copyText(lines.join('\n'),this);});
+  document.getElementById('scall').addEventListener('click',function(){var lines=[];panel.querySelectorAll('.sc-row').forEach(function(row){lines.push(row.querySelector('small').textContent+': '+row.querySelector('b').textContent);});copyText(lines.join('\\n'),this);});
 })();
 </script>
 {% else %}
@@ -3733,7 +3732,7 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>Bank_name</label>
+<label>Bank name</label>
 <input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
 <label>Reference</label>
 <input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
@@ -3768,7 +3767,7 @@ ADMIN_BODY = """
 {% if gd or specific_details %}
 <h2 style="margin-top:22px">Saved school details</h2>
 <table>
-<tr><th>For</th><th>School</th><th>Reference</th><th>Amount</th><th>Reference no.</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>Bank name</th><th>Reference</th><th>Amount</th><th>PayShap</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
 <tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Account_Number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
@@ -3899,11 +3898,11 @@ onsubmit="return confirm('Remove this member instruction?');">
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Joined level</th><th>Selected school level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Selected top-up level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td>{{ u['id'] }}</td><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
-<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}S{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
+<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}L{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_add_balance', user_id=u['id']) }}"
