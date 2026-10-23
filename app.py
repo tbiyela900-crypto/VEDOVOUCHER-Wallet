@@ -3048,7 +3048,7 @@ TOPUP_BODY = """
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
 <label>Enter you Bank Account Number  (</label>
-<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
+<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
 <p class="muted small" style="margin-top:8px">Only the admin can see the voucher information.</p>
 <label>Reason fo topup)</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
@@ -3218,7 +3218,7 @@ Upgrade to Level {{ next_level }}</button>
 """
 
 POTS_BODY = """
-<div class="card note">
+#<div class="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
 annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
