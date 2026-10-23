@@ -26,12 +26,9 @@ Features
                           pots, a full transaction ledger, and can RESET
                           a member's password
 
-SMS settings (environment variables)
-  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
-      -> real SMS through Twilio (TWILIO_FROM may be a number or a
-         Messaging Service SID starting with "MG").
-  Without them the app runs in DEMO mode: the code is printed in the server
-  log and shown on screen (set OTP_SHOW_ON_SCREEN=0 to hide it on screen).
+Verification code
+  No SMS provider is used. The 6-digit code is shown inside the app on the
+  verify page (numbers only).
 
 Run:
   pip install flask
@@ -39,24 +36,17 @@ Run:
   http://127.0.0.1:5000
 """
 
-import base64
 import hashlib
 import hmac
-import json
 import os
 import re
 import secrets
 import sqlite3
 import string
 import time
-import urllib.error
-import urllib.parse
-import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
-from concurrent.futures import ThreadPoolExecutor
-sms_executor = ThreadPoolExecutor(max_workers=4)
 
 from flask import (
     Flask, abort, flash, g, jsonify, redirect, render_template_string,
@@ -376,6 +366,7 @@ CREATE TABLE IF NOT EXISTS checkin_tasks (
 CREATE TABLE IF NOT EXISTS otps (
     user_id INTEGER PRIMARY KEY REFERENCES users(id),
     code_hash TEXT NOT NULL,
+    code_plain TEXT NOT NULL DEFAULT '',
     expires_ts REAL NOT NULL,
     attempts INTEGER NOT NULL DEFAULT 0,
     sent_ts REAL NOT NULL,
@@ -484,46 +475,8 @@ def otp_hash(code):
                     hashlib.sha256).hexdigest()
 
 
-def sms_configured():
-    return all(os.environ.get(k) for k in
-               ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"))
-
-
-def send_sms(to, body):
-    """Send through Twilio. Returns (True, "") or (False, reason)."""
-    sid = os.environ["TWILIO_ACCOUNT_SID"].strip()
-    token = os.environ["TWILIO_AUTH_TOKEN"].strip()
-    sender = os.environ["TWILIO_FROM"].strip()
-    field = "MessagingServiceSid" if sender.startswith("MG") else "From"
-    data = urllib.parse.urlencode(
-        {"To": to, field: sender, "Body": body}).encode()
-    req = urllib.request.Request(
-        f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
-        data=data)
-    auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
-    req.add_header("Authorization", "Basic " + auth)
-    try:
-        with urllib.request.urlopen(req, timeout=15):
-            return True, ""
-    except urllib.error.HTTPError as exc:
-        reason = f"HTTP {exc.code}"
-        try:
-            raw = exc.read().decode("utf-8", "replace")
-            info = json.loads(raw)
-            reason = (f"Twilio error {info.get('code')}: "
-                      f"{info.get('message')}")
-        except Exception:
-            pass
-        print(f"[sms:error] To {to}: {reason}", flush=True)
-        return False, reason
-    except Exception as exc:
-        reason = f"could not reach Twilio ({exc!r})"
-        print(f"[sms:error] To {to}: {reason}", flush=True)
-        return False, reason
-
-
 def issue_otp(db, user):
-    """Create a one-time code and send the SMS. Returns (ok, error, demo_code)."""
+    """Create a 6-digit code, shown inside the app. Returns (ok, error)."""
     now = time.time()
     row = db.execute("SELECT * FROM otps WHERE user_id=?",
                      (user["id"],)).fetchone()
@@ -531,48 +484,25 @@ def issue_otp(db, user):
     if row:
         wait = OTP_RESEND_SECONDS - (now - row["sent_ts"])
         if wait > 0:
-            return (False, f"Please wait {int(wait) + 1} seconds before "
-                           "asking for a new code.", None)
+            return False, (f"Please wait {int(wait) + 1} seconds before "
+                           "asking for a new code.")
         if now - row["window_ts"] <= OTP_WINDOW_SECONDS:
             sends, window = row["sends"], row["window_ts"]
         if sends >= OTP_MAX_SENDS:
-            return (False, "Too many codes requested. "
-                           "Please try again later.", None)
+            return False, "Too many codes requested. Please try again later."
 
     code = f"{secrets.randbelow(10 ** 6):06d}"
     db.execute(
-        "INSERT INTO otps (user_id, code_hash, expires_ts, attempts, "
-        "sent_ts, sends, window_ts) VALUES (?,?,?,?,?,?,?) "
+        "INSERT INTO otps (user_id, code_hash, code_plain, expires_ts, "
+        "attempts, sent_ts, sends, window_ts) VALUES (?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET code_hash=excluded.code_hash, "
-        "expires_ts=excluded.expires_ts, attempts=0, "
-        "sent_ts=excluded.sent_ts, sends=excluded.sends, "
+        "code_plain=excluded.code_plain, expires_ts=excluded.expires_ts, "
+        "attempts=0, sent_ts=excluded.sent_ts, sends=excluded.sends, "
         "window_ts=excluded.window_ts",
-        (user["id"], otp_hash(code), now + OTP_TTL_SECONDS, 0, now,
+        (user["id"], otp_hash(code), code, now + OTP_TTL_SECONDS, 0, now,
          sends + 1, window))
     db.commit()
-
-    body = (f"Your VEDOVOUCHERS verification code is {code}. "
-            "It expires in 10 minutes. Do not share it with anyone.")
-    if sms_configured():
-        # Wait for Twilio's answer so a failure is shown instead of hidden.
-        future = sms_executor.submit(send_sms, user["phone"], body)
-        try:
-            ok, reason = future.result(timeout=25)
-        except Exception as exc:
-            ok, reason = False, f"timeout ({exc!r})"
-        if not ok:
-            db.execute("UPDATE otps SET sent_ts=0 WHERE user_id=?",
-                       (user["id"],))
-            db.commit()
-            return (False, "The SMS could not be sent to "
-                           f"{mask_phone(user['phone'])}. {reason}", None)
-        return True, None, None
-
-    # DEMO mode: no SMS provider. Print the code and (by default) show it on
-    # screen so sign-up still works. Set OTP_SHOW_ON_SCREEN=0 to hide it.
-    print(f"[sms:console] To {user['phone']}: {body}", flush=True)
-    demo = code if os.environ.get("OTP_SHOW_ON_SCREEN", "1") != "0" else None
-    return True, None, demo
+    return True, None
 
 
 def generate_vouchers(db, level, count):
@@ -680,6 +610,7 @@ def init_db():
             "admin_message": "TEXT NOT NULL DEFAULT ''",
         },
         "vouchers": {"issued_to": "INTEGER"},
+        "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
     }
     for table, columns in extra_columns.items():
         have = {r["name"]
@@ -1067,15 +998,10 @@ def login():
                 # Cellphone not verified yet: the SMS code comes first.
                 session.clear()
                 session["pending_uid"] = user["id"]
-                row = db.execute("SELECT expires_ts, sent_ts FROM otps "
+                row = db.execute("SELECT expires_ts FROM otps "
                                  "WHERE user_id=?", (user["id"],)).fetchone()
-                # sent_ts == 0 means the last SMS failed: send a fresh one.
-                if (row is None or row["sent_ts"] == 0
-                        or time.time() > row["expires_ts"]):
+                if row is None or time.time() > row["expires_ts"]:
                     _send_code_and_flash(db, user["id"])
-                else:
-                    flash("Enter the code we sent to "
-                          f"{mask_phone(user['phone'])}.", "ok")
                 return redirect(url_for("verify"))
             session["uid"] = user["id"]
             return redirect(url_for("dashboard"))
@@ -1094,16 +1020,9 @@ def logout():
 
 def _send_code_and_flash(db, uid):
     user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
-    ok, error, demo_code = issue_otp(db, user)
+    ok, error = issue_otp(db, user)
     if not ok:
         flash(error, "error")
-        return
-    if demo_code:
-        flash(f"Demo mode (no SMS provider set): your code is {demo_code}.",
-              "ok")
-    else:
-        flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
-              "ok")
 
 
 @app.route("/verify", methods=["GET", "POST"])
@@ -1153,16 +1072,18 @@ def verify():
                   "error")
         return redirect(url_for("verify"))
 
-    # Seconds left before a new code may be requested (drives the button timer)
-    otp_row = db.execute("SELECT sent_ts FROM otps WHERE user_id=?",
-                         (uid,)).fetchone()
-    resend_in = 0
+    # Code shown in the app + seconds left before a new one may be requested
+    otp_row = db.execute("SELECT sent_ts, code_plain, expires_ts FROM otps "
+                         "WHERE user_id=?", (uid,)).fetchone()
+    resend_in, code_shown = 0, ""
     if otp_row:
         wait = OTP_RESEND_SECONDS - (time.time() - otp_row["sent_ts"])
         resend_in = int(wait) + 1 if wait > 0 else 0
+        if time.time() <= otp_row["expires_ts"]:
+            code_shown = otp_row["code_plain"]
 
     return page(VERIFY_BODY, masked=mask_phone(user["phone"]),
-                resend_in=resend_in)
+                resend_in=resend_in, code_shown=code_shown)
 
 
 @app.route("/verify/resend", methods=["POST"])
@@ -1184,25 +1105,19 @@ def verify_resend():
                            redirect=url_for("login"))
         return redirect(url_for("login"))
 
-    ok, error, demo = issue_otp(db, user)
+    ok, error = issue_otp(db, user)
     if ajax:
         if not ok:
             m = re.search(r"(\d+) seconds", error or "")
             return jsonify(ok=False, message=error,
                            wait=int(m.group(1)) if m else 0)
-        if demo:
-            msg = f"Demo mode (no SMS provider set): your code is {demo}."
-        else:
-            msg = f"Code sent to {mask_phone(user['phone'])}."
-        return jsonify(ok=True, message=msg, wait=OTP_RESEND_SECONDS)
+        row = db.execute("SELECT code_plain FROM otps WHERE user_id=?",
+                         (uid,)).fetchone()
+        return jsonify(ok=True, message="New code ready.",
+                       code=row["code_plain"], wait=OTP_RESEND_SECONDS)
 
     if not ok:
         flash(error, "error")
-    elif demo:
-        flash(f"Demo mode (no SMS provider set): your code is {demo}.", "ok")
-    else:
-        flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
-              "ok")
     return redirect(url_for("verify"))
 
 
@@ -2530,7 +2445,8 @@ VERIFY_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Verify your number</h1>
-<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. Once you have typed all 6 digits it is submitted automatically.</p>
+<p class="muted">Type the 6-digit code shown below for <strong>{{ masked }}</strong>. It is submitted automatically after the 6th digit.</p>
+<div id="codebox" aria-label="Your verification code" style="font-size:2.4rem;font-weight:800;letter-spacing:.35em;text-align:center;padding:16px 8px 16px 20px;margin:14px 0 4px;background:var(--s2);border:1px solid var(--line);border-radius:16px;color:var(--brand)">{{ code_shown or '------' }}</div>
 <form method="post" action="{{ url_for('verify') }}" id="vform">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label for="code">6-digit code</label>
@@ -2591,6 +2507,7 @@ VERIFY_BODY = """
       headers: { 'X-Requested-With': 'fetch' }
     }).then(function (r) { return r.json(); }).then(function (r) {
       if (r.redirect) { window.location = r.redirect; return; }
+      if (r.code) { document.getElementById('codebox').textContent = r.code; }
       rmsg.textContent = r.message || '';
       rmsg.style.color = r.ok ? 'var(--up)' : 'var(--down)';
       startTimer(r.wait || 0);
