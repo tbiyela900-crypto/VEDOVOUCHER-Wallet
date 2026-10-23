@@ -2445,7 +2445,7 @@ input[type=file]{padding:10px;}
 {% set ep = request.endpoint %}
 <header class="top">
 <nav>
-<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>My VEDOVOUCHER Wallet</span></a>
+<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>Vedo Ai</span></a>
 {% if me %}
 <div class="tabs">
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
@@ -3578,7 +3578,7 @@ app.jinja_loader = DictLoader({"base": BASE})
 if __name__ == "__main__":
     init_db()
     print("\n======================================")
-    print(" ZEDAVOUCHERS")
+    print(" VEDO AI")
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
