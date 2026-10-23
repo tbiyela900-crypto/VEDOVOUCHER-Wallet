@@ -7,7 +7,7 @@ Features
   * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
   * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
   * Admin approval issues a voucher code to the member
-  * Daily check-in (level reward / 24) with streak bonus
+  * Daily check-in (level reward / 24) with a special 7-day streak congratulation
   * Referral codes and team
   * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
                           Admin can edit the demo instruction text.
@@ -105,11 +105,22 @@ DAILY_REWARD_CENTS = {
 }
 
 STREAK_DAYS = 7
-STREAK_BONUS_PER_LEVEL_CENTS = 1000     # R10 x level
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
 
 # Account number rules (digits only, exactly 10)
 ACCOUNT_NUMBER_LEN = 10
+
+# --- Team tiers ------------------------------------------------------------
+# At each member count the team gets a name and a team account number that
+# the member can view on the My Team page.
+TEAM_TIERS = [
+    (5, "Bronze Team"),
+    (10, "Silver Team"),
+    (15, "Gold Team"),
+    (20, "Platinum Team"),
+]
+
+DEFAULT_WELCOME_TEXT = "Welcome, let's grow together."
 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
@@ -343,6 +354,16 @@ CREATE TABLE IF NOT EXISTS checkin_tasks (
     UNIQUE(user_id, day, task_no)
 );
 
+CREATE TABLE IF NOT EXISTS team_tiers (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    members INTEGER NOT NULL,
+    name TEXT NOT NULL,
+    account_number TEXT NOT NULL UNIQUE,
+    created_at TEXT NOT NULL,
+    UNIQUE(user_id, members)
+);
+
 CREATE TABLE IF NOT EXISTS admin_posts (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     image TEXT NOT NULL,
@@ -395,6 +416,14 @@ def new_referral_code(db):
         if not db.execute("SELECT 1 FROM users WHERE referral_code=?",
                           (code,)).fetchone():
             return code
+
+
+def new_team_account_number(db):
+    while True:
+        number = "TEAM-" + "".join(secrets.choice(string.digits) for _ in range(8))
+        if not db.execute("SELECT 1 FROM team_tiers WHERE account_number=?",
+                          (number,)).fetchone():
+            return number
 
 
 def generate_vouchers(db, level, count):
@@ -653,6 +682,8 @@ def inject_globals():
         "POT_WEEKS": POT_WEEKS,
         "pot_interest": pot_interest_cents,
         "icon": icon,
+        "welcome_text": get_setting(get_db(), "welcome_text",
+                                    DEFAULT_WELCOME_TEXT),
     }
 
 
@@ -897,8 +928,8 @@ def dashboard():
         "WHERE user_id=? AND status='LOCKED'", (user["id"],)).fetchone()["s"]
 
     reward = daily_reward_cents(user["level"])
-    bonus = (user["level"] * STREAK_BONUS_PER_LEVEL_CENTS
-             if next_streak % STREAK_DAYS == 0 else 0)
+    milestone = bool(done and user["streak"] > 0
+                     and user["streak"] % STREAK_DAYS == 0)
 
     task_total = tasks_for_level(user["level"])
     task_done = db.execute(
@@ -911,7 +942,7 @@ def dashboard():
     return page(DASH_BODY, task_total=task_total, task_done=task_done,
                 posts=posts, user=user, done=done, next_streak=next_streak,
                 history=history, recent_tx=recent_tx, locked=locked,
-                reward=reward, bonus=bonus, STREAK_DAYS=STREAK_DAYS)
+                reward=reward, milestone=milestone, STREAK_DAYS=STREAK_DAYS)
 
 
 @app.route("/checkin")
@@ -1041,24 +1072,20 @@ def checkin_complete(n):
     completed, earned = summary["n"], summary["s"]
 
     finished = False
-    bonus = 0
+    milestone = False
+    streak = 0
     if completed >= total:
         # All tasks done: the day counts as checked in (streak, history).
         _done, streak = checkin_state(user)
-        bonus = (user["level"] * STREAK_BONUS_PER_LEVEL_CENTS
-                 if streak % STREAK_DAYS == 0 else 0)
         inserted = db.execute(
             "INSERT OR IGNORE INTO checkins (user_id, day, reward, bonus) "
-            "VALUES (?,?,?,?)", (user["id"], day, earned, bonus)).rowcount
+            "VALUES (?,?,?,0)", (user["id"], day, earned)).rowcount
         if inserted == 1:
             finished = True
             db.execute("UPDATE users SET streak=?, last_checkin=? WHERE id=?",
                        (streak, day, user["id"]))
-            if bonus:
-                credit(db, user["id"], bonus, "CHECKIN",
-                       f"{streak}-day streak bonus")
-        else:
-            bonus = 0
+            # Every 7th day in a row earns a special congratulation (no money).
+            milestone = streak % STREAK_DAYS == 0
     db.commit()
 
     points = db.execute("SELECT points FROM users WHERE id=?",
@@ -1066,7 +1093,7 @@ def checkin_complete(n):
     return jsonify(ok=True, reward_text=money(reward),
                    balance=money(points), completed=completed, total=total,
                    earned_text=money(earned), done=finished,
-                   bonus=bonus, bonus_text=money(bonus))
+                   milestone=milestone, streak=streak)
 
 
 # ---------------------------------------------------------------------------
@@ -1257,8 +1284,34 @@ def team():
         referrer = db.execute("SELECT username FROM users WHERE id=?",
                               (user["referred_by"],)).fetchone()
 
+    # Team tiers: a name and a team account number unlock at 5/10/15/20 members
+    count = len(members)
+    tiers = []
+    for size, name in TEAM_TIERS:
+        row = db.execute(
+            "SELECT account_number FROM team_tiers WHERE user_id=? AND members=?",
+            (user["id"], size)).fetchone()
+        if row is None and count >= size:
+            db.execute(
+                "INSERT OR IGNORE INTO team_tiers "
+                "(user_id, members, name, account_number, created_at) "
+                "VALUES (?,?,?,?,?)",
+                (user["id"], size, name, new_team_account_number(db), now_iso()))
+            db.commit()
+            row = db.execute(
+                "SELECT account_number FROM team_tiers "
+                "WHERE user_id=? AND members=?", (user["id"], size)).fetchone()
+        tiers.append({"size": size, "name": name,
+                      "number": row["account_number"] if row else None})
+    reached = [t for t in tiers if t["number"]]
+    team_name = reached[-1]["name"] if reached else None
+    next_tier = next((t for t in tiers if not t["number"]), None)
+    tier_pct = (min(100, int(count / next_tier["size"] * 100))
+                if next_tier else 100)
+
     return page(TEAM_BODY, user=user, members=members, earned=earned,
-                team_points=team_points, referrer=referrer)
+                team_points=team_points, referrer=referrer, tiers=tiers,
+                team_name=team_name, next_tier=next_tier, tier_pct=tier_pct)
 
 
 # ============================================================================
@@ -1576,6 +1629,22 @@ def admin_instructions():
         set_setting(db, "topup_instructions", text)
         db.commit()
         flash("Top-up instruction text updated.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/welcome", methods=["POST"])
+@admin_required
+def admin_welcome():
+    text = request.form.get("welcome_text", "").strip()
+    if not text:
+        flash("Welcome text cannot be empty.", "error")
+    elif len(text) > 120:
+        flash("Welcome text is too long (max 120 characters).", "error")
+    else:
+        db = get_db()
+        set_setting(db, "welcome_text", text)
+        db.commit()
+        flash("Welcome text updated.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -1970,6 +2039,24 @@ input[type=file]{padding:10px;}
 .lb-hint{position:absolute;left:0;right:0;bottom:16px;text-align:center;color:var(--muted);font-size:.8rem;pointer-events:none;}
 @media (max-width:720px){ .lb-nav{display:none;} }
 
+.tiers{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:10px;}
+.tier{display:flex;flex-direction:column;gap:6px;border-radius:14px;padding:16px;border:1px solid var(--line);background:var(--s2);}
+.tier b{font-size:1rem;}
+.tier span{color:var(--muted);font-size:.82rem;}
+.tier small{color:var(--muted);font-size:.74rem;text-transform:uppercase;letter-spacing:.4px;}
+.tier code{font-size:.95rem;word-break:break-all;}
+.tier.on{border-color:rgba(31,214,164,.55);background:rgba(31,214,164,.10);}
+.tier.lock{opacity:.55;}
+.cg{position:fixed;inset:0;z-index:120;display:none;align-items:center;justify-content:center;background:rgba(2,7,11,.85);backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);overflow:hidden;}
+.cg.open{display:flex;}
+.cg-box{position:relative;max-width:420px;margin:16px;text-align:center;padding:34px 26px;border-radius:26px;border:1px solid rgba(31,214,164,.5);background:radial-gradient(420px 200px at 50% 0%,rgba(31,214,164,.35),transparent 70%),linear-gradient(160deg,#0f766e,#0b3d49 60%,#08242f);box-shadow:0 30px 80px rgba(0,0,0,.6);animation:cgpop .5s cubic-bezier(.2,1.4,.4,1);}
+.cg-box .big{font-size:3rem;line-height:1;margin-bottom:10px;}
+.cg-box h2{font-size:1.6rem;margin:0 0 8px;}
+.cg-box p{margin:0 0 18px;color:#d9f5ec;}
+.cg i.cf{position:absolute;top:-16px;width:9px;height:14px;opacity:.9;animation:cfall linear forwards;}
+@keyframes cgpop{from{transform:scale(.6);opacity:0;}to{transform:scale(1);opacity:1;}}
+@keyframes cfall{to{transform:translateY(110vh) rotate(720deg);}}
+
 /* ---------- login / register ---------- */
 .auth{max-width:440px;margin:30px auto 0;}
 .auth .logo{width:54px;height:54px;border-radius:17px;font-size:1.4rem;margin-bottom:16px;}
@@ -1997,6 +2084,8 @@ input[type=file]{padding:10px;}
   .track{animation:none;}
   .hs-slide img,.hs-slide.active img{transition:none;transform:none;}
   button.tile.pulse{animation:none;}
+  .cg-box{animation:none;}
+  .cg i.cf{display:none;}
   .ticker{overflow-x:auto;}
 }
 </style>
@@ -2004,7 +2093,7 @@ input[type=file]{padding:10px;}
 <body>
 <div class="ticker" aria-label="Daily rewards by level"><div class="track">
 {% for k in range(2) %}
-<span class="tk">Welcome, let's grow together.</span>
+<span class="tk">{{ welcome_text|e }}</span>
 {% for l in LEVELS %}<span class="tk">Level {{ l }} <b>{{ daily_reward(l) }}/day</b></span>{% endfor %}
 {% endfor %}
 </div></div>
@@ -2166,7 +2255,7 @@ DASH_BODY = """
 
 <div class="card">
 <div class="feedhead">
-<h2>Latest from the admin</h2>
+<h2>Latest</h2>
 {% if posts %}<span class="pill">{{ posts|length }} post{{ 's' if posts|length > 1 }}</span>{% endif %}
 </div>
 {% if posts %}
@@ -2351,14 +2440,14 @@ DASH_BODY = """
 
 <div class="card">
 <h2>Daily check-in</h2>
+{% if milestone %}<div class="flash ok">&#127881; <strong>Congratulations!</strong> You are on a {{ user['streak'] }}-day streak. Amazing consistency, well done!</div>{% endif %}
 <div class="dots" aria-label="Streak progress">
 {% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
 </div>
 <p>Today's reward: <strong>{{ money(reward) }}</strong></p>
-{% if bonus %}<p>Streak bonus: <strong class="pos">+{{ money(bonus) }}</strong></p>{% endif %}
 <p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
 the daily check-in amount is the level reward divided by 24.</p>
-<p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
+<p class="muted">Check in {{ STREAK_DAYS }} days in a row to earn a special congratulation.</p>
 {% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks (5 seconds each) to earn today's reward.</p>{% endif %}
 <form method="get" action="{{ url_for('checkin') }}">
 <button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
@@ -2446,6 +2535,7 @@ Tap a task and wait 5 seconds while it loads. Every finished task adds its rewar
 <div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
 <div class="bar"><b id="progbar" style="width:{{ pct }}%"></b></div>
 <div id="msg" style="margin-top:14px"></div>
+<div class="cg" id="cg" role="dialog" aria-modal="true" aria-label="Congratulations"><div class="cg-box"><div class="big">&#127881;</div><h2>Congratulations!</h2><p id="cgtext"></p><button type="button" class="primary" id="cgok" style="margin-top:0">Awesome!</button></div></div>
 <div class="taskgrid">
 {% for t in tasks %}
 <button type="button" class="task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
@@ -2478,6 +2568,23 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
     return fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .catch(function () { return { ok: false, error: 'Something went wrong. Reload the page and try again.' }; });
+  }
+
+  function celebrate(streak) {
+    var cg = document.getElementById('cg');
+    var colors = ['#1fd6a4', '#2b7fff', '#f2b84b', '#8b7cf6', '#ff5c6c'];
+    document.getElementById('cgtext').textContent = 'You checked in ' + streak + ' days in a row. That is a special achievement!';
+    for (var k = 0; k < 60; k++) {
+      var c = document.createElement('i');
+      c.className = 'cf';
+      c.style.left = (Math.random() * 100) + '%';
+      c.style.background = colors[k % colors.length];
+      c.style.animationDuration = (2.5 + Math.random() * 2.5) + 's';
+      c.style.animationDelay = (Math.random() * 0.8) + 's';
+      cg.appendChild(c);
+    }
+    cg.classList.add('open');
+    document.getElementById('cgok').addEventListener('click', function () { window.location.reload(); });
   }
 
   function lockOthers(on, current) {
@@ -2528,10 +2635,10 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
             document.getElementById('earned').textContent = r.earned_text;
             document.getElementById('bal').textContent = r.balance;
             var text = '+' + r.reward_text + ' added to your balance.';
-            if (r.bonus) { text += ' Streak bonus: +' + r.bonus_text + '.'; }
             if (r.done) { text += ' All tasks done for today!'; }
             say(text, 'ok');
-            if (r.done) { setTimeout(function () { window.location.reload(); }, 2500); }
+            if (r.done && r.milestone) { celebrate(r.streak); }
+            else if (r.done) { setTimeout(function () { window.location.reload(); }, 2500); }
           });
         }, WAIT_MS + 300);
       });
@@ -2664,6 +2771,29 @@ TEAM_BODY = """
 </script>
 <p class="muted">Anyone who opens your link gets your code filled in automatically and joins your team.</p>
 {% if referrer %}<p>You joined <b>{{ referrer['username'] }}</b>'s team.</p>{% endif %}
+</div>
+
+<div class="card">
+<h2>Team levels{% if team_name %} - you are <span class="pos">{{ team_name }}</span>{% endif %}</h2>
+{% if next_tier %}
+<p class="muted">{{ members|length }} of {{ next_tier['size'] }} members. Reach {{ next_tier['size'] }} members to unlock <b>{{ next_tier['name'] }}</b> and its team account number.</p>
+<div class="bar" style="margin-bottom:14px"><b style="width:{{ tier_pct }}%"></b></div>
+{% else %}<p class="muted">Your team reached the top level.</p>{% endif %}
+<div class="tiers">
+{% for t in tiers %}
+<div class="tier {{ 'on' if t['number'] else 'lock' }}">
+<b>{{ t['name'] }}</b>
+<span>{{ t['size'] }} members</span>
+{% if t['number'] %}
+<small>Team account number</small>
+<code>{{ t['number'] }}</code>
+<button type="button" class="ghost" onclick="navigator.clipboard.writeText('{{ t['number'] }}');this.textContent='Copied';">Copy</button>
+{% else %}
+<small>Locked - reach {{ t['size'] }} members</small>
+{% endif %}
+</div>
+{% endfor %}
+</div>
 </div>
 
 <div class="card">
@@ -2855,6 +2985,16 @@ ADMIN_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <textarea name="instructions" rows="4" maxlength="1000" required>{{ instructions }}</textarea>
 <button class="primary">Save instructions</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Welcome text (moving banner)</h2>
+<p class="muted">Shown in the moving banner at the top of every page.</p>
+<form method="post" action="{{ url_for('admin_welcome') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input name="welcome_text" value="{{ welcome_text }}" maxlength="120" required>
+<button class="primary">Save welcome text</button>
 </form>
 </div>
 
