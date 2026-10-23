@@ -2103,7 +2103,7 @@ BASE = """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#050c13">
-<title>Vedo Ai Investment</title>
+<title>Vedo Invest</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -2465,7 +2465,7 @@ input[type=file]{padding:10px;}
 {% set ep = request.endpoint %}
 <header class="top">
 <nav>
-<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>Vedo Ai Investment</span></a>
+<a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>Vedo Invest</span></a>
 {% if me %}
 <div class="tabs">
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
@@ -3619,7 +3619,7 @@ app.jinja_loader = DictLoader({"base": BASE})
 if __name__ == "__main__":
     init_db()
     print("\n======================================")
-    print(" VEDO INVESTMENT")
+    print(" VEDO INVEST")
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
