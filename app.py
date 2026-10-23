@@ -3040,18 +3040,18 @@ TOPUP_BODY = """
 <div class="card note">
 <h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
-<h2>{% if admin_msg %}Message from the admin{% else %}Instructions from the admin{% endif %}</h2>
+<h2>{% if admin_msg %}Message from the admin{% else %}Caution{% endif %}</h2>
 <p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
-<p class="muted small">Wait for a voucher code.</p>
+<p class="muted small">Voucher code at Top-up history below</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Enter you Bank Account Number  (</label>
+<label>Enter you Bank Account Number  (</label>)
 <input name="voucher_digits" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
-<p class="muted small" style="margin-top:8px">Only the admin can see the voucher information.</p>
-<label>Reason fo topup)</label>
+<label>Reason for topup</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
+<p class="muted small">Scroll to Top-up history below then swipe right for top up voucher</p>
 <button class="primary">Request top-up</button>
 </form>
 </div>
