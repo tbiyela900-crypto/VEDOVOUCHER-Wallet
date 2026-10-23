@@ -476,6 +476,16 @@ def normalize_phone(raw):
     return None
 
 
+def normalize_sa_phone(raw):
+    """Sign-up only: accept a South African cellphone number, return +27...
+    Accepted: 082 123 4567, 0821234567, +27 82 123 4567, 27821234567,
+    0027821234567. Anything else (other countries, landlines) -> None."""
+    phone = normalize_phone(raw)
+    if phone and re.fullmatch(r"\+27[6-8]\d{8}", phone):
+        return phone
+    return None
+
+
 def mask_phone(phone):
     phone = phone or ""
     return phone[:3] + "*" * max(0, len(phone) - 7) + phone[-4:]
@@ -808,7 +818,7 @@ def register():
         # `username` column (and in `phone`) so the rest of the app keeps
         # working unchanged.
         serial_number = request.form.get("serial_number", "").strip()
-        phone = normalize_phone(request.form.get("phone", ""))
+        phone = normalize_sa_phone(request.form.get("phone", ""))
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
         ref_code = request.form.get("referral", "").strip().upper()
@@ -830,8 +840,8 @@ def register():
 
         # Validate cellphone number (an SMS code is sent to it)
         if phone is None:
-            error = ("Enter a valid cellphone number, "
-                     "for example 082 123 4567.")
+            error = ("Enter a valid South African cellphone number, "
+                     "for example 082 123 4567 or +27 82 123 4567.")
 
         # Validate serial number (exactly 11 digits)
         elif (not serial_number.isascii()
@@ -2611,7 +2621,7 @@ REGISTER_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Serial number (11 digits)</label>
 <input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
-<label>Cellphone number (this will be your login)</label>
+<label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
 <p class="muted small" style="margin-top:6px">A 6-digit code will be shown on the next page to verify this number.</p>
 <label>Password (minimum 8 characters)</label>
