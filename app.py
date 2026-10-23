@@ -3311,7 +3311,7 @@ Upgrade to Level {{ next_level }}</button>
 """
 
 POTS_BODY = """
-<div class="card note">
+<div class7="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
 annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
