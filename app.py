@@ -3040,16 +3040,14 @@ TOPUP_BODY = """
 <div class="card note">
 <h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
-<h2>{% if admin_msg %}Message from the admin{% else %}Caution{% endif %}</h2>
 <p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
-<p class="muted small">Voucher code at Top-up history below</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Enter you Bank Account Number  (</label>)
+<label>Enter you Bank Account Number.
 <input name="voucher_digits" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
-<label>Reason for topup</label>
+<label>Reason for topup.</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
 <p class="muted small">Scroll to Top-up history below then swipe right for top up voucher</p>
 <button class="primary">Request top-up</button>
@@ -3218,7 +3216,7 @@ Upgrade to Level {{ next_level }}</button>
 """
 
 POTS_BODY = """
-#<div class="card note">
+<div class="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
 annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
