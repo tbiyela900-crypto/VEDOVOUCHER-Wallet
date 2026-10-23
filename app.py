@@ -1466,17 +1466,22 @@ def get_topup_details(db, user_id):
 @app.route("/topup/select-level", methods=["POST"])
 @login_required
 def topup_select_level():
-    """Create a pending school top-up request when a level tile is tapped.
-
-    Because the amount/reason inputs are intentionally removed from the UI,
-    the request uses the configured minimum top-up amount and an empty note.
-    """
+    """Create a pending top-up request after the member selects a level and amount."""
     db = get_db()
     user = current_user()
     try:
         level = int(request.form.get("level", "0"))
     except (TypeError, ValueError):
         return jsonify(ok=False, message="Choose a valid level."), 400
+
+    cents = parse_amount(request.form.get("amount"),
+                         TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
+    if cents is None:
+        return jsonify(
+            ok=False,
+            message=(f"Enter an amount between {money(TOPUP_MIN_CENTS)} "
+                     f"and {money(TOPUP_MAX_CENTS)}.")
+        ), 400
     if level not in LEVELS or level <= user["level"]:
         return jsonify(ok=False, message="Tap a level above your current level."), 400
 
@@ -1491,9 +1496,9 @@ def topup_select_level():
     db.execute(
         "INSERT INTO topups (user_id, amount, level, note, status, created_at) "
         "VALUES (?,?,?, '', 'PENDING', ?)",
-        (user["id"], TOPUP_MIN_CENTS, level, now_iso()))
+        (user["id"], cents, level, now_iso()))
     db.commit()
-    return jsonify(ok=True, level=level,
+    return jsonify(ok=True, level=level, amount=money(cents),
                    message=f"Request for Level {level} sent.")
 
 
@@ -1568,11 +1573,11 @@ def topup():
             return (details[key] if details and details[key] else "-")
 
         info_rows = [
-            ("Bank name", val("Bank_name")),
-            ("Reference", val("Reference")),
-            ("Amount", val("Amount")),
-            ("Account number", val("Account_number")),
-            ("Payshap Account number", val("book_number")),
+            ("School name", val("school_name")),
+            ("Teacher's name", val("teacher_name")),
+            ("Student number", val("student_number")),
+            ("Reference number", val("reference_number")),
+            ("Book number", val("book_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
@@ -2081,8 +2086,8 @@ def admin_topup_details():
         target_id, label = 0, "everyone"
 
     fields = {key: request.form.get(key, "").strip()[:100]
-              for key in ("Bank_name", "Account_name", "Amount",
-                          "Account_number", "Pay Shap Id")}
+              for key in ("school_name", "teacher_name", "student_number",
+                          "reference_number", "book_number")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2101,15 +2106,15 @@ def admin_topup_details():
         flag = new_flag
 
     db.execute(
-        "INSERT INTO topup_details (user_id, Bank_name, Reference, "
-        "Amount, Account_number, Payshap, message, flag, "
+        "INSERT INTO topup_details (user_id, school_name, teacher_name, "
+        "student_number, reference_number, book_number, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
-        "Bank_name=excluded.Bank_name, "
-        "Reference=excluded.Reference, "
-        "Amount=excluded.Amount, "
-        "Account_number=excluded.Account_number, "
-        "Payshap=excluded.Payshap, message=excluded.message, "
+        "school_name=excluded.school_name, "
+        "teacher_name=excluded.teacher_name, "
+        "student_number=excluded.student_number, "
+        "reference_number=excluded.reference_number, "
+        "book_number=excluded.book_number, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
         (target_id, fields["school_name"], fields["teacher_name"],
          fields["student_number"], fields["reference_number"],
@@ -3337,13 +3342,13 @@ TOPUP_BODY = """
 <div class="sc-head">
 {% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="School flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['school_name'] if details and details['school_name'] else 'School top-up details' }}</h2>
+<h2>{{ details['Bank_name'] if details and details['Bank_name'] else 'Top up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
 </div>
 {% if details and details['message'] %}<div class="sc-msg">{{ details['message'] }}</div>{% endif %}
-<div class="sc-sec">School information</div>
+<div class="sc-sec">Top up information</div>
 <div class="sc-grid">
 {% for label, value in info_rows %}
 <div class="sc-row"><div><small>{{ label }}</small><b>{{ value }}</b></div><button type="button" class="sc-copy" data-copy="{{ value }}">Copy</button></div>
@@ -3392,9 +3397,14 @@ TOPUP_BODY = """
 </button>
 {% endfor %}
 </div>
-<section class="join-step" id="joinStep" {% if not user['selected_level'] %}hidden{% endif %}>
-<p class="join-level" id="joinTitle">{% if user['selected_level'] %}Level {{ user['selected_level'] }} selected{% else %}Choose a level to continue{% endif %}</p>
-<p class="level-hint" id="joinInfo">Tap a level to send a request and open the school details countdown. Requests use the minimum top-up amount of {{ money(TOPUP_MIN_CENTS) }}.</p>
+<section class="join-step" id="joinStep" hidden>
+<p class="join-level" id="joinTitle">Choose an amount for this level</p>
+<p class="level-hint" id="joinInfo">Enter your top-up amount, then press Enter to open the Top up details for 10 minutes.</p>
+<form id="topupAmountForm" novalidate>
+<label for="topupAmount">Amount (R)</label>
+<input id="topupAmount" name="amount" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter amount (R10–R50,000)" required>
+<button type="submit" class="primary" id="enterTopup">Enter</button>
+</form>
 <p id="saveStatus" class="level-hint" role="status" aria-live="polite"></p>
 </section>
 </div>
@@ -3405,24 +3415,48 @@ TOPUP_BODY = """
   var title=document.getElementById('joinTitle');
   var info=document.getElementById('joinInfo');
   var status=document.getElementById('saveStatus');
+  var form=document.getElementById('topupAmountForm');
+  var amountInput=document.getElementById('topupAmount');
+  var enterButton=document.getElementById('enterTopup');
+  var selectedLevel=null;
   var csrf={{ csrf_token()|tojson }};
-  if(!pick)return;
+  if(!pick || !form)return;
+
   pick.querySelectorAll('button[data-level]').forEach(function(btn){
     btn.addEventListener('click',function(){
-      var level=btn.getAttribute('data-level');
+      selectedLevel=btn.getAttribute('data-level');
       pick.querySelectorAll('.tile').forEach(function(tile){tile.classList.remove('selected');});
       btn.classList.add('selected');
       step.hidden=false;
-      title.textContent='Sending request for Level '+level+'…';
-      info.textContent='Opening school details and countdown…';
-      status.textContent='Sending your request…';
-      var fd=new FormData();fd.append('level',level);fd.append('csrf_token',csrf);
-      fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
-        .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not save selection.');return data;});})
-        .then(function(data){status.textContent=data.message||'Request sent. Opening school details…';window.location.reload();})
-        .catch(function(err){status.textContent=err.message||'Could not send request. Please try again.';btn.disabled=false;});
+      title.textContent='Level '+selectedLevel+' selected';
+      info.textContent='Enter your amount, then press Enter. The Top up details will open for 10 minutes.';
+      status.textContent='';
+      amountInput.value='';
+      amountInput.focus();
       step.scrollIntoView({behavior:'smooth',block:'nearest'});
     });
+  });
+
+  form.addEventListener('submit',function(ev){
+    ev.preventDefault();
+    if(!selectedLevel){status.textContent='Tap a level first.';return;}
+    var amount=amountInput.value.trim();
+    var numeric=Number(amount);
+    if(!amount || !Number.isFinite(numeric) || numeric<10 || numeric>50000){
+      status.textContent='Enter an amount from R10 to R50,000.';
+      amountInput.focus();
+      return;
+    }
+    enterButton.disabled=true;
+    status.textContent='Sending your request…';
+    var fd=new FormData();
+    fd.append('level',selectedLevel);
+    fd.append('amount',amount);
+    fd.append('csrf_token',csrf);
+    fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
+      .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not send request.');return data;});})
+      .then(function(data){status.textContent=data.message||'Request sent. Opening Top up details…';window.location.reload();})
+      .catch(function(err){status.textContent=err.message||'Could not send request. Please try again.';enterButton.disabled=false;});
   });
 })();
 </script>
@@ -3699,22 +3733,22 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>Bnkl name</label>
-<input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
+<label>Bank name</label>
+<input name="Bank name" maxlength="100" value="{{ gd['Bank name'] if gd else '' }}">
 <label>Reference</label>
-<input name="Bank_name" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
+<input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
 <label>Amount</label>
-<input name="student_number" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
-<label>Reference number</label>
-<input name="Account" maxlength="100" value="{{ gd['Account number'] if gd else '' }}">
+<input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
+<label>Pay shap</label>
+<input name="Account number" maxlength="100" value="{{ gd['Account number'] if gd else '' }}">
 <label>Book number</label>
-<input name="Payshap" maxlength="100" value="{{ gd['Payshap'] if gd else '' }}">
+<input name="Pay shap" maxlength="100" value="{{ gd['Pay shap'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
 <input type="file" name="flag" accept="image/png,image/jpeg,image/gif,image/webp">
 {% if gd and gd['flag'] %}<p class="muted small" style="margin-top:8px">Current global flag: <img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:24px;vertical-align:middle;border-radius:3px"></p>{% endif %}
-<button class="primary">Save school details</button>
+<button class="primary">Top up details</button>
 </form>
 <script>
 (function () {
@@ -3732,18 +3766,18 @@ ADMIN_BODY = """
 </script>
 
 {% if gd or specific_details %}
-<h2 style="margin-top:22px">Top Information</h2>
+<h2 style="margin-top:22px">Top up info</h2>
 <table>
-<tr><th>For</th><th>Bank</th><th>Teacher</th><th>Amount</th><th>Payshap.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>Bank</th><th>Reference</th><th>Amount</th><th>Account no.</th><th>Payshap id.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference_name'] or '-' }}</td><td>{{ gd['Account_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['Account_number'] or '-' }}</td><td>{{ gd['Payshap id'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
-<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the Top up details?');">
+<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['school_name'] or '-' }}</td><td>{{ s['teacher_name'] or '-' }}</td><td>{{ s['student_number'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['book_number'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['Payshap id'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
