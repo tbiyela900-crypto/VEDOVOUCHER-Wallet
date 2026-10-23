@@ -157,8 +157,8 @@ DEFAULT_TOPUP_INSTRUCTIONS = (
 # --- Savings pots ----------------------------------------------------------
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
-POT_APR_PERCENT = {
-    1: Decimal("4.0."), 2: Decimal("4.5"), 3: Decimal("5.0"),
+#POT_APR_PERCENT = {
+    1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
     4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
     7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
 }
