@@ -1,96 +1,159 @@
-"""
-Vedo Ai Investment  -  advanced interface edition
-=================================================================
+                INSERT INTO vouchers (
+                    code,
+                    level,
+                    created_at
+                )
+                VALUES (?,?,?)
+                """,
+                (
+                    code,
+                    level,
+                    now_iso()
+                )
+            )
 
-Features
-  * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
-    verified with an SMS one-time code (OTP) before the first login.
-    The verified cellphone number IS the login ID (no account number).
-  * TOP-UP page looks like the check-in page: the member enters an amount and
-    a reason, then taps a level tile. The tiles close and a WHITE details tab
-    opens for 10 minutes showing the school name, teacher's name, student
-    number, reference number and book number, a small school flag and a red
-    message. ALL of that information is entered by the admin only (Admin
-    page > School top-up details, for everyone or for one member). The member
-    can copy every line.
-  * Admin approval of a top-up only marks it approved. It does NOT add any
-    money to the balance.
-  * The balance only grows through the daily check-in tasks (and referral
-    bonuses, savings-pot interest, etc.), or when the admin adds balance to
-    a member by hand (Admin page > All members > Add balance).
-  * Daily check-in (level reward / 24) with a special 7-day streak congratulation
-  * Referral codes and team
-  * Simulated WITHDRAWALS: user requests a cash-out of money,
-                          admin approves/rejects (rejected = refunded).
-  * TEAM VIEW           : each team member's level and points (balance)
-  * LEVEL UPGRADES      : spend balance to move up one level, costs are public
-  * SAVINGS POTS        : lock part of the balance for 1-9 weeks and earn a
-                          clearly labelled, realistic annual interest rate
-                          (simple interest, NOT a multiplier)
-  * PROFILE             : user (and admin) can see the details entered when
-                          the account was created
-  * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
-                          pots, a full transaction ledger, can ADD BALANCE to
-                          a member and RESET a member's password
+            print(f"  Level {level}: {code}")
 
-Verification code
-  No SMS provider is used. The 6-digit code is shown inside the app on the
-  verify page (numbers only).
+    # Top-up instructions
+    if not db.execute(
+        "SELECT 1 FROM settings WHERE key='topup_instructions'"
+    ).fetchone():
 
-Run:
-  pip install flask
-  python app.py
-  http://127.0.0.1:5000
-"""
-
-import hashlib
-import hmac
-import os
-import re
-import secrets
-import sqlite3
-import string
-import time
-from datetime import datetime, timedelta, timezone
-from decimal import Decimal, ROUND_HALF_UP
-from functools import wraps
-
-from flask import (
-    Flask, abort, flash, g, jsonify, redirect, render_template_string,
-    request, send_from_directory, session, url_for,
-)
-from jinja2 import DictLoader
-from markupsafe import Markup
-from werkzeug.security import check_password_hash, generate_password_hash
-
-
-# ============================================================================
-# CONFIGURATION
-# ============================================================================
-
-BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get(
-    "DB_PATH",
-    os.path.join(BASE_DIR, "rewards.db")
-)
-
-def backup_database():
-    """Create a consistent SQLite backup on persistent storage."""
-    backup_dir = "/var/data/backups"
-    os.makedirs(backup_dir, exist_ok=True)
-
-    if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(
-            f"Database not found: {DB_PATH}"
+        set_setting(
+            db,
+            "topup_instructions",
+            DEFAULT_TOPUP_INSTRUCTIONS
         )
 
-    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(
-        backup_dir, f"rewards_{stamp}.db"
-    )
+    db.commit()
+    db.close()
 
-    source = sqlite3.connect(DB_PATH, timeout=30)
-    destination = sqlite3.connect(backup_path)
 
-    try:
+init_db()
+
+# ============================================================================
+# AUTHENTICATION / CSRF
+# ============================================================================
+
+def current_user():
+    uid = session.get("uid")
+    if uid is None:
+        return None
+    return get_db().execute("SELECT * FROM users WHERE id=?",
+                            (uid,)).fetchone()
+
+
+def login_required(view):
+    @wraps(view)
+    def wrapped(*args, **kwargs):
+        if current_user() is None:
+            flash("Please log in first.", "error")
+            return redirect(url_for("login"))
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def admin_required(view):
+    @wraps(view)
+    @login_required
+    def wrapped(*args, **kwargs):
+        if not current_user()["is_admin"]:
+            abort(403)
+        return view(*args, **kwargs)
+    return wrapped
+
+
+def csrf_token():
+    if "csrf" not in session:
+        session["csrf"] = secrets.token_hex(16)
+    return session["csrf"]
+
+
+@app.before_request
+def check_csrf():
+    if request.method != "POST":
+        return None
+    sent = request.form.get("csrf_token", "")
+    good = session.get("csrf", "")
+    if sent and good and hmac.compare_digest(sent.encode(), good.encode()):
+        return None
+
+    # Expired page / lost session cookie: recover nicely on the sign-in pages.
+    ep = request.endpoint
+    if ep == "verify_resend" and request.headers.get(
+            "X-Requested-With") == "fetch":
+        return jsonify(ok=False, redirect=url_for("login"),
+                       message="Your page expired. Please log in again.")
+    if ep in ("login", "register", "verify", "verify_resend"):
+        flash("Your page expired. Please try again.", "error")
+        return redirect(url_for("register" if ep == "register" else "login"))
+    abort(400, "Invalid or missing CSRF token. Go back and reload.")
+
+
+@app.context_processor
+def inject_globals():
+    return {
+        "csrf_token": csrf_token,
+        "me": current_user(),
+        "LEVELS": LEVELS,
+        "money": money,
+        "level_reward": level_reward,
+        "daily_reward": daily_reward,
+        "UPGRADE_COST_CENTS": UPGRADE_COST_CENTS,
+        "POT_APR_PERCENT": POT_APR_PERCENT,
+        "POT_WEEKS": POT_WEEKS,
+        "pot_interest": pot_interest_cents,
+        "icon": icon,
+        "mask_phone": mask_phone,
+        "welcome_text": get_setting(get_db(), "welcome_text",
+                                    DEFAULT_WELCOME_TEXT),
+    }
+
+
+# ============================================================================
+# REGISTER / LOGIN / LOGOUT
+# ============================================================================
+
+@app.route("/register", methods=["GET", "POST"])
+def register():
+    error = None
+
+    if request.method == "POST":
+        # The verified CELLPHONE NUMBER is the login ID. It is stored in the
+        # `username` column (and in `phone`) so the rest of the app keeps
+        # working unchanged.
+        serial_number = request.form.get("serial_number", "").strip()
+        phone = normalize_sa_phone(request.form.get("phone", ""))
+        password = request.form.get("password", "")
+        confirm = request.form.get("confirm", "")
+        ref_code = request.form.get("referral", "").strip().upper()
+        level_code = request.form.get("level_code", "").strip().upper()
+
+        db = get_db()
+
+        # Free up numbers held by sign-ups that never verified (over 1 hour old)
+        db.execute("DELETE FROM otps WHERE user_id IN (SELECT id FROM users "
+                   "WHERE phone_verified=0 AND is_admin=0 "
+                   "AND created_at < datetime('now','-1 hour'))")
+        db.execute("DELETE FROM users WHERE phone_verified=0 AND is_admin=0 "
+                   "AND created_at < datetime('now','-1 hour')")
+        db.commit()
+
+        referrer = None
+        voucher = None
+        start_level = 0
+
+        # Validate cellphone number (an SMS code is sent to it)
+        if phone is None:
+            error = ("Enter a valid South African cellphone number, "
+                     "for example 082 123 4567 or +27 82 123 4567.")
+
+        # Validate serial number (exactly 11 digits)
+        elif (not serial_number.isascii()
+                or not serial_number.isdigit()
+                or len(serial_number) != 11):
+            error = "Serial number must contain exactly 11 digits."
+
+        # Validate password
+        elif len(password) < 8:
+            error = "Password must be at least 8 characters."
