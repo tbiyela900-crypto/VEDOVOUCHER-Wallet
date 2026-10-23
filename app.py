@@ -2542,18 +2542,6 @@ REGISTER_BODY = """
 <label>Cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required autofocus>
 <p class="muted small" style="margin-top:6px">Put 6-digit code showing.</p>
-<label>Cereal/Serial Number</label>
-<input
-    type="text"
-    name="serial_number"
-    value="{{ form.get('serial_number','') }}"
-    maxlength="11"
-    minlength="11"
-    inputmode="numeric"
-    pattern="[0-9]{11}"
-    placeholder="Enter 11-digit cereal/serial number"
-    required
->
 <label>Password (minimum 8 characters)</label>
 <input name="password" type="password" autocomplete="new-password" required>
 <label>Confirm password</label>
@@ -2561,9 +2549,6 @@ REGISTER_BODY = """
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
 <label>Level code from the admin (optional)</label>
-<input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. L3-ABCD-EFGH" autocomplete="off">
-<button class="primary" style="width:100%">Join</button>
-</form>
 <p class="muted" style="margin-top:16px">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
 </div>
 </div>
