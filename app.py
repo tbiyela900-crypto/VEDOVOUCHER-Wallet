@@ -2536,12 +2536,12 @@ REGISTER_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Create account</h1>
-<p class="muted">You start at Level 0, or at the level of your level code from the admin.</p>
+<p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required autofocus>
-<p class="muted small" style="margin-top:6px">We will send a 6-digit code by SMS to confirm this number.</p>
+<p class="muted small" style="margin-top:6px">Put 6-digit code showing.</p>
 <label>Cereal/Serial Number</label>
 <input
     type="text"
@@ -2878,7 +2878,7 @@ CHECKIN_BODY = """
 {% set pct = (completed_n / total * 100)|int %}
 <h2>Today's tasks - Level {{ user['level'] }}</h2>
 <p>Finish all <strong>{{ total }}</strong> tasks to earn today's <strong>{{ money(daily) }}</strong>.
-Tap a task and wait 5 seconds while it loads. Every finished task adds its reward to your balance straight away.</p>
+Tap to complete tasks.</p>
 <p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
 <div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
 <div class="bar"><b id="progbar" style="width:{{ pct }}%"></b></div>
@@ -3047,10 +3047,10 @@ TOPUP_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Bank Account Number followed by 00000 (16 digits)</label>
-<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="16" maxlength="11" placeholder="16 digits" autocomplete="off" required>
+<label>Enter you Bank Account Number  (</label>
+<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
 <p class="muted small" style="margin-top:8px">Only the admin can see the voucher information.</p>
-<label>Note for the admin (reason fo topup)</label>
+<label>Reason fo topup)</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
 <button class="primary">Request top-up</button>
 </form>
@@ -3076,8 +3076,7 @@ TOPUP_BODY = """
 WITHDRAW_BODY = """
 <div class="card note">
 <h1>Withdraw (money)</h1>
-<p class="muted">A withdrawal request only moves money
-out of your balance for the admin to approve. No ban. Rejected requests are refunded.</p>
+<p class="muted">Enter withdrawal request. Rejected requests are refunded.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -3174,12 +3173,7 @@ UPGRADE_BODY = """
 <p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['points']) }}</strong></p>
 <h2>Rules</h2>
 <ul>
-<li>You can move up <b>one level at a time</b>.</li>
-<li>The cost is paid from your balance (earn it with your daily check-in).</li>
-<li>The cost of a level = 50% of the difference between that level's total reward and the level below it.</li>
-<li>Upgrades are final: they cannot be refunded or reversed.</li>
-<li>A higher level means a higher daily check-in reward (level reward / 24).</li>
-</ul>
+
 {% if next_level %}
 {% set cost = UPGRADE_COST_CENTS[next_level] %}
 {% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
@@ -3202,7 +3196,7 @@ Upgrade to Level {{ next_level }}</button>
 
 <div class="card">
 <h2>Redeem a voucher code</h2>
-<p class="muted">When the admin approves your top-up you receive a voucher code (see your Top up history). Enter it here to move to its level.</p>
+<p class="muted">Enter voucher here to move to your level.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Voucher code</label>
