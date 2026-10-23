@@ -2221,8 +2221,17 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .hello{margin:0 0 18px;font-weight:600;opacity:.9;}
 .lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
 .balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
-.fp{width:54px;height:54px;border-radius:50%;display:grid;place-items:center;background:rgba(255,255,255,.10);border:1px solid rgba(255,255,255,.25);}
-.fp .ic{width:28px;height:28px;}
+.fpwrap{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none;}
+.fp{width:78px;height:78px;padding:0;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#031016;background:linear-gradient(135deg,#1fd6a4,#8ff5dc);border:3px solid rgba(255,255,255,.9);box-shadow:0 8px 24px rgba(0,0,0,.35);animation:fppulse 2s ease-out infinite;font:inherit;}
+.fp .ic{width:44px;height:44px;stroke-width:2.2;}
+.fp:hover{filter:brightness(1.08);}
+.fp:active{transform:scale(.94);}
+.fp.open{animation:none;background:#fff;box-shadow:0 0 22px rgba(31,214,164,.85);}
+.fpcap{font-size:.74rem;font-weight:800;letter-spacing:.3px;color:#eafff8;text-align:center;}
+@keyframes fppulse{0%{box-shadow:0 0 0 0 rgba(31,214,164,.75),0 8px 24px rgba(0,0,0,.35);}70%{box-shadow:0 0 0 20px rgba(31,214,164,0),0 8px 24px rgba(0,0,0,.35);}100%{box-shadow:0 0 0 0 rgba(31,214,164,0),0 8px 24px rgba(0,0,0,.35);}}
+.actions.closed{display:none;}
+.actions.reveal{animation:revealin .35s ease-out;}
+@keyframes revealin{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 20px;}
 .chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:600;}
 .actions{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;background:rgba(3,12,18,.45);border-radius:18px;padding:12px 6px;}
@@ -2439,6 +2448,7 @@ input[type=file]{padding:10px;}
   .hs-slide img,.hs-slide.active img{transition:none;transform:none;}
   button.tile.pulse{animation:none;}
   .cg-box{animation:none;}
+  .fp,.actions.reveal{animation:none;}
   .cg i.cf{display:none;}
   .ticker{overflow-x:auto;}
 }
@@ -2654,14 +2664,17 @@ DASH_BODY = """
 <p class="lbl">Available balance</p>
 <div class="balance">{{ money(user['points']) }}</div>
 </div>
-<div class="fp">{{ icon('fingerprint') }}</div>
+<div class="fpwrap">
+<button type="button" class="fp" id="fp" aria-expanded="false" aria-controls="heroactions" aria-label="Open menu">{{ icon('fingerprint') }}</button>
+<span class="fpcap" id="fpcap">Tap to open menu</span>
+</div>
 </div>
 <div class="chips">
 <span class="chip">Level {{ user['level'] }}</span>
 <span class="chip">{{ user['streak'] }} day streak</span>
 <span class="chip">{{ money(locked) }} in pots</span>
 </div>
-<div class="actions">
+<div class="actions closed" id="heroactions">
 <a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
 <a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
@@ -2913,6 +2926,24 @@ DASH_BODY = """
 {% endfor %}
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
 </div>
+
+<script>
+(function () {
+  var btn = document.getElementById('fp');
+  var menu = document.getElementById('heroactions');
+  var cap = document.getElementById('fpcap');
+  if (!btn || !menu) { return; }
+  btn.addEventListener('click', function () {
+    var opening = menu.classList.contains('closed');
+    menu.classList.toggle('closed', !opening);
+    menu.classList.toggle('reveal', opening);
+    btn.classList.toggle('open', opening);
+    btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
+    btn.setAttribute('aria-label', opening ? 'Close menu' : 'Open menu');
+    cap.textContent = opening ? 'Tap to close' : 'Tap to open menu';
+  });
+})();
+</script>
 """
 
 CHECKIN_BODY = """
