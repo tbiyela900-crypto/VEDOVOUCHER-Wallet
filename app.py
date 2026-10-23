@@ -1466,19 +1466,35 @@ def get_topup_details(db, user_id):
 @app.route("/topup/select-level", methods=["POST"])
 @login_required
 def topup_select_level():
-    """Record a member's chosen level without creating a top-up request."""
+    """Create a pending school top-up request when a level tile is tapped.
+
+    Because the amount/reason inputs are intentionally removed from the UI,
+    the request uses the configured minimum top-up amount and an empty note.
+    """
     db = get_db()
     user = current_user()
     try:
         level = int(request.form.get("level", "0"))
     except (TypeError, ValueError):
         return jsonify(ok=False, message="Choose a valid level."), 400
-    if level not in LEVELS:
-        return jsonify(ok=False, message="Choose a valid level."), 400
+    if level not in LEVELS or level <= user["level"]:
+        return jsonify(ok=False, message="Tap a level above your current level."), 400
+
+    pending = db.execute(
+        "SELECT COUNT(*) AS n FROM topups WHERE user_id=? AND status='PENDING'",
+        (user["id"],)).fetchone()["n"]
+    if pending >= 3:
+        return jsonify(ok=False, message="You already have 3 pending top-up requests."), 400
+
     db.execute("UPDATE users SET selected_level=? WHERE id=?",
                (level, user["id"]))
+    db.execute(
+        "INSERT INTO topups (user_id, amount, level, note, status, created_at) "
+        "VALUES (?,?,?, '', 'PENDING', ?)",
+        (user["id"], TOPUP_MIN_CENTS, level, now_iso()))
     db.commit()
-    return jsonify(ok=True, level=level, message=f"Level {level} selected.")
+    return jsonify(ok=True, level=level,
+                   message=f"Request for Level {level} sent.")
 
 
 @app.route("/topup", methods=["GET", "POST"])
@@ -1552,11 +1568,11 @@ def topup():
             return (details[key] if details and details[key] else "-")
 
         info_rows = [
-            ("Bank name", val("Bank name")),
-            ("Account name", val("Account_name")),
+            ("Bank name", val("Bank_name")),
+            ("Reference", val("Reference")),
+            ("Amount", val("Amount")),
             ("Account number", val("Account_number")),
-            ("Reference numbe", val("reference_number")),
-            ("Reference number", val("Reference_number")),
+            ("Payshap Account number", val("book_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
@@ -2065,8 +2081,8 @@ def admin_topup_details():
         target_id, label = 0, "everyone"
 
     fields = {key: request.form.get(key, "").strip()[:100]
-              for key in ("school_name", "teacher_name", "student_number",
-                          "reference_number", "book_number")}
+              for key in ("Bank_name", "Account_name", "Amount",
+                          "Account_number", "Pay Shap Id")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2085,15 +2101,15 @@ def admin_topup_details():
         flag = new_flag
 
     db.execute(
-        "INSERT INTO topup_details (user_id, school_name, teacher_name, "
-        "student_number, reference_number, book_number, message, flag, "
+        "INSERT INTO topup_details (user_id, Bank_name, Reference, "
+        "Amount, Account_number, Payshap, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
-        "school_name=excluded.school_name, "
-        "teacher_name=excluded.teacher_name, "
-        "student_number=excluded.student_number, "
-        "reference_number=excluded.reference_number, "
-        "book_number=excluded.book_number, message=excluded.message, "
+        "Bank_name=excluded.Bank_name, "
+        "Reference=excluded.Reference, "
+        "Amount=excluded.Amount, "
+        "Account_number=excluded.Account_number, "
+        "Payshap=excluded.Payshap, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
         (target_id, fields["school_name"], fields["teacher_name"],
          fields["student_number"], fields["reference_number"],
@@ -3371,14 +3387,14 @@ TOPUP_BODY = """
 <h1>Tap the level you want</h1>
 <div class="level-pick" id="levelPick">
 {% for l in LEVELS %}
-<button type="button" class="tile t{{ l }}{% if user['selected_level'] == l %} selected{% endif %}" data-level="{{ l }}" data-reward="{{ level_reward(l) }}" data-daily="{{ daily_reward(l) }}">
-<b>✦ SCHOOL {{ l }}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} daily</span>
+<button type="button" class="tile t{{ l }}{% if user['selected_level'] == l %} selected{% endif %}" {% if l <= user['level'] %}disabled title="Already at or below your current level"{% endif %} data-level="{{ l }}" data-reward="{{ level_reward(l) }}" data-daily="{{ daily_reward(l) }}">
+<b>✦ LEVEL {{ l }}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} daily</span>
 </button>
 {% endfor %}
 </div>
 <section class="join-step" id="joinStep" {% if not user['selected_level'] %}hidden{% endif %}>
-<p class="join-level" id="joinTitle">{% if user['selected_level'] %}You selected School Level {{ user['selected_level'] }}{% else %}Select a school level{% endif %}</p>
-<p class="level-hint" id="joinInfo">{% if user['selected_level'] %}Your level choice has been saved for the admin. No top-up request has been submitted.{% else %}Tap a level above to select it. Your choice will be shown to the admin; this does not submit a top-up request.{% endif %}</p>
+<p class="join-level" id="joinTitle">{% if user['selected_level'] %}Level {{ user['selected_level'] }} selected{% else %}Choose a level to continue{% endif %}</p>
+<p class="level-hint" id="joinInfo">Tap a level to send a request and open the school details countdown. Requests use the minimum top-up amount of {{ money(TOPUP_MIN_CENTS) }}.</p>
 <p id="saveStatus" class="level-hint" role="status" aria-live="polite"></p>
 </section>
 </div>
@@ -3397,14 +3413,14 @@ TOPUP_BODY = """
       pick.querySelectorAll('.tile').forEach(function(tile){tile.classList.remove('selected');});
       btn.classList.add('selected');
       step.hidden=false;
-      title.textContent='You selected School Level '+level+' — would you like to join?';
-      info.textContent='Level reward: '+btn.getAttribute('data-reward')+' · Daily check-in: '+btn.getAttribute('data-daily');
-      status.textContent='Saving your selection…';
+      title.textContent='Sending request for Level '+level+'…';
+      info.textContent='Opening school details and countdown…';
+      status.textContent='Sending your request…';
       var fd=new FormData();fd.append('level',level);fd.append('csrf_token',csrf);
       fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
         .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not save selection.');return data;});})
-        .then(function(data){status.textContent='Selected level saved for the admin. No top-up request was submitted.';})
-        .catch(function(err){status.textContent=err.message||'Could not save selection. Please refresh and try again.';});
+        .then(function(data){status.textContent=data.message||'Request sent. Opening school details…';window.location.reload();})
+        .catch(function(err){status.textContent=err.message||'Could not send request. Please try again.';btn.disabled=false;});
       step.scrollIntoView({behavior:'smooth',block:'nearest'});
     });
   });
@@ -3542,7 +3558,7 @@ Upgrade to Level {{ next_level }}</button>
 
 <div class="card">
 <h2>Redeem a level code</h2>
-<p class="muted">Enter a Purchased code.</p>
+<p class="muted">Enter a level code from the admin to move to that level.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Level code</label>
