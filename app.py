@@ -3342,13 +3342,13 @@ TOPUP_BODY = """
 <div class="sc-head">
 {% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="School flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['Bank_name'] if details and details['Bank_name'] else 'Top up details' }}</h2>
+<h2>{{ details['school_name'] if details and details['school_name'] else 'School top-up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
 </div>
 {% if details and details['message'] %}<div class="sc-msg">{{ details['message'] }}</div>{% endif %}
-<div class="sc-sec">Top up information</div>
+<div class="sc-sec">School information</div>
 <div class="sc-grid">
 {% for label, value in info_rows %}
 <div class="sc-row"><div><small>{{ label }}</small><b>{{ value }}</b></div><button type="button" class="sc-copy" data-copy="{{ value }}">Copy</button></div>
@@ -3399,7 +3399,7 @@ TOPUP_BODY = """
 </div>
 <section class="join-step" id="joinStep" hidden>
 <p class="join-level" id="joinTitle">Choose an amount for this level</p>
-<p class="level-hint" id="joinInfo">Enter your top-up amount, then press Enter to open the Top up details for 10 minutes.</p>
+<p class="level-hint" id="joinInfo">Enter your top-up amount, then press Enter to open the school details for 10 minutes.</p>
 <form id="topupAmountForm" novalidate>
 <label for="topupAmount">Amount (R)</label>
 <input id="topupAmount" name="amount" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter amount (R10–R50,000)" required>
@@ -3429,7 +3429,7 @@ TOPUP_BODY = """
       btn.classList.add('selected');
       step.hidden=false;
       title.textContent='Level '+selectedLevel+' selected';
-      info.textContent='Enter your amount, then press Enter. The Top up details will open for 10 minutes.';
+      info.textContent='Enter your amount, then press Enter. The school details will open for 10 minutes.';
       status.textContent='';
       amountInput.value='';
       amountInput.focus();
@@ -3455,7 +3455,7 @@ TOPUP_BODY = """
     fd.append('csrf_token',csrf);
     fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
       .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not send request.');return data;});})
-      .then(function(data){status.textContent=data.message||'Request sent. Opening Top up details…';window.location.reload();})
+      .then(function(data){status.textContent=data.message||'Request sent. Opening school details…';window.location.reload();})
       .catch(function(err){status.textContent=err.message||'Could not send request. Please try again.';enterButton.disabled=false;});
   });
 })();
@@ -3733,22 +3733,22 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>Bank name</label>
-<input name="Bank name" maxlength="100" value="{{ gd['Bank name'] if gd else '' }}">
-<label>Reference</label>
-<input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
-<label>Amount</label>
-<input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
-<label>Pay shap</label>
-<input name="Account number" maxlength="100" value="{{ gd['Account number'] if gd else '' }}">
+<label>School name</label>
+<input name="school_name" maxlength="100" value="{{ gd['school_name'] if gd else '' }}">
+<label>Teacher's name</label>
+<input name="teacher_name" maxlength="100" value="{{ gd['teacher_name'] if gd else '' }}">
+<label>Student number</label>
+<input name="student_number" maxlength="100" value="{{ gd['student_number'] if gd else '' }}">
+<label>Reference number</label>
+<input name="reference_number" maxlength="100" value="{{ gd['reference_number'] if gd else '' }}">
 <label>Book number</label>
-<input name="Pay shap" maxlength="100" value="{{ gd['Pay shap'] if gd else '' }}">
+<input name="book_number" maxlength="100" value="{{ gd['book_number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
 <input type="file" name="flag" accept="image/png,image/jpeg,image/gif,image/webp">
 {% if gd and gd['flag'] %}<p class="muted small" style="margin-top:8px">Current global flag: <img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:24px;vertical-align:middle;border-radius:3px"></p>{% endif %}
-<button class="primary">Top up details</button>
+<button class="primary">Save school details</button>
 </form>
 <script>
 (function () {
@@ -3766,18 +3766,18 @@ ADMIN_BODY = """
 </script>
 
 {% if gd or specific_details %}
-<h2 style="margin-top:22px">Top up info</h2>
+<h2 style="margin-top:22px">Saved school details</h2>
 <table>
-<tr><th>For</th><th>Bank</th><th>Reference</th><th>Amount</th><th>Account no.</th><th>Payshap id.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>School</th><th>Teacher</th><th>Student no.</th><th>Reference no.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['Account_number'] or '-' }}</td><td>{{ gd['Payshap id'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['school_name'] or '-' }}</td><td>{{ gd['teacher_name'] or '-' }}</td><td>{{ gd['student_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['Payshap id'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['school_name'] or '-' }}</td><td>{{ s['teacher_name'] or '-' }}</td><td>{{ s['student_number'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['book_number'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
