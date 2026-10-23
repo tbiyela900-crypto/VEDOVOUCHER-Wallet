@@ -3171,8 +3171,15 @@ WITHDRAW_BODY = """
 <div class="card note">
 <h1>Withdraw (money)</h1>
 <p class="muted">Enter withdrawal request. Rejected requests are refunded.</p>
-<p class="muted">Enter withdrawal in of term R150, R250.. R1500..R15000.</p>
-<p class="muted">Withdraws takes 48 hours.</p>
+<p class="muted">Withdrawals R150.</p>
+<p class="muted">Withdrawals R500.</p>
+<p class="muted">Withdrawals R1500.</p>
+<p class="muted">Withdrawals R4500.</p>
+<p class="muted">Withdrawals R12000.</p>
+<p class="muted">Withdrawals R25000.</p>
+<p class="muted">Withdrawals R30000.</p>
+<p class="muted">Withdrawals R50000.</p>
+<p class="muted">Withdraws takes 24 hours.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -3311,7 +3318,7 @@ Upgrade to Level {{ next_level }}</button>
 """
 
 POTS_BODY = """
-<div class7="card note">
+<div class="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
 annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
