@@ -1,160 +1,96 @@
-        note = request.form.get("note", "").strip()[:100]
-        try:
-            level = int(request.form.get("level", 0))
-        except ValueError:
-            level = 0
+"""
+Vedo Ai Investment  -  advanced interface edition
+=================================================================
 
-        if cents is None:
-            flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
-                  f"{money(TOPUP_MAX_CENTS)}.", "error")
-            return redirect(url_for("topup"))
+Features
+  * Accounts, login/logout, members start at Level 0 and earn 0 until top up
+  * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
+    verified with an SMS one-time code (OTP) before the first login.
+    The verified cellphone number IS the login ID (no account number).
+  * TOP-UP page looks like the check-in page: the member enters an amount and
+    a reason, then taps a level tile. The tiles close and a WHITE details tab
+    opens for 10 minutes showing the school name, teacher's name, student
+    number, reference number and book number, a small school flag and a red
+    message. ALL of that information is entered by the admin only (Admin
+    page > School top-up details, for everyone or for one member). The member
+    can copy every line.
+  * Admin approval of a top-up only marks it approved. It does NOT add any
+    money to the balance.
+  * The balance only grows through the daily check-in tasks (and referral
+    bonuses, savings-pot interest, etc.), or when the admin adds balance to
+    a member by hand (Admin page > All members > Add balance).
+  * Daily check-in (level reward / 24) with a special 7-day streak congratulation
+  * Referral codes and team
+  * Simulated WITHDRAWALS: user requests a cash-out of money,
+                          admin approves/rejects (rejected = refunded).
+  * TEAM VIEW           : each team member's level and points (balance)
+  * LEVEL UPGRADES      : spend balance to move up one level, costs are public
+  * SAVINGS POTS        : lock part of the balance for 1-9 weeks and earn a
+                          clearly labelled, realistic annual interest rate
+                          (simple interest, NOT a multiplier)
+  * PROFILE             : user (and admin) can see the details entered when
+                          the account was created
+  * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
+                          pots, a full transaction ledger, can ADD BALANCE to
+                          a member and RESET a member's password
 
-        if level not in LEVELS or level <= user["level"]:
-            flash("Tap a level above your current level.", "error")
-            return redirect(url_for("topup"))
+Verification code
+  No SMS provider is used. The 6-digit code is shown inside the app on the
+  verify page (numbers only).
 
-        pending = db.execute(
-            "SELECT COUNT(*) AS n FROM topups WHERE user_id=? "
-            "AND status='PENDING'", (user["id"],)).fetchone()["n"]
-        if pending >= 3:
-            flash("You already have 3 pending top-up requests.", "error")
-            return redirect(url_for("topup"))
+Run:
+  pip install flask
+  python app.py
+  http://127.0.0.1:5000
+"""
 
-        db.execute(
-            "INSERT INTO topups (user_id, amount, level, note, status, "
-            "created_at) VALUES (?,?,?,?, 'PENDING', ?)",
-            (user["id"], cents, level, note, now_iso()))
-        db.commit()
-        flash(f"Top-up request for {money(cents)} (Level {level}) sent.", "ok")
-        return redirect(url_for("topup"))
+import hashlib
+import hmac
+import os
+import re
+import secrets
+import sqlite3
+import string
+import time
+from datetime import datetime, timedelta, timezone
+from decimal import Decimal, ROUND_HALF_UP
+from functools import wraps
 
-    history = db.execute(
-        "SELECT * FROM topups WHERE user_id=? ORDER BY id DESC",
-        (user["id"],)).fetchall()
-    # A member-specific instruction replaces the global one for that member.
-    own = db.execute("SELECT text FROM user_instructions WHERE user_id=?",
-                     (user["id"],)).fetchone()
-    instructions = own["text"] if own else get_setting(
-        db, "topup_instructions", DEFAULT_TOPUP_INSTRUCTIONS)
-
-    # The school details tab stays open for 10 minutes after a request.
-    cutoff = (datetime.now(timezone.utc)
-              - timedelta(seconds=TOPUP_PANEL_SECONDS)
-              ).strftime("%Y-%m-%d %H:%M:%S")
-    active = db.execute(
-        "SELECT * FROM topups WHERE user_id=? AND status='PENDING' "
-        "AND created_at>=? ORDER BY id DESC LIMIT 1",
-        (user["id"], cutoff)).fetchone()
-
-    left, details, info_rows, req_rows = 0, None, [], []
-    if active:
-        age = (datetime.now(timezone.utc)
-               - _parse_ts(active["created_at"])).total_seconds()
-        left = int(TOPUP_PANEL_SECONDS - age)
-        if left <= 0:
-            active = None
-    if active:
-        details = get_topup_details(db, user["id"])
-
-        def val(key):
-            return (details[key] if details and details[key] else "-")
-
-        info_rows = [
-            ("School name", val("school_name")),
-            ("Teacher's name", val("teacher_name")),
-            ("Student number", val("student_number")),
-            ("Reference number", val("reference_number")),
-            ("Book number", val("book_number")),
-        ]
-        req_rows = [
-            ("Level", f"Level {active['level']}"),
-            ("Amount", money(active["amount"])),
-            ("Reason", active["note"] or "-"),
-        ]
-
-    return page(TOPUP_BODY, user=user, history=history,
-                instructions=instructions, active=active, left=left,
-                details=details, info_rows=info_rows, req_rows=req_rows,
-                TOPUP_MIN_CENTS=TOPUP_MIN_CENTS,
-                TOPUP_MAX_CENTS=TOPUP_MAX_CENTS)
+from flask import (
+    Flask, abort, flash, g, jsonify, redirect, render_template_string,
+    request, send_from_directory, session, url_for,
+)
+from jinja2 import DictLoader
+from markupsafe import Markup
+from werkzeug.security import check_password_hash, generate_password_hash
 
 
 # ============================================================================
-# WITHDRAWALS
+# CONFIGURATION
 # ============================================================================
 
-@app.route("/withdraw", methods=["GET", "POST"])
-@login_required
-def withdraw():
-    db = get_db()
-    user = current_user()
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+DB_PATH = os.environ.get(
+    "DB_PATH",
+    os.path.join(BASE_DIR, "rewards.db")
+)
 
-    if request.method == "POST":
-        cents = parse_amount(request.form.get("amount"), WITHDRAW_MIN_CENTS)
-        if cents is None:
-            flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).",
-                  "error")
-            return redirect(url_for("withdraw"))
+def backup_database():
+    """Create a consistent SQLite backup on persistent storage."""
+    backup_dir = "/var/data/backups"
+    os.makedirs(backup_dir, exist_ok=True)
 
-        if not debit(db, user["id"], cents, "WITHDRAW",
-                     "Withdrawal request (pending)"):
-            db.rollback()
-            flash("Insufficient play balance.", "error")
-            return redirect(url_for("withdraw"))
+    if not os.path.exists(DB_PATH):
+        raise FileNotFoundError(
+            f"Database not found: {DB_PATH}"
+        )
 
-        db.execute(
-            "INSERT INTO withdrawals (user_id, amount, bank_name, "
-            "account_number, account_holder, status, created_at) "
-            "VALUES (?, ?, 'DEMO', 'N/A', ?, 'PENDING', ?)",
-            (user["id"], cents, user["username"], now_iso()))
-        db.commit()
-        flash(f"Withdrawal request for {money(cents)} created. "
-              "It will be reviewed", "ok")
-        return redirect(url_for("withdraw"))
+    stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
+    backup_path = os.path.join(
+        backup_dir, f"rewards_{stamp}.db"
+    )
 
-    withdrawals = db.execute(
-        "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
-        (user["id"],)).fetchall()
-    return page(WITHDRAW_BODY, user=user, withdrawals=withdrawals,
-                WITHDRAW_MIN_CENTS=WITHDRAW_MIN_CENTS)
+    source = sqlite3.connect(DB_PATH, timeout=30)
+    destination = sqlite3.connect(backup_path)
 
-
-# ============================================================================
-# TEAM VIEW
-# ============================================================================
-
-@app.route("/team")
-@login_required
-def team():
-    db = get_db()
-    user = current_user()
-
-    members = db.execute(
-        "SELECT username, level, points, streak, created_at FROM users "
-        "WHERE referred_by=? AND phone_verified=1 "
-        "ORDER BY level DESC, points DESC",
-        (user["id"],)).fetchall()
-
-    earned = db.execute(
-        "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
-        "WHERE user_id=? AND kind='REFERRAL'", (user["id"],)).fetchone()["s"]
-
-    team_points = sum(m["points"] for m in members)
-
-    referrer = None
-    if user["referred_by"]:
-        referrer = db.execute("SELECT username FROM users WHERE id=?",
-                              (user["referred_by"],)).fetchone()
-
-    # Team tiers: a name and a team account number unlock at 5/10/15/20 members
-    count = len(members)
-    tiers = []
-    for size, name in TEAM_TIERS:
-        row = db.execute(
-            "SELECT account_number FROM team_tiers WHERE user_id=? AND members=?",
-            (user["id"], size)).fetchone()
-        if row is None and count >= size:
-            db.execute(
-                "INSERT OR IGNORE INTO team_tiers "
-                "(user_id, members, name, account_number, created_at) "
-                "VALUES (?,?,?,?,?)",
+    try:
