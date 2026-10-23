@@ -123,6 +123,7 @@ UPGRADE_COST_CENTS = {
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
 WITHDRAW_MIN_CENTS = 1000       # R10
+ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
     "Enter Amount"
@@ -1603,6 +1604,34 @@ def admin_reset_password(user_id):
     return redirect(url_for("admin"))
 
 
+@app.route("/admin/user/<int:user_id>/add-balance", methods=["POST"])
+@admin_required
+def admin_add_balance(user_id):
+    """Admin adds balance to a member. It is written to the transaction
+    ledger, so it shows in the member's activity and the admin ledger."""
+    back = request.form.get("q", "").strip()[:30] or None
+    cents = parse_amount(request.form.get("amount"), 1, ADMIN_ADD_MAX_CENTS)
+    note = request.form.get("note", "").strip()[:100]
+
+    if cents is None:
+        flash(f"Enter an amount from R0.01 to {money(ADMIN_ADD_MAX_CENTS)}.",
+              "error")
+        return redirect(url_for("admin", q=back))
+
+    db = get_db()
+    target = db.execute("SELECT id, username FROM users WHERE id=?",
+                        (user_id,)).fetchone()
+    if target is None:
+        flash("Member not found.", "error")
+        return redirect(url_for("admin", q=back))
+
+    credit(db, user_id, cents, "ADMIN_CREDIT",
+           note or "Balance added by admin")
+    db.commit()
+    flash(f"Added {money(cents)} to account {target['username']}.", "ok")
+    return redirect(url_for("admin", q=back))
+
+
 @app.route("/admin/topup/<int:topup_id>/<action>", methods=["POST"])
 @admin_required
 def admin_topup(topup_id, action):
@@ -1800,7 +1829,7 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .stat span{color:var(--muted);font-size:.84rem;}
 
 /* ---------- dashboard ---------- */
-.dash{display:grid;grid-template-columns:1.3fr 1fr;gap:16px;margin-bottom:16px;}
+.dash{display:grid;grid-template-columns:1fr 1.15fr;gap:16px;margin-bottom:16px;}
 .dash .card{margin-bottom:0;}
 .hero{border-radius:26px;padding:24px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
   background:
@@ -1892,7 +1921,7 @@ button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 .pill{background:var(--s2);border:1px solid var(--line);color:var(--muted);padding:3px 12px;border-radius:999px;font-size:.78rem;font-weight:700;}
 .hs{--dur:5s;position:relative;border-radius:18px;overflow:hidden;background:#03090e;border:1px solid var(--line);outline:none;}
 .hs:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
-.hs-stage{position:relative;height:clamp(220px,48vw,420px);}
+.hs-stage{position:relative;height:clamp(260px,52vw,480px);}
 .hs-slide{position:absolute;inset:0;margin:0;opacity:0;visibility:hidden;transition:opacity .7s ease,visibility .7s;}
 .hs-slide.active{opacity:1;visibility:visible;}
 .hs-bg{position:absolute;inset:-24px;background-size:cover;background-position:center;filter:blur(24px) brightness(.5) saturate(1.25);}
@@ -1904,7 +1933,7 @@ button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 .hs figcaption{position:absolute;left:0;right:0;bottom:0;padding:16px 20px 30px;display:flex;flex-direction:column;gap:4px;pointer-events:none;}
 .hs figcaption small{color:var(--brand);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.72rem;}
 .hs figcaption strong{font-size:1.2rem;line-height:1.3;color:#fff;text-shadow:0 2px 12px rgba(0,0,0,.7);}
-.hs-nav{position:absolute;top:calc(clamp(220px,48vw,420px) / 2 - 20px);width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(3,10,16,.55);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
+.hs-nav{position:absolute;top:calc(clamp(260px,52vw,480px) / 2 - 20px);width:40px;height:40px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(3,10,16,.55);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer;backdrop-filter:blur(6px);-webkit-backdrop-filter:blur(6px);}
 .hs-nav:hover{background:rgba(31,214,164,.5);}
 .hs-nav.prev{left:10px;} .hs-nav.next{right:10px;}
 .hs-bars{position:absolute;left:16px;right:16px;bottom:12px;display:flex;gap:6px;}
@@ -1916,6 +1945,30 @@ button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 @keyframes hsfill{from{width:0;}to{width:100%;}}
 .hs-empty{padding:34px 16px;text-align:center;color:var(--muted);background:var(--s2);border:1px dashed var(--line);border-radius:14px;}
 input[type=file]{padding:10px;}
+
+.hero{display:flex;flex-direction:column;}
+.hero .actions{margin-top:auto;}
+.hs-slide{cursor:zoom-in;}
+.hs-hint{margin:10px 0 0;}
+.moneywrap{display:flex;align-items:center;gap:28px;flex-wrap:wrap;}
+.moneywrap .donutwrap{margin:4px 0;flex:none;}
+.moneyside{flex:1;min-width:240px;}
+.lb{display:none;position:fixed;inset:0;z-index:100;flex-direction:column;background:rgba(2,7,11,.95);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);outline:none;}
+.lb.open{display:flex;}
+.lb-track{flex:1;display:flex;overflow-x:auto;overflow-y:hidden;scroll-snap-type:x mandatory;scrollbar-width:none;-webkit-overflow-scrolling:touch;}
+.lb-track::-webkit-scrollbar{display:none;}
+.lb-item{flex:0 0 100%;min-width:0;margin:0;scroll-snap-align:center;scroll-snap-stop:always;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;padding:64px 16px 56px;}
+.lb-item img{max-width:100%;max-height:calc(100vh - 240px);max-height:calc(100dvh - 240px);object-fit:contain;border-radius:12px;box-shadow:0 20px 60px rgba(0,0,0,.6);}
+.lb-item figcaption{max-width:720px;text-align:center;display:flex;flex-direction:column;gap:6px;}
+.lb-item figcaption small{color:var(--brand);font-weight:700;letter-spacing:.5px;text-transform:uppercase;font-size:.72rem;}
+.lb-item figcaption strong{font-size:1.1rem;line-height:1.4;color:#fff;}
+.lb-x{position:absolute;top:14px;right:14px;z-index:2;width:42px;height:42px;border-radius:50%;border:1px solid rgba(255,255,255,.3);background:rgba(255,255,255,.1);color:#fff;font-size:1.6rem;line-height:1;cursor:pointer;}
+.lb-count{position:absolute;top:22px;left:50%;transform:translateX(-50%);z-index:2;background:rgba(255,255,255,.1);border:1px solid rgba(255,255,255,.2);color:#fff;padding:3px 12px;border-radius:999px;font-size:.8rem;font-weight:700;}
+.lb-nav{position:absolute;top:50%;margin-top:-22px;z-index:2;width:44px;height:44px;border-radius:50%;border:1px solid rgba(255,255,255,.28);background:rgba(255,255,255,.1);color:#fff;font-size:1.7rem;line-height:1;cursor:pointer;}
+.lb-nav:hover{background:rgba(31,214,164,.5);}
+.lb-prev{left:12px;} .lb-next{right:12px;}
+.lb-hint{position:absolute;left:0;right:0;bottom:16px;text-align:center;color:var(--muted);font-size:.8rem;pointer-events:none;}
+@media (max-width:720px){ .lb-nav{display:none;} }
 
 /* ---------- login / register ---------- */
 .auth{max-width:440px;margin:30px auto 0;}
@@ -2111,47 +2164,6 @@ DASH_BODY = """
 </div>
 </section>
 
-<section class="card">
-<h2>Where your money is</h2>
-<div class="donutwrap">
-<svg class="donut" viewBox="0 0 100 100" role="img" aria-label="Available versus locked balance">
-<circle class="ring" cx="50" cy="50" r="40"/>
-{% if total %}
-<circle class="a1" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format(pct * 2.5133) }} 251.33"/>
-<circle class="a2" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format((100 - pct) * 2.5133) }} 251.33" stroke-dashoffset="-{{ '%.2f'|format(pct * 2.5133) }}"/>
-{% endif %}
-</svg>
-<div class="donut-mid"><b>{{ money(total) }}</b><span>Total</span></div>
-</div>
-<div class="legend">
-<span><i style="background:var(--brand)"></i>Available {{ money(user['points']) }}</span>
-<span><i style="background:var(--violet)"></i>Locked {{ money(locked) }}</span>
-</div>
-{% if next_cost %}
-<div class="progtxt"><span>Next: Level {{ user['level'] + 1 }}</span><span>{{ lvl_pct }}% of {{ money(next_cost) }}</span></div>
-<div class="bar"><b style="width:{{ lvl_pct }}%"></b></div>
-{% else %}
-<p class="muted small">You are at the highest level.</p>
-{% endif %}
-</section>
-</div>
-
-<div class="card">
-<h2>Daily check-in</h2>
-<div class="dots" aria-label="Streak progress">
-{% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
-</div>
-<p>Today's reward: <strong>{{ money(reward) }}</strong></p>
-{% if bonus %}<p>Streak bonus: <strong class="pos">+{{ money(bonus) }}</strong></p>{% endif %}
-<p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
-the daily check-in amount is the level reward divided by 24.</p>
-<p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
-{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks (5 seconds each) to earn today's reward.</p>{% endif %}
-<form method="get" action="{{ url_for('checkin') }}">
-<button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
-</form>
-</div>
-
 <div class="card">
 <div class="feedhead">
 <h2>Latest from the admin</h2>
@@ -2185,16 +2197,45 @@ the daily check-in amount is the level reward divided by 24.</p>
 <div class="hs-bars">{% for p in posts %}<i><b></b></i>{% endfor %}</div>
 {% endif %}
 </div>
+<p class="muted small hs-hint">Tap a photo to open it full screen{% if posts|length > 1 %} and swipe through all posts{% endif %}.</p>
+
+<div class="lb" id="lb" tabindex="-1" role="dialog" aria-modal="true" aria-label="Posts from the admin">
+<button type="button" class="lb-x" aria-label="Close">&times;</button>
+<span class="lb-count" id="lbcount"></span>
+<div class="lb-track" id="lbtrack">
+{% for p in posts %}
+<figure class="lb-item">
+<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}" loading="lazy">
+<figcaption>
+<small>{{ p['created_at'][:10] }}</small>
+{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% endif %}
+</figcaption>
+</figure>
+{% endfor %}
+</div>
+{% if posts|length > 1 %}
+<button type="button" class="lb-nav lb-prev" aria-label="Previous post">&#8249;</button>
+<button type="button" class="lb-nav lb-next" aria-label="Next post">&#8250;</button>
+<div class="lb-hint">Swipe left or right</div>
+{% endif %}
+</div>
+
 <script>
 (function () {
   var hs = document.getElementById('hs');
   if (!hs) { return; }
   var slides = hs.querySelectorAll('.hs-slide');
   var bars = hs.querySelectorAll('.hs-bars i');
-  if (slides.length < 2) { return; }
+  var many = slides.length > 1;
   var i = 0;
 
+  var lb = document.getElementById('lb');
+  var track = document.getElementById('lbtrack');
+  var count = document.getElementById('lbcount');
+  var lbIdx = 0;
+
   function show(n) {
+    if (!many) { return; }
     slides[i].classList.remove('active');
     i = (n + slides.length) % slides.length;
     slides[i].classList.add('active');
@@ -2206,6 +2247,61 @@ the daily check-in amount is the level reward divided by 24.</p>
     bars[i].classList.add('active');
   }
 
+  function lbGo(n, smooth) {
+    lbIdx = Math.max(0, Math.min(slides.length - 1, n));
+    track.scrollTo({ left: lbIdx * track.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
+    count.textContent = (lbIdx + 1) + ' / ' + slides.length;
+  }
+
+  function openLb(n) {
+    lb.classList.add('open');
+    document.body.style.overflow = 'hidden';
+    hs.classList.add('paused');
+    lbGo(n, false);
+    lb.focus();
+  }
+
+  function closeLb() {
+    lb.classList.remove('open');
+    document.body.style.overflow = '';
+    hs.classList.remove('paused');
+    show(lbIdx);
+  }
+
+  /* open the full-screen viewer by tapping the picture */
+  slides.forEach(function (s, k) {
+    s.addEventListener('click', function (e) {
+      if (e.target.closest('.hs-del')) { return; }
+      openLb(k);
+    });
+  });
+
+  /* full-screen viewer: swipe (native scroll-snap), arrows, keys, close */
+  track.addEventListener('scroll', function () {
+    var n = Math.round(track.scrollLeft / track.clientWidth);
+    if (n !== lbIdx) {
+      lbIdx = n;
+      count.textContent = (lbIdx + 1) + ' / ' + slides.length;
+    }
+  });
+  lb.querySelector('.lb-x').addEventListener('click', closeLb);
+  lb.addEventListener('click', function (e) {
+    if (e.target === lb || e.target.classList.contains('lb-item')) { closeLb(); }
+  });
+  var lbPrev = lb.querySelector('.lb-prev');
+  var lbNext = lb.querySelector('.lb-next');
+  if (lbPrev) { lbPrev.addEventListener('click', function () { lbGo(lbIdx - 1, true); }); }
+  if (lbNext) { lbNext.addEventListener('click', function () { lbGo(lbIdx + 1, true); }); }
+  document.addEventListener('keydown', function (e) {
+    if (!lb.classList.contains('open')) { return; }
+    if (e.key === 'Escape') { closeLb(); }
+    if (e.key === 'ArrowLeft') { lbGo(lbIdx - 1, true); }
+    if (e.key === 'ArrowRight') { lbGo(lbIdx + 1, true); }
+  });
+
+  if (!many) { return; }
+
+  /* auto-sliding showcase on the dashboard */
   hs.addEventListener('animationend', function (e) {
     if (e.animationName === 'hsfill') { show(i + 1); }
   });
@@ -2214,7 +2310,9 @@ the daily check-in amount is the level reward divided by 24.</p>
   bars.forEach(function (bar, k) { bar.addEventListener('click', function () { show(k); }); });
 
   hs.addEventListener('mouseenter', function () { hs.classList.add('paused'); });
-  hs.addEventListener('mouseleave', function () { hs.classList.remove('paused'); });
+  hs.addEventListener('mouseleave', function () {
+    if (!lb.classList.contains('open')) { hs.classList.remove('paused'); }
+  });
   hs.addEventListener('keydown', function (e) {
     if (e.key === 'ArrowLeft') { show(i - 1); }
     if (e.key === 'ArrowRight') { show(i + 1); }
@@ -2223,7 +2321,7 @@ the daily check-in amount is the level reward divided by 24.</p>
   var x0 = null;
   hs.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; hs.classList.add('paused'); }, { passive: true });
   hs.addEventListener('touchend', function (e) {
-    hs.classList.remove('paused');
+    if (!lb.classList.contains('open')) { hs.classList.remove('paused'); }
     if (x0 === null) { return; }
     var dx = e.changedTouches[0].clientX - x0;
     x0 = null;
@@ -2247,6 +2345,53 @@ the daily check-in amount is the level reward divided by 24.</p>
 </form>
 {% endif %}
 </div>
+
+
+</div>
+
+<div class="card">
+<h2>Daily check-in</h2>
+<div class="dots" aria-label="Streak progress">
+{% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
+</div>
+<p>Today's reward: <strong>{{ money(reward) }}</strong></p>
+{% if bonus %}<p>Streak bonus: <strong class="pos">+{{ money(bonus) }}</strong></p>{% endif %}
+<p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
+the daily check-in amount is the level reward divided by 24.</p>
+<p class="muted">Check in {{ STREAK_DAYS }} days in a row for a streak bonus.</p>
+{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks (5 seconds each) to earn today's reward.</p>{% endif %}
+<form method="get" action="{{ url_for('checkin') }}">
+<button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
+</form>
+</div>
+
+<section class="card">
+<h2>Where your money is</h2>
+<div class="moneywrap">
+<div class="donutwrap">
+<svg class="donut" viewBox="0 0 100 100" role="img" aria-label="Available versus locked balance">
+<circle class="ring" cx="50" cy="50" r="40"/>
+{% if total %}
+<circle class="a1" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format(pct * 2.5133) }} 251.33"/>
+<circle class="a2" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format((100 - pct) * 2.5133) }} 251.33" stroke-dashoffset="-{{ '%.2f'|format(pct * 2.5133) }}"/>
+{% endif %}
+</svg>
+<div class="donut-mid"><b>{{ money(total) }}</b><span>Total</span></div>
+</div>
+<div class="moneyside">
+<div class="legend">
+<span><i style="background:var(--brand)"></i>Available {{ money(user['points']) }}</span>
+<span><i style="background:var(--violet)"></i>Locked {{ money(locked) }}</span>
+</div>
+{% if next_cost %}
+<div class="progtxt"><span>Next: Level {{ user['level'] + 1 }}</span><span>{{ lvl_pct }}% of {{ money(next_cost) }}</span></div>
+<div class="bar"><b style="width:{{ lvl_pct }}%"></b></div>
+{% else %}
+<p class="muted small">You are at the highest level.</p>
+{% endif %}
+</div>
+</div>
+</section>
 
 <div class="card">
 <h2>Recent activity</h2>
@@ -2763,11 +2908,21 @@ ADMIN_BODY = """
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>Account number</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Reset password</th></tr>
+<tr><th>Account number</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>L{{ u['level'] }}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_add_balance', user_id=u['id']) }}"
+onsubmit="return confirm('Add this amount to account {{ u['username'] }}?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="q" value="{{ q }}">
+<input class="pwbox" style="width:105px" name="amount" type="number" step="0.01" min="0.01" placeholder="Amount (R)" required>
+<input class="pwbox" name="note" maxlength="100" placeholder="Note (optional)">
+<button class="success">Add</button>
+</form>
+</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_reset_password', user_id=u['id']) }}"
 onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
