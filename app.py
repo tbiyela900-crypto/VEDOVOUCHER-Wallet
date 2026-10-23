@@ -158,7 +158,7 @@ DEFAULT_TOPUP_INSTRUCTIONS = (
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
 POT_APR_PERCENT = {
-    1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
+    1: Decimal("4.0."), 2: Decimal("4.5"), 3: Decimal("5.0"),
     4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
     7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
 }
@@ -2093,7 +2093,7 @@ BASE = """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#050c13">
-<title>VEDOVOUCHERS Wallets</title>
+<title>VEDO Ai Investment</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
