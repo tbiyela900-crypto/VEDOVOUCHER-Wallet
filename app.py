@@ -1,5 +1,5 @@
 """
-ZEDAVouchers  -  advanced interface edition
+Vedo Ai  -  advanced interface edition
 =================================================================
 
 Features
@@ -158,12 +158,12 @@ DEFAULT_TOPUP_INSTRUCTIONS = (
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
 #POT_APR_PERCENT = {
-    1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
-    4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
-    7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
-}
-POT_WEEKS = sorted(POT_APR_PERCENT)
-POT_MIN_CENTS = 1000            # R10
+    #1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
+    #4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
+    #7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
+#}
+#POT_WEEKS = sorted(POT_APR_PERCENT)
+#POT_MIN_CENTS = 1000            # R10
 
 # --- Check-in tasks / admin photos ----------------------------------------
 TASK_WAIT_SECONDS = 5           # each tap loads for 5 seconds
@@ -2093,7 +2093,7 @@ BASE = """
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
 <meta name="theme-color" content="#050c13">
-<title>VEDO Ai Investment</title>
+<title>Vedo Ai</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
@@ -3576,7 +3576,7 @@ app.jinja_loader = DictLoader({"base": BASE})
 if __name__ == "__main__":
     init_db()
     print("\n======================================")
-    print(" ZEDAVOUCHERS")
+    print(" Vedo Ai Investment")
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
