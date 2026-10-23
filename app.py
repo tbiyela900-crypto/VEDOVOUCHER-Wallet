@@ -1449,7 +1449,7 @@ def topup():
         (user["id"],)).fetchall()
     # A message the admin sent for the member's latest request replaces the
     # global instructions; with no specific message the global one shows.
-    admin_msg = history[0]["admin_message"] if history else ""
+    admin_msg = history[0]["Update"] if history else ""
     return page(TOPUP_BODY, user=user, history=history, admin_msg=admin_msg,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS),
@@ -2442,7 +2442,7 @@ LOGIN_BODY = """
 <button class="primary" style="width:100%">Log in</button>
 </form>
 <p class="muted" style="margin-top:16px">No account? <a href="{{ url_for('register') }}">Create one</a>.</p>
-<p class="muted small">Lost your password? Please contact the admin to reset it.</p>
+<p class="muted small">If password contact our support team.</p>
 </div>
 </div>
 """
@@ -2769,13 +2769,13 @@ DASH_BODY = """
 })();
 </script>
 {% else %}
-<div class="hs-empty">No posts yet. News and photos from the admin will show up here.</div>
+<div class="hs-empty">Updates will show up here.</div>
 {% endif %}
 {% if me['is_admin'] %}
 <form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Post a photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
-<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
+<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp/mp4" required>
 <label>Caption</label>
 <input name="caption" maxlength="300" placeholder="Write a caption for this photo">
 <button class="primary">Post photo</button>
@@ -2795,8 +2795,8 @@ DASH_BODY = """
 <p>Today's reward: <strong>{{ money(reward) }}</strong></p>
 <p class="muted">Your Level {{ user['level'] }} reward is <strong>{{ level_reward(user['level']) }}</strong>;
 the daily check-in amount is the level reward divided by 24.</p>
-<p class="muted">Check in {{ STREAK_DAYS }} days in a row to earn a special congratulation.</p>
-{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks (5 seconds each) to earn today's reward.</p>{% endif %}
+<p class="muted">Check in {{ STREAK_DAYS }} days in a row to earn a reward.</p>
+{% if task_total %}<p class="muted">Open check-in, tap your level, then finish {{ task_total }} tasks to earn today's reward.</p>{% endif %}
 <form method="get" action="{{ url_for('checkin') }}">
 <button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
 </form>
@@ -3042,13 +3042,13 @@ TOPUP_BODY = """
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
 <h2>{% if admin_msg %}Message from the admin{% else %}Instructions from the admin{% endif %}</h2>
 <p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
-<p class="muted small">When the admin approves your request you receive a voucher code. Approval does not add money to your balance: your balance grows with your daily check-in.</p>
+<p class="muted small">Wait for a voucher code.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
 <label>Bank Account Number followed by 00000 (16 digits)</label>
-<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="16" maxlength="16" placeholder="16 digits" autocomplete="off" required>
+<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{16}" minlength="16" maxlength="11" placeholder="16 digits" autocomplete="off" required>
 <p class="muted small" style="margin-top:8px">Only the admin can see the voucher information.</p>
 <label>Note for the admin (reason fo topup)</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
