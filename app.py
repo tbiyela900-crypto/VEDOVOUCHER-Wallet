@@ -1118,7 +1118,8 @@ def verify_resend():
     uid = session.get("pending_uid")
     if not uid:
         if ajax:
-            return jsonify(ok=False, message="Session expired.", redirect=url_for("login"))
+            return jsonify(ok=False, message="Session expired.",
+                           redirect=url_for("login"))
         return redirect(url_for("login"))
 
     db = get_db()
@@ -1126,7 +1127,8 @@ def verify_resend():
     if user is None or user["phone_verified"]:
         session.pop("pending_uid", None)
         if ajax:
-            return jsonify(ok=False, message="Already verified.", redirect=url_for("login"))
+            return jsonify(ok=False, message="Already verified.",
+                           redirect=url_for("login"))
         return redirect(url_for("login"))
 
     ok, error, demo = issue_otp(db, user)
@@ -1140,17 +1142,15 @@ def verify_resend():
             msg += f" Demo code: {demo}"
         return jsonify(ok=True, message=msg, wait=OTP_RESEND_SECONDS)
 
-    _send_code_and_flash(db, uid) if False else None
-    flash(error or f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
-          "error" if not ok else "ok")
-    if demo:
-        flash(f"Demo mode (no SMS provider set): your code is {demo}.", "ok")
+    if not ok:
+        flash(error, "error")
+    else:
+        flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
+              "ok")
+        if demo:
+            flash(f"Demo mode (no SMS provider set): your code is {demo}.",
+                  "ok")
     return redirect(url_for("verify"))
-     row = db.execute("SELECT sent_ts FROM otps WHERE user_id=?", (uid,)).fetchone()
-    resend_in = (max(0, int(OTP_RESEND_SECONDS - (time.time() - row["sent_ts"])))
-                 if row else 0)
-    return page(VERIFY_BODY, masked=mask_phone(user["phone"]), resend_in=resend_in)
-
 @app.route("/")
 def index():
     if current_user():
