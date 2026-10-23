@@ -10,7 +10,7 @@ Features
   * TOP-UP page looks like the check-in page: the member taps a level tile,
     enters an amount and presses Enter. The tiles close and a WHITE details
     tab opens for 10 minutes showing the Bank Name, Reference, Amount,
-    PayShap and Account number, a small school flag and a red message. ALL of
+    PayShap and Account number, a small Top-up flag and a red message. ALL of
     that information is entered by the admin only (Admin page > Top-up
     details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
@@ -146,13 +146,13 @@ UPGRADE_COST_CENTS = {
 # --- Top-ups / withdrawals -------------------------------------------------
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
-TOPUP_PANEL_SECONDS = 600       # the school details tab stays open 10 minutes
+TOPUP_PANEL_SECONDS = 600       # the Top-up details tab stays open 10 minutes
 WITHDRAW_MIN_CENTS = 1000       # R10
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
     "Enter the amount and the reason for the top-up, then tap the level you "
-    "want. A tab with the school details will open for 10 minutes. An admin "
+    "want. A tab with the top up details will open for 10 minutes. An admin "
     "will review your request and approve or reject it."
 )
 
@@ -1452,7 +1452,7 @@ def _parse_ts(text):
 
 
 def get_topup_details(db, user_id):
-    """School details written by the admin. A member-specific entry replaces
+    """Top up details written by the admin. A member-specific entry replaces
     the global one (user_id 0) for that member."""
     row = db.execute("SELECT * FROM topup_details WHERE user_id=?",
                      (user_id,)).fetchone()
@@ -1549,7 +1549,7 @@ def topup():
     instructions = own["text"] if own else get_setting(
         db, "topup_instructions", DEFAULT_TOPUP_INSTRUCTIONS)
 
-    # The school details tab stays open for 10 minutes after a request.
+    # The Top-up details tab stays open for 10 minutes after a request.
     cutoff = (datetime.now(timezone.utc)
               - timedelta(seconds=TOPUP_PANEL_SECONDS)
               ).strftime("%Y-%m-%d %H:%M:%S")
@@ -1991,7 +1991,7 @@ def admin():
         "JOIN users u ON u.id = ui.user_id "
         "ORDER BY ui.updated_at DESC").fetchall()
 
-    # School details shown in the white top-up tab (global + per member)
+    # Top-up details shown in the white top-up tab (global + per member)
     global_details = db.execute(
         "SELECT * FROM topup_details WHERE user_id=0").fetchone()
     specific_details = db.execute(
@@ -2069,7 +2069,7 @@ def admin_instruction_delete(user_id):
 @app.route("/admin/topup-details", methods=["POST"])
 @admin_required
 def admin_topup_details():
-    """Admin writes the school details, red message and flag that members
+    """Admin writes the Top up details, red message and flag that members
     see (and can copy) in the white tab that opens after they tap a level on
     the Top up page. Members cannot enter or change any of this."""
     db = get_db()
@@ -2122,7 +2122,7 @@ def admin_topup_details():
 
     if new_flag and old and old["flag"]:
         _remove_upload(old["flag"])
-    flash(f"School top-up details saved for {label}.", "ok")
+    flash(f"Top-up top-up details saved for {label}.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -2136,7 +2136,7 @@ def admin_topup_details_delete(user_id):
     db.commit()
     if old:
         _remove_upload(old["flag"])
-    flash("School top-up details removed.", "ok")
+    flash("Top-up details removed.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -2597,8 +2597,8 @@ input[type=file]{padding:10px;}
 @keyframes cgpop{from{transform:scale(.6);opacity:0;}to{transform:scale(1);opacity:1;}}
 @keyframes cfall{to{transform:translateY(110vh) rotate(720deg);}}
 
-/* ---------- top-up: white school details tab ---------- */
-.card.schoolcard{background:#fff;color:#1b1b1b;border:1px solid #dcdfe2;overflow:visible;box-shadow:0 10px 40px rgba(0,0,0,.35);}
+/* ---------- top-up: white Top-up details tab ---------- */
+.card.Top-upcard{background:#fff;color:#1b1b1b;border:1px solid #dcdfe2;overflow:visible;box-shadow:0 10px 40px rgba(0,0,0,.35);}
 .sc-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
 .sc-flag{height:34px;width:auto;max-width:64px;object-fit:contain;border-radius:4px;border:1px solid #d5d8db;background:#fff;}
 .sc-title h2{margin:0;color:#111;font-size:1.2rem;}
@@ -3337,17 +3337,17 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
 
 TOPUP_BODY = """
 {% if active %}
-<div class="card schoolcard" id="schoolpanel" data-left="{{ left }}">
+<div class="card Top-upcard" id="Top-uppanel" data-left="{{ left }}">
 <div class="sc-head">
-{% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="School flag">{% endif %}
+{% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="Top-up flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['Bank_name'] if details and details['Bank_name'] else 'School top-up details' }}</h2>
+<h2>{{ details['Bank_name'] if details and details['Bank_name'] else ' Top-up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
 </div>
 {% if details and details['message'] %}<div class="sc-msg">{{ details['message'] }}</div>{% endif %}
-<div class="sc-sec">School information</div>
+<div class="sc-sec">Top up information</div>
 <div class="sc-grid">
 {% for label, value in info_rows %}
 <div class="sc-row"><div><small>{{ label }}</small><b>{{ value }}</b></div><button type="button" class="sc-copy" data-copy="{{ value }}">Copy</button></div>
@@ -3364,7 +3364,7 @@ TOPUP_BODY = """
 </div>
 <script>
 (function () {
-  var panel = document.getElementById('schoolpanel');
+  var panel = document.getElementById('Top-uppanel');
   var timerEl = document.getElementById('sctimer');
   var left = parseInt(panel.getAttribute('data-left'), 10) || 0;
   function fmt(s) { var m=Math.floor(s/60), r=s%60; return (m<10?'0':'')+m+':'+(r<10?'0':'')+r; }
@@ -3398,7 +3398,7 @@ TOPUP_BODY = """
 </div>
 <section class="join-step" id="joinStep" hidden>
 <p class="join-level" id="joinTitle">Choose an amount for this level</p>
-<p class="level-hint" id="joinInfo">Enter your top-up amount, then press Enter to open the school details for 10 minutes.</p>
+<p class="level-hint" id="joinInfo">Enter your top-up amount then press Enter.</p>
 <form id="topupAmountForm" novalidate>
 <label for="topupAmount">Amount (R)</label>
 <input id="topupAmount" name="amount" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter amount (R10–R50,000)" required>
@@ -3428,7 +3428,7 @@ TOPUP_BODY = """
       btn.classList.add('selected');
       step.hidden=false;
       title.textContent='Level '+selectedLevel+' selected';
-      info.textContent='Enter your amount, then press Enter. The school details will open for 10 minutes.';
+      info.textContent='Enter your amount, then press Enter. The Top up details will open for 10 minutes.';
       status.textContent='';
       amountInput.value='';
       amountInput.focus();
@@ -3454,7 +3454,7 @@ TOPUP_BODY = """
     fd.append('csrf_token',csrf);
     fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
       .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not send request.');return data;});})
-      .then(function(data){status.textContent=data.message||'Request sent. Opening school details…';window.location.reload();})
+      .then(function(data){status.textContent=data.message||'Request sent. Opening  details…';window.location.reload();})
       .catch(function(err){status.textContent=err.message||'Could not send request. Please try again.';enterButton.disabled=false;});
   });
 })();
@@ -3744,10 +3744,10 @@ ADMIN_BODY = """
 <input name="Account_Number" maxlength="100" value="{{ gd['Account_Number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
-<label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<label>Small Top-up flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
 <input type="file" name="flag" accept="image/png,image/jpeg,image/gif,image/webp">
 {% if gd and gd['flag'] %}<p class="muted small" style="margin-top:8px">Current global flag: <img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:24px;vertical-align:middle;border-radius:3px"></p>{% endif %}
-<button class="primary">Save school details</button>
+<button class="primary">Save Top-up details</button>
 </form>
 <script>
 (function () {
@@ -3765,14 +3765,14 @@ ADMIN_BODY = """
 </script>
 
 {% if gd or specific_details %}
-<h2 style="margin-top:22px">Saved school details</h2>
+<h2 style="margin-top:22px">Saved Top-up details</h2>
 <table>
 <tr><th>For</th><th>Bank name</th><th>Reference</th><th>Amount</th><th>PayShap</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
 <tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Account_Number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
-<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
+<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global Top-up details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
