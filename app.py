@@ -16,7 +16,9 @@ Features
   * Daily check-in (level reward / 24) with a special 7-day streak congratulation
   * Referral codes and team
   * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
-                          Admin can edit the demo instruction text.
+                          Admin can edit the top-up instruction text either
+                          for EVERYONE (global) or for ONE member (by member
+                          ID or cellphone number).
   * Simulated WITHDRAWALS: user requests a cash-out of  money,
                           admin approves/rejects (rejected = refunded).
   * TEAM VIEW           : each team member's level and points (balance)
@@ -394,6 +396,12 @@ CREATE TABLE IF NOT EXISTS admin_posts (
     caption TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS user_instructions (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    text TEXT NOT NULL,
+    updated_at TEXT NOT NULL
+);
 """
 
 
@@ -611,7 +619,6 @@ def init_db():
             "voucher_alpha5": "TEXT NOT NULL DEFAULT ''",
             "voucher_alpha4": "TEXT NOT NULL DEFAULT ''",
             "issued_code": "TEXT",
-            "admin_message": "TEXT NOT NULL DEFAULT ''",
         },
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
@@ -1447,12 +1454,13 @@ def topup():
     history = db.execute(
         "SELECT * FROM topups WHERE user_id=? ORDER BY id DESC",
         (user["id"],)).fetchall()
-    # A message the admin sent for the member's latest request replaces the
-    # global instructions; with no specific message the global one shows.
-    admin_msg = history[0]["admin_message"] if history else ""
-    return page(TOPUP_BODY, user=user, history=history, admin_msg=admin_msg,
-                instructions=get_setting(db, "topup_instructions",
-                                         DEFAULT_TOPUP_INSTRUCTIONS),
+    # A member-specific instruction replaces the global one for that member.
+    own = db.execute("SELECT text FROM user_instructions WHERE user_id=?",
+                     (user["id"],)).fetchone()
+    instructions = own["text"] if own else get_setting(
+        db, "topup_instructions", DEFAULT_TOPUP_INSTRUCTIONS)
+    return page(TOPUP_BODY, user=user, history=history,
+                instructions=instructions,
                 TOPUP_MIN_CENTS=TOPUP_MIN_CENTS,
                 TOPUP_MAX_CENTS=TOPUP_MAX_CENTS)
 
@@ -1851,26 +1859,75 @@ def admin():
         "SELECT * FROM vouchers WHERE used_by IS NULL "
         "ORDER BY level, created_at").fetchall()
 
+    # Member-specific top-up instructions (override the global text)
+    specific = db.execute(
+        "SELECT ui.*, u.username FROM user_instructions ui "
+        "JOIN users u ON u.id = ui.user_id "
+        "ORDER BY ui.updated_at DESC").fetchall()
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
-                unused=unused, q=q,
+                unused=unused, q=q, specific=specific,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
+
+
+def _find_member(raw):
+    """Find a member by numeric ID or by cellphone number."""
+    db = get_db()
+    raw = (raw or "").strip()
+    phone = normalize_phone(raw)
+    if phone:
+        return db.execute(
+            "SELECT id, username FROM users WHERE username=? OR phone=?",
+            (phone, phone)).fetchone()
+    if raw.isascii() and raw.isdigit():
+        return db.execute("SELECT id, username FROM users WHERE id=?",
+                          (int(raw),)).fetchone()
+    return None
 
 
 @app.route("/admin/instructions", methods=["POST"])
 @admin_required
 def admin_instructions():
     text = request.form.get("instructions", "").strip()
+    scope = request.form.get("scope", "global")
+
     if not text:
         flash("Instruction text cannot be empty.", "error")
-    elif len(text) > 1000:
+        return redirect(url_for("admin"))
+    if len(text) > 1000:
         flash("Instruction text is too long (max 1000 characters).", "error")
+        return redirect(url_for("admin"))
+
+    db = get_db()
+    if scope == "user":
+        member = _find_member(request.form.get("target", ""))
+        if member is None:
+            flash("No member found with that ID.", "error")
+            return redirect(url_for("admin"))
+        db.execute(
+            "INSERT INTO user_instructions (user_id, text, updated_at) "
+            "VALUES (?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+            "text=excluded.text, updated_at=excluded.updated_at",
+            (member["id"], text, now_iso()))
+        db.commit()
+        flash(f"Instruction saved for member {member['username']} "
+              f"(ID {member['id']}).", "ok")
     else:
-        db = get_db()
         set_setting(db, "topup_instructions", text)
         db.commit()
-        flash("Top-up instruction text updated.", "ok")
+        flash("Global top-up instruction text updated.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/instructions/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def admin_instruction_delete(user_id):
+    db = get_db()
+    db.execute("DELETE FROM user_instructions WHERE user_id=?", (user_id,))
+    db.commit()
+    flash("Member instruction removed. They now see the global text.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -1941,34 +1998,6 @@ def admin_add_balance(user_id):
            note or "Balance added by admin")
     db.commit()
     flash(f"Added {money(cents)} to account {target['username']}.", "ok")
-    return redirect(url_for("admin", q=back))
-
-
-@app.route("/admin/topup/<int:topup_id>/message", methods=["POST"])
-@admin_required
-def admin_topup_message(topup_id):
-    """Send a specific message to the member who made this top-up request.
-    An empty message clears it, so the global message shows again."""
-    back = request.form.get("q", "").strip()[:30] or None
-    message = request.form.get("message", "").strip()
-    if len(message) > 500:
-        flash("The message is too long (max 500 characters).", "error")
-        return redirect(url_for("admin", q=back))
-
-    db = get_db()
-    t = db.execute("SELECT id FROM topups WHERE id=?", (topup_id,)).fetchone()
-    if t is None:
-        flash("Top-up request not found.", "error")
-        return redirect(url_for("admin", q=back))
-
-    db.execute("UPDATE topups SET admin_message=? WHERE id=?",
-               (message, topup_id))
-    db.commit()
-    if message:
-        flash(f"Message for top-up #{topup_id} sent to the member.", "ok")
-    else:
-        flash(f"Message cleared. The member sees the global message again.",
-              "ok")
     return redirect(url_for("admin", q=back))
 
 
@@ -3025,7 +3054,7 @@ TOPUP_BODY = """
 <div class="card note">
 <h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
-<p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
+<p style="white-space:pre-wrap">{{ instructions }}</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
@@ -3043,12 +3072,11 @@ TOPUP_BODY = """
 <h2>Top-up history</h2>
 {% if history %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Your voucher code</th><th>Admin message</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Your voucher code</th></tr>
 {% for t in history %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td><td class="muted">{{ t['note'] }}</td>
 <td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
-<td>{% if t['issued_code'] %}<code>{{ t['issued_code'] }}</code>{% else %}-{% endif %}</td>
-<td class="muted" style="white-space:pre-wrap">{{ t['admin_message'] or '-' }}</td></tr>
+<td>{% if t['issued_code'] %}<code>{{ t['issued_code'] }}</code>{% else %}-{% endif %}</td></tr>
 {% endfor %}
 </table>
 <p class="muted small" style="margin-top:10px">Redeem a voucher code on the <a href="{{ url_for('upgrade') }}">Upgrade</a> page.</p>
@@ -3308,12 +3336,55 @@ ADMIN_BODY = """
 
 <div class="card">
 <h2>Top-up instruction text</h2>
-<p class="muted">The global message shown to every member on the Top up page. A member only sees something else when you send them a specific message on their top-up request below.</p>
+<p class="muted">Choose who sees this text on the Top up page. A member-specific instruction replaces the global one for that member only.</p>
 <form method="post" action="{{ url_for('admin_instructions') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Send to</label>
+<select name="scope" id="iscope">
+<option value="global">Everyone (global message)</option>
+<option value="user">A specific member</option>
+</select>
+<div id="itarget" hidden>
+<label>Member ID (see the ID column in All members) or cellphone number</label>
+<input name="target" id="itarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
+</div>
+<label>Instruction text</label>
 <textarea name="instructions" rows="4" maxlength="1000" required>{{ instructions }}</textarea>
 <button class="primary">Save instructions</button>
 </form>
+<script>
+(function () {
+  var s = document.getElementById('iscope');
+  var box = document.getElementById('itarget');
+  var inp = document.getElementById('itarget_in');
+  function sync() {
+    var on = s.value === 'user';
+    box.hidden = !on;
+    inp.required = on;
+  }
+  s.addEventListener('change', sync);
+  sync();
+})();
+</script>
+
+{% if specific %}
+<h2 style="margin-top:22px">Member-specific instructions</h2>
+<table>
+<tr><th>ID</th><th>Member</th><th>Instruction</th><th>Updated</th><th></th></tr>
+{% for s in specific %}
+<tr><td>{{ s['user_id'] }}</td><td>{{ s['username'] }}</td>
+<td class="muted" style="white-space:pre-wrap">{{ s['text'] }}</td>
+<td>{{ s['updated_at'][:16] }}</td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_instruction_delete', user_id=s['user_id']) }}"
+onsubmit="return confirm('Remove this member instruction?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="danger">Remove</button>
+</form>
+</td></tr>
+{% endfor %}
+</table>
+{% endif %}
 </div>
 
 <div class="card">
@@ -3331,7 +3402,7 @@ ADMIN_BODY = """
 <p class="muted small">Approving a top-up only issues a voucher code to the member. It does not change their balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th><th>Message to member</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
 <tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
 <td class="muted">{{ t['note'] }}</td>
@@ -3347,14 +3418,6 @@ ADMIN_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button></form>
 {% elif t['issued_code'] %}<code>{{ t['issued_code'] }}</code>
 {% endif %}
-</td>
-<td>
-<form class="inline" method="post" action="{{ url_for('admin_topup_message', topup_id=t['id']) }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<input type="hidden" name="q" value="{{ q }}">
-<textarea name="message" rows="2" maxlength="500" placeholder="Message for {{ t['username'] }} (empty = global message)" style="width:240px;font-size:.85rem;padding:8px 10px;border-radius:10px">{{ t['admin_message'] }}</textarea>
-<button class="success">Send</button>
-</form>
 </td></tr>
 {% endfor %}
 </table>
@@ -3385,9 +3448,9 @@ ADMIN_BODY = """
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
-<tr><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
+<tr><td>{{ u['id'] }}</td><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
 <td>L{{ u['level'] }}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
