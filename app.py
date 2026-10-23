@@ -837,19 +837,21 @@ def register():
         confirm = request.form.get("confirm", "")
         ref_code = request.form.get("referral", "").strip().upper()
         level_code = request.form.get("level_code", "").strip().upper()
-             _db = get_db()
-        _db.execute("DELETE FROM otps WHERE user_id IN (SELECT id FROM users "
-                    "WHERE phone_verified=0 AND is_admin=0 "
-                    "AND created_at < datetime('now','-1 hour'))")
-        _db.execute("DELETE FROM users WHERE phone_verified=0 AND is_admin=0 "
-                    "AND created_at < datetime('now','-1 hour')")
-        _db.commit()
 
         db = get_db()
+
+        # Free up numbers held by sign-ups that never verified (over 1 hour old)
+        db.execute("DELETE FROM otps WHERE user_id IN (SELECT id FROM users "
+                   "WHERE phone_verified=0 AND is_admin=0 "
+                   "AND created_at < datetime('now','-1 hour'))")
+        db.execute("DELETE FROM users WHERE phone_verified=0 AND is_admin=0 "
+                   "AND created_at < datetime('now','-1 hour')")
+        db.commit()
+
         referrer = None
         voucher = None
         start_level = 0
-
+     
         # Validate account number (strictly 10 digits)
         if (not account_number.isascii()
                 or not account_number.isdigit()
