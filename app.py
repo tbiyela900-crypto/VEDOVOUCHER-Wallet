@@ -1449,7 +1449,7 @@ def topup():
         (user["id"],)).fetchall()
     # A message the admin sent for the member's latest request replaces the
     # global instructions; with no specific message the global one shows.
-    admin_msg = history[0]["Update"] if history else ""
+    admin_msg = history[0]["admin_message"] if history else ""
     return page(TOPUP_BODY, user=user, history=history, admin_msg=admin_msg,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS),
