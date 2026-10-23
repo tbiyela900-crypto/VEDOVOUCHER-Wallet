@@ -4,8 +4,9 @@ ZEDAVouchers  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an ACCOUNT NUMBER + 11-digit serial number + a cellphone number
-    that must be verified with an SMS one-time code (OTP) before the first login
+  * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
+    verified with an SMS one-time code (OTP) before the first login.
+    The verified cellphone number IS the login ID (no account number).
   * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
   * Admin approval issues a voucher code to the member
   * Daily check-in (level reward / 24) with a special 7-day streak congratulation
@@ -25,12 +26,12 @@ Features
                           pots, a full transaction ledger, and can RESET
                           a member's password
 
-Interface
-  * Dark market-terminal look with a live reward ticker
-  * Banking-app dashboard: balance card, quick actions, balance ring,
-    level progress, streak dots, activity bars and transaction list
-  * Three main tabs (Withdraw, My Team, Profile) with sub-menus
-  * Bottom tab bar on phones
+SMS settings (environment variables)
+  TWILIO_ACCOUNT_SID, TWILIO_AUTH_TOKEN, TWILIO_FROM
+      -> real SMS through Twilio (TWILIO_FROM may be a number or a
+         Messaging Service SID starting with "MG").
+  Without them the app runs in DEMO mode: the code is printed in the server
+  log and shown on screen (set OTP_SHOW_ON_SCREEN=0 to hide it on screen).
 
 Run:
   pip install flask
@@ -47,6 +48,7 @@ import secrets
 import sqlite3
 import string
 import time
+import urllib.error
 import urllib.parse
 import urllib.request
 from datetime import datetime, timedelta, timezone
@@ -115,9 +117,6 @@ DAILY_REWARD_CENTS = {
 
 STREAK_DAYS = 7
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
-
-# Account number rules (digits only, exactly 10)
-ACCOUNT_NUMBER_LEN = 10
 
 # --- Team tiers ------------------------------------------------------------
 # At each member count the team gets a name and a team account number that
@@ -475,6 +474,12 @@ def mask_phone(phone):
     return phone[:3] + "*" * max(0, len(phone) - 7) + phone[-4:]
 
 
+def otp_hash(code):
+    """Keyed hash of a one-time code (the plain code is never stored)."""
+    return hmac.new(app.secret_key.encode(), str(code).encode(),
+                    hashlib.sha256).hexdigest()
+
+
 def sms_configured():
     return all(os.environ.get(k) for k in
                ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"))
@@ -482,9 +487,9 @@ def sms_configured():
 
 def send_sms(to, body):
     """Send through Twilio. Returns "sent" or "failed". Runs in a worker thread."""
-    sid = os.environ["TWILIO_ACCOUNT_SID"]
-    token = os.environ["TWILIO_AUTH_TOKEN"]
-    sender = os.environ["TWILIO_FROM"]
+    sid = os.environ["TWILIO_ACCOUNT_SID"].strip()
+    token = os.environ["TWILIO_AUTH_TOKEN"].strip()
+    sender = os.environ["TWILIO_FROM"].strip()
     field = "MessagingServiceSid" if sender.startswith("MG") else "From"
     data = urllib.parse.urlencode(
         {"To": to, field: sender, "Body": body}).encode()
@@ -494,25 +499,37 @@ def send_sms(to, body):
     auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
     req.add_header("Authorization", "Basic " + auth)
     try:
-        with urllib.request.urlopen(req, timeout=8):
+        with urllib.request.urlopen(req, timeout=15):
             return "sent"
-    except Exception:
-        app.logger.exception("SMS send failed")
+    except urllib.error.HTTPError as exc:
+        # Twilio explains the problem in the response body (bad number,
+        # unverified trial recipient, wrong credentials, geo permissions...)
+        try:
+            detail = exc.read().decode("utf-8", "replace")[:500]
+        except Exception:
+            detail = ""
+        print(f"[sms:error] Twilio HTTP {exc.code} for {to}: {detail}",
+              flush=True)
+        return "failed"
+    except Exception as exc:
+        print(f"[sms:error] Could not reach Twilio for {to}: {exc!r}",
+              flush=True)
         return "failed"
 
 
 def _deliver_sms(user_id, to, body):
     """Background job: send, retry once, and free the resend timer on failure."""
-    for _ in range(2):
+    for attempt in range(2):
         if send_sms(to, body) == "sent":
             return
+        time.sleep(1)
     try:
         conn = sqlite3.connect(DB_PATH, timeout=30)
         conn.execute("UPDATE otps SET sent_ts=0 WHERE user_id=?", (user_id,))
         conn.commit()
         conn.close()
-    except Exception:
-        app.logger.exception("Could not reset resend timer")
+    except Exception as exc:
+        print(f"[sms:error] Could not reset resend timer: {exc!r}", flush=True)
 
 
 def issue_otp(db, user):
@@ -550,8 +567,10 @@ def issue_otp(db, user):
         sms_executor.submit(_deliver_sms, user["id"], user["phone"], body)
         return True, None, None
 
+    # DEMO mode: no SMS provider. Print the code and (by default) show it on
+    # screen so sign-up still works. Set OTP_SHOW_ON_SCREEN=0 to hide it.
     print(f"[sms:console] To {user['phone']}: {body}", flush=True)
-    demo = code if os.environ.get("OTP_SHOW_ON_SCREEN") == "1" else None
+    demo = code if os.environ.get("OTP_SHOW_ON_SCREEN", "1") != "0" else None
     return True, None, demo
 
 
@@ -814,6 +833,7 @@ def inject_globals():
         "POT_WEEKS": POT_WEEKS,
         "pot_interest": pot_interest_cents,
         "icon": icon,
+        "mask_phone": mask_phone,
         "welcome_text": get_setting(get_db(), "welcome_text",
                                     DEFAULT_WELCOME_TEXT),
     }
@@ -828,9 +848,9 @@ def register():
     error = None
 
     if request.method == "POST":
-        # The ACCOUNT NUMBER is the account identifier (exactly 10 digits).
-        # It is stored in the `username` column so login keeps working.
-        account_number = request.form.get("account_number", "").strip()
+        # The verified CELLPHONE NUMBER is the login ID. It is stored in the
+        # `username` column (and in `phone`) so the rest of the app keeps
+        # working unchanged.
         serial_number = request.form.get("serial_number", "").strip()
         phone = normalize_phone(request.form.get("phone", ""))
         password = request.form.get("password", "")
@@ -851,24 +871,17 @@ def register():
         referrer = None
         voucher = None
         start_level = 0
-     
-        # Validate account number (strictly 10 digits)
-        if (not account_number.isascii()
-                or not account_number.isdigit()
-                or len(account_number) != ACCOUNT_NUMBER_LEN):
-            error = (f"Account number must be exactly "
-                     f"{ACCOUNT_NUMBER_LEN} digits.")
+
+        # Validate cellphone number (an SMS code is sent to it)
+        if phone is None:
+            error = ("Enter a valid cellphone number, "
+                     "for example 082 123 4567.")
 
         # Validate serial number (exactly 11 digits)
         elif (not serial_number.isascii()
                 or not serial_number.isdigit()
                 or len(serial_number) != 11):
             error = "Serial number must contain exactly 11 digits."
-
-        # Validate cellphone number (an SMS code is sent to it)
-        elif phone is None:
-            error = ("Enter a valid cellphone number, "
-                     "for example 082 123 4567.")
 
         # Validate password
         elif len(password) < 8:
@@ -901,15 +914,22 @@ def register():
             else:
                 start_level = voucher["level"]
 
-        # Check duplicate account number
+        # Check duplicate cellphone number
         if not error:
             existing_user = db.execute(
-                "SELECT 1 FROM users WHERE username=?",
-                (account_number,)
+                "SELECT phone_verified FROM users "
+                "WHERE username=? OR phone=?",
+                (phone, phone)
             ).fetchone()
 
             if existing_user:
-                error = "That account number is already registered."
+                if existing_user["phone_verified"]:
+                    error = ("That cellphone number is already registered. "
+                             "Please log in.")
+                else:
+                    error = ("That cellphone number is already waiting to be "
+                             "verified. Log in with it and your password to "
+                             "get a new SMS code.")
 
         # Check duplicate serial number
         if not error:
@@ -944,7 +964,7 @@ def register():
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
-                    account_number,
+                    phone,
                     generate_password_hash(password),
                     start_level,
                     new_referral_code(db),
@@ -975,7 +995,7 @@ def register():
                     pay_referral_bonus(
                         db,
                         {"level": 0, "referred_by": referrer["id"],
-                         "username": account_number},
+                         "username": phone},
                         start_level)
 
             db.commit()
@@ -983,7 +1003,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That account number or serial number is already registered.",
+                "That cellphone number or serial number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1012,20 +1032,27 @@ def register():
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if request.method == "POST":
-        username = request.form.get("username", "").strip()
+        raw = request.form.get("username", "").strip()
         password = request.form.get("password", "")
 
-        user = get_db().execute(
-            "SELECT * FROM users WHERE username = ?",
-            (username,)
-        ).fetchone()
+        # Members log in with their cellphone number (any usual format).
+        # Anything that is not a phone number (e.g. the admin username) is
+        # looked up as typed.
+        candidate = normalize_phone(raw) or raw
+
+        db = get_db()
+        user = db.execute(
+            "SELECT * FROM users WHERE username=? OR username=?",
+            (candidate, raw)).fetchone()
+        if user is None:
+            user = db.execute("SELECT * FROM users WHERE phone=?",
+                              (candidate,)).fetchone()
 
         if user and check_password_hash(user["pw_hash"], password):
             if not user["phone_verified"]:
                 # Cellphone not verified yet: the SMS code comes first.
                 session.clear()
                 session["pending_uid"] = user["id"]
-                db = get_db()
                 row = db.execute("SELECT expires_ts FROM otps WHERE user_id=?",
                                  (user["id"],)).fetchone()
                 if row is None or time.time() > row["expires_ts"]:
@@ -1037,7 +1064,7 @@ def login():
             session["uid"] = user["id"]
             return redirect(url_for("dashboard"))
 
-        flash("Wrong account number or password.", "error")
+        flash("Wrong cellphone number or password.", "error")
         return page(LOGIN_BODY), 401
 
     return page(LOGIN_BODY)
@@ -1055,10 +1082,11 @@ def _send_code_and_flash(db, uid):
     if not ok:
         flash(error, "error")
         return
-    flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
-          "ok")
     if demo_code:
         flash(f"Demo mode (no SMS provider set): your code is {demo_code}.",
+              "ok")
+    else:
+        flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
               "ok")
 
 
@@ -1109,7 +1137,16 @@ def verify():
                   "error")
         return redirect(url_for("verify"))
 
-    return page(VERIFY_BODY, masked=mask_phone(user["phone"]))
+    # Seconds left before a new code may be requested (drives the button timer)
+    otp_row = db.execute("SELECT sent_ts FROM otps WHERE user_id=?",
+                         (uid,)).fetchone()
+    resend_in = 0
+    if otp_row:
+        wait = OTP_RESEND_SECONDS - (time.time() - otp_row["sent_ts"])
+        resend_in = int(wait) + 1 if wait > 0 else 0
+
+    return page(VERIFY_BODY, masked=mask_phone(user["phone"]),
+                resend_in=resend_in)
 
 
 @app.route("/verify/resend", methods=["POST"])
@@ -1137,20 +1174,22 @@ def verify_resend():
             m = re.search(r"(\d+) seconds", error or "")
             return jsonify(ok=False, message=error,
                            wait=int(m.group(1)) if m else 0)
-        msg = f"Code sent to {mask_phone(user['phone'])}."
         if demo:
-            msg += f" Demo code: {demo}"
+            msg = f"Demo mode (no SMS provider set): your code is {demo}."
+        else:
+            msg = f"Code sent to {mask_phone(user['phone'])}."
         return jsonify(ok=True, message=msg, wait=OTP_RESEND_SECONDS)
 
     if not ok:
         flash(error, "error")
+    elif demo:
+        flash(f"Demo mode (no SMS provider set): your code is {demo}.", "ok")
     else:
         flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
               "ok")
-        if demo:
-            flash(f"Demo mode (no SMS provider set): your code is {demo}.",
-                  "ok")
     return redirect(url_for("verify"))
+
+
 @app.route("/")
 def index():
     if current_user():
@@ -2167,6 +2206,7 @@ button.primary:disabled{background:var(--s3);color:#5f7888;cursor:not-allowed;fi
 button.danger{background:rgba(255,92,108,.14);color:var(--down);border:1px solid rgba(255,92,108,.35);border-radius:10px;padding:6px 12px;cursor:pointer;font-family:inherit;font-weight:600;}
 button.success{background:rgba(39,214,155,.14);color:var(--up);border:1px solid rgba(39,214,155,.35);border-radius:10px;padding:6px 12px;cursor:pointer;font-family:inherit;font-weight:600;}
 button.ghost{background:var(--s2);color:var(--ink);border:1px solid var(--line);border-radius:10px;padding:7px 14px;cursor:pointer;font-family:inherit;font-weight:600;}
+button.ghost:disabled{opacity:.55;cursor:not-allowed;}
 button:focus-visible,a:focus-visible{outline:2px solid var(--brand);outline-offset:2px;}
 .inline{display:inline-block;margin:0 2px;}
 .pwbox{width:150px;padding:7px 10px;font-size:.85rem;border-radius:10px;}
@@ -2454,13 +2494,13 @@ LOGIN_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Welcome back</h1>
-<p class="muted">Log in with your account number.</p>
+<p class="muted">Log in with your verified cellphone number.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Account number</label>
-<input name="username" inputmode="numeric" required autofocus>
+<label>Cellphone number</label>
+<input name="username" type="text" inputmode="tel" autocomplete="username" placeholder="e.g. 082 123 4567" required autofocus>
 <label>Password</label>
-<input name="password" type="password" required>
+<input name="password" type="password" autocomplete="current-password" required>
 <button class="primary" style="width:100%">Log in</button>
 </form>
 <p class="muted" style="margin-top:16px">No account? <a href="{{ url_for('register') }}">Create one</a>.</p>
@@ -2474,7 +2514,7 @@ VERIFY_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Verify your number</h1>
-<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. It is filled in and submitted automatically when you type all 6 digits.</p>
+<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. Once you have typed all 6 digits it is submitted automatically.</p>
 <form method="post" action="{{ url_for('verify') }}" id="vform">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label for="code">6-digit code</label>
@@ -2499,7 +2539,7 @@ VERIFY_BODY = """
   var rform = document.getElementById('rform');
   var rbtn = document.getElementById('rbtn');
   var rmsg = document.getElementById('rmsg');
-  var left = {{ resend_in }};
+  var left = {{ resend_in|default(0)|int }};
   var timer = null, sent = false;
 
   function tick() {
@@ -2559,19 +2599,9 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0, or at the level of your level code from the admin.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Account number (exactly 10 digits)</label>
-<input
-    type="text"
-    name="account_number"
-    value="{{ form.get('account_number','') }}"
-    maxlength="10"
-    minlength="10"
-    inputmode="numeric"
-    pattern="[0-9]{10}"
-    placeholder="Enter your 10-digit account number"
-    required
-    autofocus
->
+<label>Cellphone number (this will be your login)</label>
+<input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required autofocus>
+<p class="muted small" style="margin-top:6px">We will send a 6-digit code by SMS to confirm this number.</p>
 <label>Cereal/Serial Number</label>
 <input
     type="text"
@@ -2584,13 +2614,10 @@ REGISTER_BODY = """
     placeholder="Enter 11-digit cereal/serial number"
     required
 >
-<label>Cellphone number</label>
-<input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
-<p class="muted small" style="margin-top:6px">We will send a 6-digit code by SMS to confirm this number.</p>
 <label>Password (minimum 8 characters)</label>
-<input name="password" type="password" required>
+<input name="password" type="password" autocomplete="new-password" required>
 <label>Confirm password</label>
-<input name="confirm" type="password" required>
+<input name="confirm" type="password" autocomplete="new-password" required>
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
 <label>Level code from the admin (optional)</label>
@@ -3152,7 +3179,7 @@ TEAM_BODY = """
 })();
 </script>
 <p class="muted">Anyone who opens your link gets your code filled in automatically and joins your team.</p>
-{% if referrer %}<p>You joined <b>{{ referrer['username'] }}</b>'s team.</p>{% endif %}
+{% if referrer %}<p>You joined <b>{{ mask_phone(referrer['username']) }}</b>'s team.</p>{% endif %}
 </div>
 
 <div class="card">
@@ -3189,7 +3216,7 @@ TEAM_BODY = """
 <table>
 <tr><th>Member</th><th>Level</th><th>Points</th><th>Streak</th><th>Joined</th></tr>
 {% for m in members %}
-<tr><td>{{ m['username'] }}</td>
+<tr><td>{{ mask_phone(m['username']) }}</td>
 <td><span class="badge">L{{ m['level'] }}</span></td>
 <td>{{ money(m['points']) }}</td>
 <td>{{ m['streak'] }}</td>
@@ -3324,13 +3351,13 @@ PROFILE_BODY = """
 </div>
 </div>
 <dl class="kv">
-<div><dt>Account number</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
+<div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
 <div><dt>Serial number</dt><dd>{{ member['serial_number'] }}</dd></div>
-<div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}</dd></div>
+<div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
 <div><dt>Referral code</dt><dd><code>{{ member['referral_code'] }}</code></dd></div>
-<div><dt>Referred by</dt><dd>{{ referrer['username'] if referrer else '-' }}</dd></div>
+<div><dt>Referred by</dt><dd>{{ (mask_phone(referrer['username']) if is_self else referrer['username']) if referrer else '-' }}</dd></div>
 <div><dt>Day streak</dt><dd>{{ member['streak'] }}</dd></div>
 <div><dt>Joined</dt><dd>{{ member['created_at'][:16] }}</dd></div>
 </dl>
@@ -3342,7 +3369,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Account number, serial number, referral code or cellphone" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, serial number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -3439,7 +3466,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>Account number</th><th>Cellphone</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
