@@ -640,6 +640,18 @@ def init_db():
         "topups": {"level": "INTEGER NOT NULL DEFAULT 0"},
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
+        # Older deployed databases may already have this table without the
+        # newer fields. Add missing columns safely before the admin POST uses them.
+        "topup_details": {
+            "Bank_name": "TEXT NOT NULL DEFAULT ''",
+            "Reference": "TEXT NOT NULL DEFAULT ''",
+            "Amount": "TEXT NOT NULL DEFAULT ''",
+            "PayShap": "TEXT NOT NULL DEFAULT ''",
+            "Account_Number": "TEXT NOT NULL DEFAULT ''",
+            "message": "TEXT NOT NULL DEFAULT ''",
+            "flag": "TEXT NOT NULL DEFAULT ''",
+            "updated_at": "TEXT NOT NULL DEFAULT ''",
+        },
     }
     for table, columns in extra_columns.items():
         have = {r["name"]
@@ -2118,11 +2130,17 @@ def admin_topup_details():
         (target_id, fields["Bank_name"], fields["Reference"],
          fields["Amount"], fields["PayShap"],
          fields["Account_Number"], message, flag, now_iso()))
-    db.commit()
+    try:
+        db.commit()
+    except sqlite3.Error:
+        db.rollback()
+        app.logger.exception("Failed to save admin top-up details")
+        flash("Could not save top-up details because of a database error.", "error")
+        return redirect(url_for("admin"))
 
     if new_flag and old and old["flag"]:
         _remove_upload(old["flag"])
-    flash(f"Top-up top-up details saved for {label}.", "ok")
+    flash(f"Top-up details saved for {label}.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -3993,3 +4011,4 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
