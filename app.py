@@ -52,6 +52,8 @@ import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
+from concurrent.futures import ThreadPoolExecutor
+sms_executor = ThreadPoolExecutor(max_workers=4)
 
 from flask import (
     Flask, abort, flash, g, jsonify, redirect, render_template_string,
@@ -399,9 +401,11 @@ CREATE TABLE IF NOT EXISTS admin_posts (
 
 def get_db():
     if "db" not in g:
-        g.db = sqlite3.connect(DB_PATH)
+        g.db = sqlite3.connect(DB_PATH, timeout=30)
         g.db.row_factory = sqlite3.Row
         g.db.execute("PRAGMA foreign_keys = ON")
+        g.db.execute("PRAGMA journal_mode = WAL")
+        g.db.execute("PRAGMA synchronous = NORMAL")
     return g.db
 
 
@@ -471,24 +475,16 @@ def mask_phone(phone):
     return phone[:3] + "*" * max(0, len(phone) - 7) + phone[-4:]
 
 
-def otp_hash(code):
-    return hmac.new(app.secret_key.encode(), code.encode(),
-                    hashlib.sha256).hexdigest()
+def sms_configured():
+    return all(os.environ.get(k) for k in
+               ("TWILIO_ACCOUNT_SID", "TWILIO_AUTH_TOKEN", "TWILIO_FROM"))
 
 
 def send_sms(to, body):
-    """Send an SMS through Twilio when TWILIO_* settings exist.
-
-    Returns "sent", "failed", or "console" (no SMS provider configured: the
-    message is only printed in the server log, nothing is sent to the phone).
-    """
-    sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
-    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
-    sender = os.environ.get("TWILIO_FROM", "")
-    if not (sid and token and sender):
-        print(f"[sms:console] To {to}: {body}", flush=True)
-        return "console"
-
+    """Send through Twilio. Returns "sent" or "failed". Runs in a worker thread."""
+    sid = os.environ["TWILIO_ACCOUNT_SID"]
+    token = os.environ["TWILIO_AUTH_TOKEN"]
+    sender = os.environ["TWILIO_FROM"]
     field = "MessagingServiceSid" if sender.startswith("MG") else "From"
     data = urllib.parse.urlencode(
         {"To": to, field: sender, "Body": body}).encode()
@@ -498,15 +494,29 @@ def send_sms(to, body):
     auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
     req.add_header("Authorization", "Basic " + auth)
     try:
-        with urllib.request.urlopen(req, timeout=15):
+        with urllib.request.urlopen(req, timeout=8):
             return "sent"
     except Exception:
         app.logger.exception("SMS send failed")
         return "failed"
 
 
+def _deliver_sms(user_id, to, body):
+    """Background job: send, retry once, and free the resend timer on failure."""
+    for _ in range(2):
+        if send_sms(to, body) == "sent":
+            return
+    try:
+        conn = sqlite3.connect(DB_PATH, timeout=30)
+        conn.execute("UPDATE otps SET sent_ts=0 WHERE user_id=?", (user_id,))
+        conn.commit()
+        conn.close()
+    except Exception:
+        app.logger.exception("Could not reset resend timer")
+
+
 def issue_otp(db, user):
-    """Create a one-time code and SMS it. Returns (ok, error, demo_code)."""
+    """Create a one-time code and queue the SMS. Returns (ok, error, demo_code)."""
     now = time.time()
     row = db.execute("SELECT * FROM otps WHERE user_id=?",
                      (user["id"],)).fetchone()
@@ -534,18 +544,14 @@ def issue_otp(db, user):
          sends + 1, window))
     db.commit()
 
-    result = send_sms(
-        user["phone"],
-        f"Your VEDOVOUCHERS verification code is {code}. "
-        "It expires in 10 minutes. Do not share it with anyone.")
-    if result == "failed":
-        db.execute("DELETE FROM otps WHERE user_id=?", (user["id"],))
-        db.commit()
-        return (False, "We could not send the SMS right now. "
-                       "Please tap Resend code in a moment.", None)
+    body = (f"Your VEDOVOUCHERS verification code is {code}. "
+            "It expires in 10 minutes. Do not share it with anyone.")
+    if sms_configured():
+        sms_executor.submit(_deliver_sms, user["id"], user["phone"], body)
+        return True, None, None
 
-    demo = (code if result == "console"
-            and os.environ.get("OTP_SHOW_ON_SCREEN") == "1" else None)
+    print(f"[sms:console] To {user['phone']}: {body}", flush=True)
+    demo = code if os.environ.get("OTP_SHOW_ON_SCREEN") == "1" else None
     return True, None, demo
 
 
@@ -831,6 +837,13 @@ def register():
         confirm = request.form.get("confirm", "")
         ref_code = request.form.get("referral", "").strip().upper()
         level_code = request.form.get("level_code", "").strip().upper()
+             _db = get_db()
+        _db.execute("DELETE FROM otps WHERE user_id IN (SELECT id FROM users "
+                    "WHERE phone_verified=0 AND is_admin=0 "
+                    "AND created_at < datetime('now','-1 hour'))")
+        _db.execute("DELETE FROM users WHERE phone_verified=0 AND is_admin=0 "
+                    "AND created_at < datetime('now','-1 hour')")
+        _db.commit()
 
         db = get_db()
         referrer = None
@@ -1099,19 +1112,42 @@ def verify():
 
 @app.route("/verify/resend", methods=["POST"])
 def verify_resend():
+    ajax = request.headers.get("X-Requested-With") == "fetch"
     uid = session.get("pending_uid")
     if not uid:
+        if ajax:
+            return jsonify(ok=False, message="Session expired.", redirect=url_for("login"))
         return redirect(url_for("login"))
 
     db = get_db()
     user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
     if user is None or user["phone_verified"]:
         session.pop("pending_uid", None)
+        if ajax:
+            return jsonify(ok=False, message="Already verified.", redirect=url_for("login"))
         return redirect(url_for("login"))
 
-    _send_code_and_flash(db, uid)
-    return redirect(url_for("verify"))
+    ok, error, demo = issue_otp(db, user)
+    if ajax:
+        if not ok:
+            m = re.search(r"(\d+) seconds", error or "")
+            return jsonify(ok=False, message=error,
+                           wait=int(m.group(1)) if m else 0)
+        msg = f"Code sent to {mask_phone(user['phone'])}."
+        if demo:
+            msg += f" Demo code: {demo}"
+        return jsonify(ok=True, message=msg, wait=OTP_RESEND_SECONDS)
 
+    _send_code_and_flash(db, uid) if False else None
+    flash(error or f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
+          "error" if not ok else "ok")
+    if demo:
+        flash(f"Demo mode (no SMS provider set): your code is {demo}.", "ok")
+    return redirect(url_for("verify"))
+     row = db.execute("SELECT sent_ts FROM otps WHERE user_id=?", (uid,)).fetchone()
+    resend_in = (max(0, int(OTP_RESEND_SECONDS - (time.time() - row["sent_ts"])))
+                 if row else 0)
+    return page(VERIFY_BODY, masked=mask_phone(user["phone"]), resend_in=resend_in)
 
 @app.route("/")
 def index():
@@ -2436,20 +2472,81 @@ VERIFY_BODY = """
 <span class="logo">V</span>
 <div class="card">
 <h1>Verify your number</h1>
-<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. Enter it below to finish signing in.</p>
-<form method="post" action="{{ url_for('verify') }}">
+<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. It is filled in and submitted automatically when you type all 6 digits.</p>
+<form method="post" action="{{ url_for('verify') }}" id="vform">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>6-digit code</label>
-<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="123456" required autofocus>
-<button class="primary" style="width:100%">Verify and continue</button>
+<label for="code">6-digit code</label>
+<input id="code" name="code" inputmode="numeric" autocomplete="one-time-code"
+ pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="------" required autofocus
+ style="font-size:1.8rem;letter-spacing:.5em;text-align:center;font-weight:700">
+<button class="primary" style="width:100%" id="vbtn">Verify and continue</button>
 </form>
-<form method="post" action="{{ url_for('verify_resend') }}" style="margin-top:12px">
+<form method="post" action="{{ url_for('verify_resend') }}" id="rform" style="margin-top:12px">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="ghost" style="width:100%">Resend code</button>
+<button class="ghost" style="width:100%" id="rbtn" disabled>Resend code</button>
 </form>
+<div id="rmsg" class="small muted" style="margin-top:10px" aria-live="polite"></div>
 <p class="muted small" style="margin-top:14px">The code expires in 10 minutes. <a href="{{ url_for('login') }}">Back to login</a></p>
 </div>
 </div>
+<script>
+(function () {
+  var code = document.getElementById('code');
+  var vform = document.getElementById('vform');
+  var vbtn = document.getElementById('vbtn');
+  var rform = document.getElementById('rform');
+  var rbtn = document.getElementById('rbtn');
+  var rmsg = document.getElementById('rmsg');
+  var left = {{ resend_in }};
+  var timer = null, sent = false;
+
+  function tick() {
+    if (left > 0) {
+      rbtn.disabled = true;
+      rbtn.textContent = 'Resend code in ' + left + 's';
+      left--;
+      timer = setTimeout(tick, 1000);
+    } else {
+      rbtn.disabled = false;
+      rbtn.textContent = 'Resend code';
+    }
+  }
+  function startTimer(n) { clearTimeout(timer); left = n; tick(); }
+
+  code.addEventListener('input', function () {
+    code.value = code.value.replace(/\\D/g, '').slice(0, 6);
+    if (code.value.length === 6 && !sent) {
+      sent = true;
+      vbtn.disabled = true;
+      vbtn.textContent = 'Verifying...';
+      vform.submit();
+    }
+  });
+
+  rform.addEventListener('submit', function (e) {
+    e.preventDefault();
+    if (rbtn.disabled) { return; }
+    rbtn.disabled = true;
+    rbtn.textContent = 'Sending...';
+    fetch(rform.action, {
+      method: 'POST', body: new FormData(rform), credentials: 'same-origin',
+      headers: { 'X-Requested-With': 'fetch' }
+    }).then(function (r) { return r.json(); }).then(function (r) {
+      if (r.redirect) { window.location = r.redirect; return; }
+      rmsg.textContent = r.message || '';
+      rmsg.style.color = r.ok ? 'var(--up)' : 'var(--down)';
+      startTimer(r.wait || 0);
+      code.value = ''; code.focus();
+    }).catch(function () {
+      rmsg.textContent = 'Network problem. Please try again.';
+      rmsg.style.color = 'var(--down)';
+      startTimer(0);
+    });
+  });
+
+  tick();
+})();
+</script>
 """
 
 REGISTER_BODY = """
