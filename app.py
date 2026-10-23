@@ -9,10 +9,10 @@ Features
     The verified cellphone number IS the login ID (no account number).
   * TOP-UP page looks like the check-in page: the member enters an amount and
     a reason, then taps a level tile. The tiles close and a WHITE details tab
-    opens for 10 minutes showing the school name, teacher's name, student
-    number, reference number and book number, a small school flag and a red
+    opens for 10 minutes showing the Bank Name, PayShap, Amount
+    number, PayShap and Account number, a small school flag and a red
     message. ALL of that information is entered by the admin only (Admin
-    page > School top-up details, for everyone or for one member). The member
+    page >Top-up details, for everyone or for one member). The member
     can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
     money to the balance.
@@ -295,7 +295,7 @@ CREATE TABLE IF NOT EXISTS users (
 CREATE TABLE IF NOT EXISTS vouchers (
     code TEXT PRIMARY KEY,
     level INTEGER NOT NULL,
-    used_by INTEGER REFERENCES users(id),
+    used_by INTEGER PayShapS users(id),
     used_at TEXT,
     issued_to INTEGER,
     created_at TEXT NOT NULL
@@ -334,11 +334,11 @@ CREATE TABLE IF NOT EXISTS topups (
 
 CREATE TABLE IF NOT EXISTS topup_details (
     user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
-    school_name TEXT NOT NULL DEFAULT '',
-    teacher_name TEXT NOT NULL DEFAULT '',
-    student_number TEXT NOT NULL DEFAULT '',
-    reference_number TEXT NOT NULL DEFAULT '',
-    book_number TEXT NOT NULL DEFAULT '',
+    Bank_name TEXT NOT NULL DEFAULT '',
+    Reference TEXT NOT NULL DEFAULT '',
+    Amount TEXT NOT NULL DEFAULT '',
+    PayShap TEXT NOT NULL DEFAULT '',
+    Account_Number TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL DEFAULT '',
     flag TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
@@ -1573,11 +1573,11 @@ def topup():
             return (details[key] if details and details[key] else "-")
 
         info_rows = [
-            ("School name", val("school_name")),
-            ("Teacher's name", val("teacher_name")),
-            ("Student number", val("student_number")),
-            ("Reference number", val("reference_number")),
-            ("Book number", val("book_number")),
+            ("Bank Name", val("Bank_name")),
+            ("Reference", val("Reference")),
+            ("Amount", val("Amount")),
+            ("PayShap", val("PayShap")),
+            ("Account number", val("Account_Number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
@@ -2086,8 +2086,8 @@ def admin_topup_details():
         target_id, label = 0, "everyone"
 
     fields = {key: request.form.get(key, "").strip()[:100]
-              for key in ("school_name", "teacher_name", "student_number",
-                          "reference_number", "book_number")}
+              for key in ("Bank_name", "Reference", "Amount",
+                          "PayShap", "Account_Number")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2106,19 +2106,19 @@ def admin_topup_details():
         flag = new_flag
 
     db.execute(
-        "INSERT INTO topup_details (user_id, school_name, teacher_name, "
-        "student_number, reference_number, book_number, message, flag, "
+        "INSERT INTO topup_details (user_id, Bank_name, Reference, "
+        "Amount, PayShap, Account_Number, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
-        "school_name=excluded.school_name, "
-        "teacher_name=excluded.teacher_name, "
-        "student_number=excluded.student_number, "
-        "reference_number=excluded.reference_number, "
-        "book_number=excluded.book_number, message=excluded.message, "
+        "Bank_name=excluded.Bank_name, "
+        "Reference=excluded.Reference, "
+        "Amount=excluded.Amount, "
+        "PayShap=excluded.PayShap, "
+        "Account_Number=excluded.Account_Number, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
-        (target_id, fields["school_name"], fields["teacher_name"],
-         fields["student_number"], fields["reference_number"],
-         fields["book_number"], message, flag, now_iso()))
+        (target_id, fields["Bank_name"], fields["Reference"],
+         fields["Amount"], fields["PayShap"],
+         fields["Account_Number"], message, flag, now_iso()))
     db.commit()
 
     if new_flag and old and old["flag"]:
@@ -3342,7 +3342,7 @@ TOPUP_BODY = """
 <div class="sc-head">
 {% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="School flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['school_name'] if details and details['school_name'] else 'School top-up details' }}</h2>
+<h2>{{ details['Bank_name'] if details and details['Bank_name'] else 'School top-up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
@@ -3720,7 +3720,7 @@ ADMIN_BODY = """
 </div>
 
 <div class="card">
-<h2>School top-up details (white tab)</h2>
+<h2>Top-up details (white tab)</h2>
 <p class="muted">This is what a member sees, and can copy, in the white tab that opens for 10 minutes after they tap a level on the Top up page. Only you can enter it. A member-specific entry replaces the global one for that member only. Leaving the flag empty keeps the current flag.</p>
 <form method="post" action="{{ url_for('admin_topup_details') }}" enctype="multipart/form-data">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -3733,16 +3733,16 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>School name</label>
-<input name="school_name" maxlength="100" value="{{ gd['school_name'] if gd else '' }}">
-<label>Teacher's name</label>
-<input name="teacher_name" maxlength="100" value="{{ gd['teacher_name'] if gd else '' }}">
-<label>Student number</label>
-<input name="student_number" maxlength="100" value="{{ gd['student_number'] if gd else '' }}">
-<label>Reference number</label>
-<input name="reference_number" maxlength="100" value="{{ gd['reference_number'] if gd else '' }}">
-<label>Book number</label>
-<input name="book_number" maxlength="100" value="{{ gd['book_number'] if gd else '' }}">
+<label>Bank_name</label>
+<input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
+<label>Reference</label>
+<input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
+<label>Amount</label>
+<input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
+<label>PayShap</label>
+<input name="PayShap" maxlength="100" value="{{ gd['PayShap'] if gd else '' }}">
+<label>Account number</label>
+<input name="Account_Number" maxlength="100" value="{{ gd['Account_Number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
@@ -3768,16 +3768,16 @@ ADMIN_BODY = """
 {% if gd or specific_details %}
 <h2 style="margin-top:22px">Saved school details</h2>
 <table>
-<tr><th>For</th><th>School</th><th>Teacher</th><th>Student no.</th><th>Reference no.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>School</th><th>Reference</th><th>Amount</th><th>Reference no.</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['school_name'] or '-' }}</td><td>{{ gd['teacher_name'] or '-' }}</td><td>{{ gd['student_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Account_Number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['school_name'] or '-' }}</td><td>{{ s['teacher_name'] or '-' }}</td><td>{{ s['student_number'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['book_number'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['PayShap'] or '-' }}</td><td>{{ s['Account_Number'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
