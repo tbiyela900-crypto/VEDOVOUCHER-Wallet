@@ -3171,6 +3171,8 @@ WITHDRAW_BODY = """
 <div class="card note">
 <h1>Withdraw (money)</h1>
 <p class="muted">Enter withdrawal request. Rejected requests are refunded.</p>
+<p class="muted">Enter withdrawal in of term R150, R250.. R1500..R15000.</p>
+<p class="muted">Withdraws takes 48 hours.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
