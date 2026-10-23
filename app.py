@@ -157,13 +157,13 @@ DEFAULT_TOPUP_INSTRUCTIONS = (
 # --- Savings pots ----------------------------------------------------------
 # Annual interest rate (simple interest) by lock period. Realistic, not a
 # multiplier. Interest = principal x APR x weeks / 52.
-#POT_APR_PERCENT = {
-    #1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
-    #4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
-    #7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
-#}
-#POT_WEEKS = sorted(POT_APR_PERCENT)
-#POT_MIN_CENTS = 1000            # R10
+POT_APR_PERCENT = {
+    1: Decimal("4.0"), 2: Decimal("4.5"), 3: Decimal("5.0"),
+    4: Decimal("5.5"), 5: Decimal("6.0"), 6: Decimal("6.5"),
+    7: Decimal("7.0"), 8: Decimal("7.5"), 9: Decimal("8.0"),
+}
+POT_WEEKS = sorted(POT_APR_PERCENT)
+POT_MIN_CENTS = 1000            # R10
 
 # --- Check-in tasks / admin photos ----------------------------------------
 TASK_WAIT_SECONDS = 5           # each tap loads for 5 seconds
@@ -2609,9 +2609,11 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Serial number (11 digits)</label>
+<input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>Cellphone number (this will be your login)</label>
-<input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required autofocus>
-<p class="muted small" style="margin-top:6px">Put 6-digit code showing.</p>
+<input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
+<p class="muted small" style="margin-top:6px">A 6-digit code will be shown on the next page to verify this number.</p>
 <label>Password (minimum 8 characters)</label>
 <input name="password" type="password" autocomplete="new-password" required>
 <label>Confirm password</label>
@@ -2619,6 +2621,9 @@ REGISTER_BODY = """
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
 <label>Level code from the admin (optional)</label>
+<input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. L1-ABCD-EFGH" autocomplete="off">
+<button class="primary" style="width:100%">Create account</button>
+</form>
 <p class="muted" style="margin-top:16px">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
 </div>
 </div>
@@ -3096,7 +3101,7 @@ TOPUP_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Enter you Bank Account Number.
+<label>Enter your Bank Account Number.</label>
 <input name="voucher_digits" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
 <label>Reason for topup.</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
@@ -3219,9 +3224,6 @@ UPGRADE_BODY = """
 <div class="card note">
 <h1>Level upgrade</h1>
 <p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['points']) }}</strong></p>
-<h2>Rules</h2>
-<ul>
-
 {% if next_level %}
 {% set cost = UPGRADE_COST_CENTS[next_level] %}
 {% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
