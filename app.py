@@ -3699,16 +3699,16 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>School name</label>
-<input name="school_name" maxlength="100" value="{{ gd['school_name'] if gd else '' }}">
-<label>Teacher's name</label>
-<input name="teacher_name" maxlength="100" value="{{ gd['teacher_name'] if gd else '' }}">
-<label>Student number</label>
-<input name="student_number" maxlength="100" value="{{ gd['student_number'] if gd else '' }}">
+<label>Bnkl name</label>
+<input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
+<label>Reference</label>
+<input name="Bank_name" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
+<label>Amount</label>
+<input name="student_number" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
 <label>Reference number</label>
-<input name="reference_number" maxlength="100" value="{{ gd['reference_number'] if gd else '' }}">
+<input name="Account" maxlength="100" value="{{ gd['Account number'] if gd else '' }}">
 <label>Book number</label>
-<input name="book_number" maxlength="100" value="{{ gd['book_number'] if gd else '' }}">
+<input name="Payshap" maxlength="100" value="{{ gd['Payshap'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
@@ -3732,14 +3732,14 @@ ADMIN_BODY = """
 </script>
 
 {% if gd or specific_details %}
-<h2 style="margin-top:22px">Saved school details</h2>
+<h2 style="margin-top:22px">Top Information</h2>
 <table>
-<tr><th>For</th><th>School</th><th>Teacher</th><th>Student no.</th><th>Reference no.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>Bank</th><th>Teacher</th><th>Amount</th><th>Payshap.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['school_name'] or '-' }}</td><td>{{ gd['teacher_name'] or '-' }}</td><td>{{ gd['student_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference_name'] or '-' }}</td><td>{{ gd['Account_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
-<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
+<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the Top up details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
