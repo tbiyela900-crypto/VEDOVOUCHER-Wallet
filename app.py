@@ -4,7 +4,8 @@ ZEDAVouchers  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an ACCOUNT NUMBER (any number) + 11-digit serial number
+  * Sign-up uses an ACCOUNT NUMBER + 11-digit serial number + a cellphone number
+    that must be verified with an SMS one-time code (OTP) before the first login
   * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
   * Admin approval issues a voucher code to the member
   * Daily check-in (level reward / 24) with a special 7-day streak congratulation
@@ -37,11 +38,17 @@ Run:
   http://127.0.0.1:5000
 """
 
+import base64
+import hashlib
+import hmac
 import os
+import re
 import secrets
 import sqlite3
 import string
 import time
+import urllib.parse
+import urllib.request
 from datetime import datetime, timedelta, timezone
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
@@ -121,6 +128,13 @@ TEAM_TIERS = [
 ]
 
 DEFAULT_WELCOME_TEXT = "Welcome, let's grow together."
+
+# --- SMS one-time code (OTP) -----------------------------------------------
+OTP_TTL_SECONDS = 600           # a code is valid for 10 minutes
+OTP_RESEND_SECONDS = 60         # wait between two codes
+OTP_MAX_ATTEMPTS = 5            # wrong guesses per code
+OTP_MAX_SENDS = 5               # codes per 30 minutes
+OTP_WINDOW_SECONDS = 1800
 
 # --- Level upgrades --------------------------------------------------------
 # Cost to move from level N-1 to level N = 50% of the difference between the
@@ -354,6 +368,16 @@ CREATE TABLE IF NOT EXISTS checkin_tasks (
     UNIQUE(user_id, day, task_no)
 );
 
+CREATE TABLE IF NOT EXISTS otps (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id),
+    code_hash TEXT NOT NULL,
+    expires_ts REAL NOT NULL,
+    attempts INTEGER NOT NULL DEFAULT 0,
+    sent_ts REAL NOT NULL,
+    sends INTEGER NOT NULL DEFAULT 1,
+    window_ts REAL NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS team_tiers (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -424,6 +448,105 @@ def new_team_account_number(db):
         if not db.execute("SELECT 1 FROM team_tiers WHERE account_number=?",
                           (number,)).fetchone():
             return number
+
+
+def normalize_phone(raw):
+    """Return the cellphone number as +E.164, or None if it is not valid."""
+    s = re.sub(r"[\s\-().]", "", (raw or "").strip())
+    if s.startswith("00"):
+        s = "+" + s[2:]
+    if re.fullmatch(r"0[6-8]\d{8}", s):            # South African cell, local
+        return "+27" + s[1:]
+    if re.fullmatch(r"\+?27[6-8]\d{8}", s):        # South African cell, intl
+        return "+" + s.lstrip("+")
+    if s.startswith("+27"):                        # SA number, not a cellphone
+        return None
+    if re.fullmatch(r"\+[1-9]\d{7,14}", s):        # other countries
+        return s
+    return None
+
+
+def mask_phone(phone):
+    phone = phone or ""
+    return phone[:3] + "*" * max(0, len(phone) - 7) + phone[-4:]
+
+
+def otp_hash(code):
+    return hmac.new(app.secret_key.encode(), code.encode(),
+                    hashlib.sha256).hexdigest()
+
+
+def send_sms(to, body):
+    """Send an SMS through Twilio when TWILIO_* settings exist.
+
+    Returns "sent", "failed", or "console" (no SMS provider configured: the
+    message is only printed in the server log, nothing is sent to the phone).
+    """
+    sid = os.environ.get("TWILIO_ACCOUNT_SID", "")
+    token = os.environ.get("TWILIO_AUTH_TOKEN", "")
+    sender = os.environ.get("TWILIO_FROM", "")
+    if not (sid and token and sender):
+        print(f"[sms:console] To {to}: {body}", flush=True)
+        return "console"
+
+    field = "MessagingServiceSid" if sender.startswith("MG") else "From"
+    data = urllib.parse.urlencode(
+        {"To": to, field: sender, "Body": body}).encode()
+    req = urllib.request.Request(
+        f"https://api.twilio.com/2010-04-01/Accounts/{sid}/Messages.json",
+        data=data)
+    auth = base64.b64encode(f"{sid}:{token}".encode()).decode()
+    req.add_header("Authorization", "Basic " + auth)
+    try:
+        with urllib.request.urlopen(req, timeout=15):
+            return "sent"
+    except Exception:
+        app.logger.exception("SMS send failed")
+        return "failed"
+
+
+def issue_otp(db, user):
+    """Create a one-time code and SMS it. Returns (ok, error, demo_code)."""
+    now = time.time()
+    row = db.execute("SELECT * FROM otps WHERE user_id=?",
+                     (user["id"],)).fetchone()
+    sends, window = 0, now
+    if row:
+        wait = OTP_RESEND_SECONDS - (now - row["sent_ts"])
+        if wait > 0:
+            return (False, f"Please wait {int(wait) + 1} seconds before "
+                           "asking for a new code.", None)
+        if now - row["window_ts"] <= OTP_WINDOW_SECONDS:
+            sends, window = row["sends"], row["window_ts"]
+        if sends >= OTP_MAX_SENDS:
+            return (False, "Too many codes requested. "
+                           "Please try again later.", None)
+
+    code = f"{secrets.randbelow(10 ** 6):06d}"
+    db.execute(
+        "INSERT INTO otps (user_id, code_hash, expires_ts, attempts, "
+        "sent_ts, sends, window_ts) VALUES (?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET code_hash=excluded.code_hash, "
+        "expires_ts=excluded.expires_ts, attempts=0, "
+        "sent_ts=excluded.sent_ts, sends=excluded.sends, "
+        "window_ts=excluded.window_ts",
+        (user["id"], otp_hash(code), now + OTP_TTL_SECONDS, 0, now,
+         sends + 1, window))
+    db.commit()
+
+    result = send_sms(
+        user["phone"],
+        f"Your VEDOVOUCHERS verification code is {code}. "
+        "It expires in 10 minutes. Do not share it with anyone.")
+    if result == "failed":
+        db.execute("DELETE FROM otps WHERE user_id=?", (user["id"],))
+        db.commit()
+        return (False, "We could not send the SMS right now. "
+                       "Please tap Resend code in a moment.", None)
+
+    demo = (code if result == "console"
+            and os.environ.get("OTP_SHOW_ON_SCREEN") == "1" else None)
+    return True, None, demo
 
 
 def generate_vouchers(db, level, count):
@@ -511,6 +634,8 @@ def init_db():
         "streak": "INTEGER NOT NULL DEFAULT 0",
         "points": "INTEGER NOT NULL DEFAULT 0",
         "serial_number": "TEXT",
+        "phone": "TEXT",
+        "phone_verified": "INTEGER NOT NULL DEFAULT 1",
     }
 
     for column, definition in required_columns.items():
@@ -526,6 +651,7 @@ def init_db():
             "voucher_alpha5": "TEXT NOT NULL DEFAULT ''",
             "voucher_alpha4": "TEXT NOT NULL DEFAULT ''",
             "issued_code": "TEXT",
+            "admin_message": "TEXT NOT NULL DEFAULT ''",
         },
         "vouchers": {"issued_to": "INTEGER"},
     }
@@ -700,6 +826,7 @@ def register():
         # It is stored in the `username` column so login keeps working.
         account_number = request.form.get("account_number", "").strip()
         serial_number = request.form.get("serial_number", "").strip()
+        phone = normalize_phone(request.form.get("phone", ""))
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
         ref_code = request.form.get("referral", "").strip().upper()
@@ -722,6 +849,11 @@ def register():
                 or not serial_number.isdigit()
                 or len(serial_number) != 11):
             error = "Serial number must contain exactly 11 digits."
+
+        # Validate cellphone number (an SMS code is sent to it)
+        elif phone is None:
+            error = ("Enter a valid cellphone number, "
+                     "for example 082 123 4567.")
 
         # Validate password
         elif len(password) < 8:
@@ -790,9 +922,11 @@ def register():
                     referral_code,
                     referred_by,
                     serial_number,
+                    phone,
+                    phone_verified,
                     created_at
                 )
-                VALUES (?, ?, ?, ?, ?, ?, ?)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     account_number,
@@ -801,6 +935,8 @@ def register():
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
                     serial_number,
+                    phone,
+                    0,
                     now_iso()
                 )
             )
@@ -844,16 +980,12 @@ def register():
             return redirect(url_for("register"))
 
         # -----------------------------
-        # LOG USER IN
+        # SEND THE SMS CODE (the member is NOT logged in until it is entered)
         # -----------------------------
         session.clear()
-        session["uid"] = uid
-
-        if start_level:
-            flash(f"Welcome! You start at Level {start_level}.", "ok")
-        else:
-            flash("Welcome! You start at Level 0. Top up to start earning.", "ok")
-        return redirect(url_for("dashboard"))
+        session["pending_uid"] = uid
+        _send_code_and_flash(db, uid)
+        return redirect(url_for("verify"))
 
     # GET request: show the registration page
     # (a referral link /register?ref=CODE fills in the referral code)
@@ -874,6 +1006,19 @@ def login():
         ).fetchone()
 
         if user and check_password_hash(user["pw_hash"], password):
+            if not user["phone_verified"]:
+                # Cellphone not verified yet: the SMS code comes first.
+                session.clear()
+                session["pending_uid"] = user["id"]
+                db = get_db()
+                row = db.execute("SELECT expires_ts FROM otps WHERE user_id=?",
+                                 (user["id"],)).fetchone()
+                if row is None or time.time() > row["expires_ts"]:
+                    _send_code_and_flash(db, user["id"])
+                else:
+                    flash("Enter the code we sent to "
+                          f"{mask_phone(user['phone'])}.", "ok")
+                return redirect(url_for("verify"))
             session["uid"] = user["id"]
             return redirect(url_for("dashboard"))
 
@@ -887,6 +1032,85 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
+
+
+def _send_code_and_flash(db, uid):
+    user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    ok, error, demo_code = issue_otp(db, user)
+    if not ok:
+        flash(error, "error")
+        return
+    flash(f"We sent a 6-digit code by SMS to {mask_phone(user['phone'])}.",
+          "ok")
+    if demo_code:
+        flash(f"Demo mode (no SMS provider set): your code is {demo_code}.",
+              "ok")
+
+
+@app.route("/verify", methods=["GET", "POST"])
+def verify():
+    """The new member must enter the SMS code before being logged in."""
+    uid = session.get("pending_uid")
+    if not uid:
+        return redirect(url_for("login"))
+
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if user is None or user["phone_verified"]:
+        session.pop("pending_uid", None)
+        return redirect(url_for("login"))
+
+    if request.method == "POST":
+        code = re.sub(r"\D", "", request.form.get("code", ""))
+        row = db.execute("SELECT * FROM otps WHERE user_id=?",
+                         (uid,)).fetchone()
+
+        if row is None or time.time() > row["expires_ts"]:
+            flash("That code has expired. Tap Resend code to get a new one.",
+                  "error")
+        elif row["attempts"] >= OTP_MAX_ATTEMPTS:
+            flash("Too many wrong attempts. Tap Resend code to get a new one.",
+                  "error")
+        elif len(code) == 6 and hmac.compare_digest(otp_hash(code),
+                                                    row["code_hash"]):
+            db.execute("UPDATE users SET phone_verified=1 WHERE id=?", (uid,))
+            db.execute("DELETE FROM otps WHERE user_id=?", (uid,))
+            db.commit()
+            session.clear()
+            session["uid"] = uid
+            if user["level"]:
+                flash(f"Welcome! You start at Level {user['level']}.", "ok")
+            else:
+                flash("Welcome! You start at Level 0. "
+                      "Top up to start earning.", "ok")
+            return redirect(url_for("dashboard"))
+        else:
+            db.execute("UPDATE otps SET attempts=attempts+1 WHERE user_id=?",
+                       (uid,))
+            db.commit()
+            left = OTP_MAX_ATTEMPTS - row["attempts"] - 1
+            flash("Wrong code. " + (f"{left} attempt(s) left." if left > 0
+                                    else "Tap Resend code to get a new one."),
+                  "error")
+        return redirect(url_for("verify"))
+
+    return page(VERIFY_BODY, masked=mask_phone(user["phone"]))
+
+
+@app.route("/verify/resend", methods=["POST"])
+def verify_resend():
+    uid = session.get("pending_uid")
+    if not uid:
+        return redirect(url_for("login"))
+
+    db = get_db()
+    user = db.execute("SELECT * FROM users WHERE id=?", (uid,)).fetchone()
+    if user is None or user["phone_verified"]:
+        session.pop("pending_uid", None)
+        return redirect(url_for("login"))
+
+    _send_code_and_flash(db, uid)
+    return redirect(url_for("verify"))
 
 
 @app.route("/")
@@ -1211,7 +1435,10 @@ def topup():
     history = db.execute(
         "SELECT * FROM topups WHERE user_id=? ORDER BY id DESC",
         (user["id"],)).fetchall()
-    return page(TOPUP_BODY, user=user, history=history,
+    # A message the admin sent for the member's latest request replaces the
+    # global instructions; with no specific message the global one shows.
+    admin_msg = history[0]["admin_message"] if history else ""
+    return page(TOPUP_BODY, user=user, history=history, admin_msg=admin_msg,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS),
                 TOPUP_MIN_CENTS=TOPUP_MIN_CENTS,
@@ -1270,7 +1497,8 @@ def team():
 
     members = db.execute(
         "SELECT username, level, points, streak, created_at FROM users "
-        "WHERE referred_by=? ORDER BY level DESC, points DESC",
+        "WHERE referred_by=? AND phone_verified=1 "
+        "ORDER BY level DESC, points DESC",
         (user["id"],)).fetchall()
 
     earned = db.execute(
@@ -1579,9 +1807,11 @@ def admin():
         "SELECT u.*, r.username AS referrer FROM users u "
         "LEFT JOIN users r ON r.id = u.referred_by ")
     if q:
+        digits = re.sub(r"\D", "", q).lstrip("0")
+        phone_like = f"%{digits}%" if digits else like
         users_sql += ("WHERE u.username LIKE ? OR u.serial_number LIKE ? "
-                      "OR u.referral_code LIKE ? ")
-        users_args = (like, like, like)
+                      "OR u.referral_code LIKE ? OR u.phone LIKE ? ")
+        users_args = (like, like, like, phone_like)
     else:
         users_args = ()
     users_sql += "ORDER BY u.is_admin DESC, u.level DESC, u.points DESC"
@@ -1698,6 +1928,34 @@ def admin_add_balance(user_id):
            note or "Balance added by admin")
     db.commit()
     flash(f"Added {money(cents)} to account {target['username']}.", "ok")
+    return redirect(url_for("admin", q=back))
+
+
+@app.route("/admin/topup/<int:topup_id>/message", methods=["POST"])
+@admin_required
+def admin_topup_message(topup_id):
+    """Send a specific message to the member who made this top-up request.
+    An empty message clears it, so the global message shows again."""
+    back = request.form.get("q", "").strip()[:30] or None
+    message = request.form.get("message", "").strip()
+    if len(message) > 500:
+        flash("The message is too long (max 500 characters).", "error")
+        return redirect(url_for("admin", q=back))
+
+    db = get_db()
+    t = db.execute("SELECT id FROM topups WHERE id=?", (topup_id,)).fetchone()
+    if t is None:
+        flash("Top-up request not found.", "error")
+        return redirect(url_for("admin", q=back))
+
+    db.execute("UPDATE topups SET admin_message=? WHERE id=?",
+               (message, topup_id))
+    db.commit()
+    if message:
+        flash(f"Message for top-up #{topup_id} sent to the member.", "ok")
+    else:
+        flash(f"Message cleared. The member sees the global message again.",
+              "ok")
     return redirect(url_for("admin", q=back))
 
 
@@ -2173,6 +2431,27 @@ LOGIN_BODY = """
 </div>
 """
 
+VERIFY_BODY = """
+<div class="auth">
+<span class="logo">V</span>
+<div class="card">
+<h1>Verify your number</h1>
+<p class="muted">We sent a 6-digit code by SMS to <strong>{{ masked }}</strong>. Enter it below to finish signing in.</p>
+<form method="post" action="{{ url_for('verify') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>6-digit code</label>
+<input name="code" inputmode="numeric" autocomplete="one-time-code" pattern="[0-9]{6}" minlength="6" maxlength="6" placeholder="123456" required autofocus>
+<button class="primary" style="width:100%">Verify and continue</button>
+</form>
+<form method="post" action="{{ url_for('verify_resend') }}" style="margin-top:12px">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="ghost" style="width:100%">Resend code</button>
+</form>
+<p class="muted small" style="margin-top:14px">The code expires in 10 minutes. <a href="{{ url_for('login') }}">Back to login</a></p>
+</div>
+</div>
+"""
+
 REGISTER_BODY = """
 <div class="auth">
 <span class="logo">V</span>
@@ -2206,6 +2485,9 @@ REGISTER_BODY = """
     placeholder="Enter 11-digit cereal/serial number"
     required
 >
+<label>Cellphone number</label>
+<input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
+<p class="muted small" style="margin-top:6px">We will send a 6-digit code by SMS to confirm this number.</p>
 <label>Password (minimum 8 characters)</label>
 <input name="password" type="password" required>
 <label>Confirm password</label>
@@ -2692,8 +2974,8 @@ TOPUP_BODY = """
 <div class="card note">
 <h1>Top up (money)</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
-<h2>Instructions from the admin</h2>
-<p style="white-space:pre-wrap">{{ instructions }}</p>
+<h2>{% if admin_msg %}Message from the admin{% else %}Instructions from the admin{% endif %}</h2>
+<p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
@@ -2711,11 +2993,12 @@ TOPUP_BODY = """
 <h2>Top-up history</h2>
 {% if history %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Your voucher code</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Your voucher code</th><th>Admin message</th></tr>
 {% for t in history %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td><td class="muted">{{ t['note'] }}</td>
 <td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
-<td>{% if t['issued_code'] %}<code>{{ t['issued_code'] }}</code>{% else %}-{% endif %}</td></tr>
+<td>{% if t['issued_code'] %}<code>{{ t['issued_code'] }}</code>{% else %}-{% endif %}</td>
+<td class="muted" style="white-space:pre-wrap">{{ t['admin_message'] or '-' }}</td></tr>
 {% endfor %}
 </table>
 <p class="muted small" style="margin-top:10px">Redeem a voucher code on the <a href="{{ url_for('upgrade') }}">Upgrade</a> page.</p>
@@ -2944,6 +3227,7 @@ PROFILE_BODY = """
 <dl class="kv">
 <div><dt>Account number</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
 <div><dt>Serial number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
 <div><dt>Referral code</dt><dd><code>{{ member['referral_code'] }}</code></dd></div>
@@ -2959,7 +3243,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Account number, serial number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Account number, serial number, referral code or cellphone" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -2980,7 +3264,7 @@ ADMIN_BODY = """
 
 <div class="card">
 <h2>Top-up instruction text</h2>
-<p class="muted">Shown to every member on the Top up page. Keep it a play-money demo message.</p>
+<p class="muted">The global message shown to every member on the Top up page. A member only sees something else when you send them a specific message on their top-up request below.</p>
 <form method="post" action="{{ url_for('admin_instructions') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <textarea name="instructions" rows="4" maxlength="1000" required>{{ instructions }}</textarea>
@@ -3002,7 +3286,7 @@ ADMIN_BODY = """
 <h2>Top-up requests</h2>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th><th>Message to member</th></tr>
 {% for t in topups %}
 <tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
 <td class="muted">{{ t['note'] }}</td>
@@ -3018,6 +3302,14 @@ ADMIN_BODY = """
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button></form>
 {% elif t['issued_code'] %}<code>{{ t['issued_code'] }}</code>
 {% endif %}
+</td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_topup_message', topup_id=t['id']) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="q" value="{{ q }}">
+<textarea name="message" rows="2" maxlength="500" placeholder="Message for {{ t['username'] }} (empty = global message)" style="width:240px;font-size:.85rem;padding:8px 10px;border-radius:10px">{{ t['admin_message'] }}</textarea>
+<button class="success">Send</button>
+</form>
 </td></tr>
 {% endfor %}
 </table>
@@ -3048,9 +3340,10 @@ ADMIN_BODY = """
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>Account number</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>Account number</th><th>Cellphone</th><th>Level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
+<td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
 <td>L{{ u['level'] }}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
