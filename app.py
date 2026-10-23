@@ -3378,7 +3378,7 @@ TOPUP_BODY = """
 {% endfor %}
 </div>
 <div class="sc-actions"><button type="button" class="sc-copy" id="scall">Copy all</button></div>
-<p class="sc-note">This tab closes by itself when the time runs out. Your request stays pending until an admin reviews it.</p>
+<p class="sc-note">This tab closes by itself when the time runs out.</p>
 </div>
 <script>
 (function () {
