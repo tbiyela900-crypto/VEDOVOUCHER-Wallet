@@ -7,19 +7,21 @@ Features
   * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID (no account number).
-  * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
-  * Admin approval issues a voucher code to the member. It does NOT add any
+  * TOP-UP page looks like the check-in page: the member enters an amount and
+    a reason, then taps a level tile. The tiles close and a WHITE details tab
+    opens for 10 minutes showing the school name, teacher's name, student
+    number, reference number and book number, a small school flag and a red
+    message. ALL of that information is entered by the admin only (Admin
+    page > School top-up details, for everyone or for one member). The member
+    can copy every line.
+  * Admin approval of a top-up only marks it approved. It does NOT add any
     money to the balance.
   * The balance only grows through the daily check-in tasks (and referral
     bonuses, savings-pot interest, etc.), or when the admin adds balance to
     a member by hand (Admin page > All members > Add balance).
   * Daily check-in (level reward / 24) with a special 7-day streak congratulation
   * Referral codes and team
-  * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
-                          Admin can edit the top-up instruction text either
-                          for EVERYONE (global) or for ONE member (by member
-                          ID or cellphone number).
-  * Simulated WITHDRAWALS: user requests a cash-out of  money,
+  * Simulated WITHDRAWALS: user requests a cash-out of money,
                           admin approves/rejects (rejected = refunded).
   * TEAM VIEW           : each team member's level and points (balance)
   * LEVEL UPGRADES      : spend balance to move up one level, costs are public
@@ -145,13 +147,14 @@ UPGRADE_COST_CENTS = {
 # --- Top-ups / withdrawals -------------------------------------------------
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
+TOPUP_PANEL_SECONDS = 600       # the school details tab stays open 10 minutes
 WITHDRAW_MIN_CENTS = 1000       # R10
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
-    "Enter Amount"
-    "like and submit the request. An admin will review it and approve or "
-    "reject it."
+    "Enter the amount and the reason for the top-up, then tap the level you "
+    "want. A tab with the school details will open for 10 minutes. An admin "
+    "will review your request and approve or reject it."
 )
 
 # --- Savings pots ----------------------------------------------------------
@@ -321,14 +324,23 @@ CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
+    level INTEGER NOT NULL DEFAULT 0,
     note TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL,
-    decided_at TEXT,
-    voucher_digits TEXT NOT NULL DEFAULT '',
-    voucher_alpha5 TEXT NOT NULL DEFAULT '',
-    voucher_alpha4 TEXT NOT NULL DEFAULT '',
-    issued_code TEXT
+    decided_at TEXT
+);
+
+CREATE TABLE IF NOT EXISTS topup_details (
+    user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
+    school_name TEXT NOT NULL DEFAULT '',
+    teacher_name TEXT NOT NULL DEFAULT '',
+    student_number TEXT NOT NULL DEFAULT '',
+    reference_number TEXT NOT NULL DEFAULT '',
+    book_number TEXT NOT NULL DEFAULT '',
+    message TEXT NOT NULL DEFAULT '',
+    flag TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
 );
 
 CREATE TABLE IF NOT EXISTS savings_pots (
@@ -622,14 +634,9 @@ def init_db():
                 f"ALTER TABLE users ADD COLUMN {column} {definition}"
             )
 
-    # Same safe upgrade for the top-up voucher information and issued codes.
+    # Same safe upgrade for the other tables.
     extra_columns = {
-        "topups": {
-            "voucher_digits": "TEXT NOT NULL DEFAULT ''",
-            "voucher_alpha5": "TEXT NOT NULL DEFAULT ''",
-            "voucher_alpha4": "TEXT NOT NULL DEFAULT ''",
-            "issued_code": "TEXT",
-        },
+        "topups": {"level": "INTEGER NOT NULL DEFAULT 0"},
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
     }
@@ -1366,6 +1373,24 @@ def _image_ext(data):
     return None
 
 
+def _save_image(data, ext):
+    """Write an uploaded image to UPLOAD_DIR and return its file name."""
+    os.makedirs(UPLOAD_DIR, exist_ok=True)
+    name = f"{secrets.token_hex(12)}.{ext}"
+    with open(os.path.join(UPLOAD_DIR, name), "wb") as fh:
+        fh.write(data)
+    return name
+
+
+def _remove_upload(name):
+    if not name:
+        return
+    try:
+        os.remove(os.path.join(UPLOAD_DIR, name))
+    except OSError:
+        pass
+
+
 @app.route("/admin/post", methods=["POST"])
 @admin_required
 def admin_post():
@@ -1382,10 +1407,7 @@ def admin_post():
         flash("The photo must be a PNG, JPG, GIF or WEBP image.", "error")
         return redirect(url_for("dashboard"))
 
-    os.makedirs(UPLOAD_DIR, exist_ok=True)
-    name = f"{secrets.token_hex(12)}.{ext}"
-    with open(os.path.join(UPLOAD_DIR, name), "wb") as fh:
-        fh.write(data)
+    name = _save_image(data, ext)
 
     db = get_db()
     db.execute(
@@ -1408,10 +1430,7 @@ def admin_post_delete(post_id):
 
     db.execute("DELETE FROM admin_posts WHERE id=?", (post_id,))
     db.commit()
-    try:
-        os.remove(os.path.join(UPLOAD_DIR, post["image"]))
-    except OSError:
-        pass
+    _remove_upload(post["image"])
     flash("Post deleted.", "ok")
     return redirect(url_for("dashboard"))
 
@@ -1426,6 +1445,22 @@ def media(filename):
 # TOP-UPS (simulated deposits)
 # ============================================================================
 
+def _parse_ts(text):
+    return datetime.strptime(text, "%Y-%m-%d %H:%M:%S").replace(
+        tzinfo=timezone.utc)
+
+
+def get_topup_details(db, user_id):
+    """School details written by the admin. A member-specific entry replaces
+    the global one (user_id 0) for that member."""
+    row = db.execute("SELECT * FROM topup_details WHERE user_id=?",
+                     (user_id,)).fetchone()
+    if row is None:
+        row = db.execute("SELECT * FROM topup_details WHERE user_id=0"
+                         ).fetchone()
+    return row
+
+
 @app.route("/topup", methods=["GET", "POST"])
 @login_required
 def topup():
@@ -1436,15 +1471,20 @@ def topup():
         cents = parse_amount(request.form.get("amount"),
                              TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
         note = request.form.get("note", "").strip()[:100]
-        v_digits = request.form.get("voucher_digits", "").strip()
-        v_a5 = request.form.get("voucher_alpha5", "").strip().upper()
-        v_a4 = request.form.get("voucher_alpha4", "").strip().upper()
+        try:
+            level = int(request.form.get("level", 0))
+        except ValueError:
+            level = 0
 
         if cents is None:
             flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
             return redirect(url_for("topup"))
-         
+
+        if level not in LEVELS or level <= user["level"]:
+            flash("Tap a level above your current level.", "error")
+            return redirect(url_for("topup"))
+
         pending = db.execute(
             "SELECT COUNT(*) AS n FROM topups WHERE user_id=? "
             "AND status='PENDING'", (user["id"],)).fetchone()["n"]
@@ -1453,12 +1493,11 @@ def topup():
             return redirect(url_for("topup"))
 
         db.execute(
-            "INSERT INTO topups (user_id, amount, note, status, created_at, "
-            "voucher_digits, voucher_alpha5, voucher_alpha4) "
-            "VALUES (?,?,?, 'PENDING', ?, ?, ?, ?)",
-            (user["id"], cents, note, now_iso(), v_digits, v_a5, v_a4))
+            "INSERT INTO topups (user_id, amount, level, note, status, "
+            "created_at) VALUES (?,?,?,?, 'PENDING', ?)",
+            (user["id"], cents, level, note, now_iso()))
         db.commit()
-        flash(f"Top-up request for {money(cents)} sent.", "ok")
+        flash(f"Top-up request for {money(cents)} (Level {level}) sent.", "ok")
         return redirect(url_for("topup"))
 
     history = db.execute(
@@ -1469,8 +1508,45 @@ def topup():
                      (user["id"],)).fetchone()
     instructions = own["text"] if own else get_setting(
         db, "topup_instructions", DEFAULT_TOPUP_INSTRUCTIONS)
+
+    # The school details tab stays open for 10 minutes after a request.
+    cutoff = (datetime.now(timezone.utc)
+              - timedelta(seconds=TOPUP_PANEL_SECONDS)
+              ).strftime("%Y-%m-%d %H:%M:%S")
+    active = db.execute(
+        "SELECT * FROM topups WHERE user_id=? AND status='PENDING' "
+        "AND created_at>=? ORDER BY id DESC LIMIT 1",
+        (user["id"], cutoff)).fetchone()
+
+    left, details, info_rows, req_rows = 0, None, [], []
+    if active:
+        age = (datetime.now(timezone.utc)
+               - _parse_ts(active["created_at"])).total_seconds()
+        left = int(TOPUP_PANEL_SECONDS - age)
+        if left <= 0:
+            active = None
+    if active:
+        details = get_topup_details(db, user["id"])
+
+        def val(key):
+            return (details[key] if details and details[key] else "-")
+
+        info_rows = [
+            ("School name", val("school_name")),
+            ("Teacher's name", val("teacher_name")),
+            ("Student number", val("student_number")),
+            ("Reference number", val("reference_number")),
+            ("Book number", val("book_number")),
+        ]
+        req_rows = [
+            ("Level", f"Level {active['level']}"),
+            ("Amount", money(active["amount"])),
+            ("Reason", active["note"] or "-"),
+        ]
+
     return page(TOPUP_BODY, user=user, history=history,
-                instructions=instructions,
+                instructions=instructions, active=active, left=left,
+                details=details, info_rows=info_rows, req_rows=req_rows,
                 TOPUP_MIN_CENTS=TOPUP_MIN_CENTS,
                 TOPUP_MAX_CENTS=TOPUP_MAX_CENTS)
 
@@ -1613,7 +1689,7 @@ def upgrade():
 
 
 # ============================================================================
-# VOUCHER REDEEM (codes issued when the admin approves a top-up)
+# LEVEL CODE REDEEM (codes generated by the admin)
 # ============================================================================
 
 @app.route("/redeem", methods=["POST"])
@@ -1626,10 +1702,10 @@ def redeem():
     v = db.execute("SELECT * FROM vouchers WHERE code=?", (code,)).fetchone()
     if v is None or (v["issued_to"] is not None
                      and v["issued_to"] != user["id"]):
-        flash("That voucher code is not valid.", "error")
+        flash("That code is not valid.", "error")
         return redirect(url_for("upgrade"))
     if v["used_by"] is not None:
-        flash("That voucher code has already been used.", "error")
+        flash("That code has already been used.", "error")
         return redirect(url_for("upgrade"))
     if v["level"] <= user["level"]:
         flash(f"That code is for Level {v['level']}, which is not above "
@@ -1645,12 +1721,12 @@ def redeem():
         (v["level"], user["id"], v["level"])).rowcount
     if claimed != 1 or moved != 1:
         db.rollback()
-        flash("Voucher could not be redeemed. Please try again.", "error")
+        flash("Code could not be redeemed. Please try again.", "error")
         return redirect(url_for("upgrade"))
 
     pay_referral_bonus(db, user, v["level"])
     db.commit()
-    flash(f"Voucher redeemed. You are now Level {v['level']}.", "ok")
+    flash(f"Code redeemed. You are now Level {v['level']}.", "ok")
     return redirect(url_for("upgrade"))
 
 
@@ -1848,7 +1924,7 @@ def admin():
     users = db.execute(users_sql, users_args).fetchall()
 
     topups = db.execute(
-        "SELECT topups.*, users.username, users.level AS user_level FROM topups "
+        "SELECT topups.*, users.username FROM topups "
         "JOIN users ON users.id = topups.user_id " + where +
         "ORDER BY (topups.status='PENDING') DESC, topups.id DESC "
         "LIMIT 50", args).fetchall()
@@ -1875,9 +1951,18 @@ def admin():
         "JOIN users u ON u.id = ui.user_id "
         "ORDER BY ui.updated_at DESC").fetchall()
 
+    # School details shown in the white top-up tab (global + per member)
+    global_details = db.execute(
+        "SELECT * FROM topup_details WHERE user_id=0").fetchone()
+    specific_details = db.execute(
+        "SELECT d.*, u.username FROM topup_details d "
+        "JOIN users u ON u.id = d.user_id WHERE d.user_id<>0 "
+        "ORDER BY d.updated_at DESC").fetchall()
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
                 unused=unused, q=q, specific=specific,
+                gd=global_details, specific_details=specific_details,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
@@ -1938,6 +2023,80 @@ def admin_instruction_delete(user_id):
     db.execute("DELETE FROM user_instructions WHERE user_id=?", (user_id,))
     db.commit()
     flash("Member instruction removed. They now see the global text.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/topup-details", methods=["POST"])
+@admin_required
+def admin_topup_details():
+    """Admin writes the school details, red message and flag that members
+    see (and can copy) in the white tab that opens after they tap a level on
+    the Top up page. Members cannot enter or change any of this."""
+    db = get_db()
+    scope = request.form.get("scope", "global")
+
+    if scope == "user":
+        member = _find_member(request.form.get("target", ""))
+        if member is None:
+            flash("No member found with that ID or cellphone number.", "error")
+            return redirect(url_for("admin"))
+        target_id, label = member["id"], f"member {member['username']}"
+    else:
+        target_id, label = 0, "everyone"
+
+    fields = {key: request.form.get(key, "").strip()[:100]
+              for key in ("school_name", "teacher_name", "student_number",
+                          "reference_number", "book_number")}
+    message = request.form.get("message", "").strip()[:500]
+
+    old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
+                     (target_id,)).fetchone()
+    flag = old["flag"] if old else ""
+    new_flag = ""
+
+    photo = request.files.get("flag")
+    if photo is not None and photo.filename:
+        data = photo.read()
+        ext = _image_ext(data)
+        if not data or ext is None:
+            flash("The flag must be a PNG, JPG, GIF or WEBP image.", "error")
+            return redirect(url_for("admin"))
+        new_flag = _save_image(data, ext)
+        flag = new_flag
+
+    db.execute(
+        "INSERT INTO topup_details (user_id, school_name, teacher_name, "
+        "student_number, reference_number, book_number, message, flag, "
+        "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
+        "ON CONFLICT(user_id) DO UPDATE SET "
+        "school_name=excluded.school_name, "
+        "teacher_name=excluded.teacher_name, "
+        "student_number=excluded.student_number, "
+        "reference_number=excluded.reference_number, "
+        "book_number=excluded.book_number, message=excluded.message, "
+        "flag=excluded.flag, updated_at=excluded.updated_at",
+        (target_id, fields["school_name"], fields["teacher_name"],
+         fields["student_number"], fields["reference_number"],
+         fields["book_number"], message, flag, now_iso()))
+    db.commit()
+
+    if new_flag and old and old["flag"]:
+        _remove_upload(old["flag"])
+    flash(f"School top-up details saved for {label}.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/topup-details/<int:user_id>/delete", methods=["POST"])
+@admin_required
+def admin_topup_details_delete(user_id):
+    db = get_db()
+    old = db.execute("SELECT flag FROM topup_details WHERE user_id=?",
+                     (user_id,)).fetchone()
+    db.execute("DELETE FROM topup_details WHERE user_id=?", (user_id,))
+    db.commit()
+    if old:
+        _remove_upload(old["flag"])
+    flash("School top-up details removed.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -2022,16 +2181,6 @@ def admin_topup(topup_id, action):
         flash("Top-up request not found.", "error")
         return redirect(url_for("admin"))
 
-    level = 0
-    if action == "approve":
-        try:
-            level = int(request.form.get("level", 0))
-        except ValueError:
-            level = 0
-        if level not in LEVELS:
-            flash("Pick a voucher level from 1 to 7.", "error")
-            return redirect(url_for("admin"))
-
     new_status = "APPROVED" if action == "approve" else "REJECTED"
     claimed = db.execute(
         "UPDATE topups SET status=?, decided_at=? "
@@ -2042,22 +2191,12 @@ def admin_topup(topup_id, action):
         flash("This top-up was already processed.", "error")
         return redirect(url_for("admin"))
 
-    code = ""
-    if action == "approve":
-        # Approving ONLY issues a voucher code to the member. The balance is
-        # NOT increased here: it grows through check-in, or when the admin
-        # uses "Add balance" on the member.
-        code = new_voucher_code(level)
-        db.execute(
-            "INSERT INTO vouchers (code, level, issued_to, created_at) "
-            "VALUES (?,?,?,?)", (code, level, t["user_id"], now_iso()))
-        db.execute("UPDATE topups SET issued_code=? WHERE id=?",
-                   (code, topup_id))
+    # Approving only marks the request. The balance is NOT increased here:
+    # it grows through check-in, or when the admin uses "Add balance".
     db.commit()
     msg = f"Top-up #{topup_id} {new_status.lower()}."
-    if code:
-        msg += (f" Voucher {code} (Level {level}) issued to the member. "
-                "No balance was added.")
+    if action == "approve":
+        msg += " No balance was added."
     flash(msg, "ok")
     return redirect(url_for("admin"))
 
@@ -2303,6 +2442,7 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .task.locked{opacity:.45;cursor:not-allowed;}
 button.tile{font-family:inherit;font-size:inherit;color:var(--ink);text-align:left;cursor:pointer;width:100%;}
 button.tile:hover{border-color:var(--brand);}
+button.tile:disabled{opacity:.4;cursor:not-allowed;border-color:var(--line);}
 button.tile.pulse{animation:pulse 1.8s ease-in-out infinite;}
 @keyframes pulse{0%,100%{box-shadow:0 0 0 0 rgba(31,214,164,.55);}50%{box-shadow:0 0 0 9px rgba(31,214,164,0);}}
 #lvlmsg:empty{display:none;}
@@ -2416,6 +2556,28 @@ input[type=file]{padding:10px;}
 .cg i.cf{position:absolute;top:-16px;width:9px;height:14px;opacity:.9;animation:cfall linear forwards;}
 @keyframes cgpop{from{transform:scale(.6);opacity:0;}to{transform:scale(1);opacity:1;}}
 @keyframes cfall{to{transform:translateY(110vh) rotate(720deg);}}
+
+/* ---------- top-up: white school details tab ---------- */
+.card.schoolcard{background:#fff;color:#1b1b1b;border:1px solid #dcdfe2;overflow:visible;box-shadow:0 10px 40px rgba(0,0,0,.35);}
+.sc-head{display:flex;align-items:center;gap:14px;flex-wrap:wrap;margin-bottom:16px;}
+.sc-flag{height:34px;width:auto;max-width:64px;object-fit:contain;border-radius:4px;border:1px solid #d5d8db;background:#fff;}
+.sc-title h2{margin:0;color:#111;font-size:1.2rem;}
+.sc-title small{color:#666;}
+.sc-timer{margin-left:auto;text-align:right;}
+.sc-timer small{display:block;color:#666;font-size:.74rem;}
+.sc-timer b{display:block;font-size:1.6rem;color:#c40000;letter-spacing:.5px;}
+.sc-msg{color:#d00000;font-weight:700;background:#fff5f5;border:1px solid #f1b5b5;border-radius:12px;padding:12px 14px;margin-bottom:16px;white-space:pre-wrap;}
+.sc-sec{margin:14px 0 8px;font-size:.78rem;font-weight:800;letter-spacing:.5px;text-transform:uppercase;color:#555;}
+.sc-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:10px;}
+.sc-row{display:flex;align-items:center;justify-content:space-between;gap:10px;background:#f5f6f7;border:1px solid #e3e5e8;border-radius:12px;padding:10px 12px;}
+.sc-row div{min-width:0;}
+.sc-row small{display:block;color:#666;font-size:.74rem;}
+.sc-row b{display:block;color:#111;word-break:break-word;}
+.sc-copy{flex:none;background:#fff;color:#111;border:1px solid #c9cdd1;border-radius:9px;padding:6px 12px;font-family:inherit;font-weight:700;font-size:.8rem;cursor:pointer;}
+.sc-copy:hover{background:#111;color:#fff;}
+.sc-actions{display:flex;gap:10px;flex-wrap:wrap;margin-top:16px;}
+.sc-actions .sc-copy{padding:9px 16px;font-size:.88rem;}
+.sc-note{color:#666;font-size:.82rem;margin:12px 0 0;}
 
 /* ---------- login / register ---------- */
 .auth{max-width:440px;margin:30px auto 0;}
@@ -3134,35 +3296,134 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
 """
 
 TOPUP_BODY = """
+{% if active %}
+<div class="card schoolcard" id="schoolpanel" data-left="{{ left }}">
+<div class="sc-head">
+{% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="School flag">{% endif %}
+<div class="sc-title">
+<h2>{{ details['school_name'] if details and details['school_name'] else 'School top-up details' }}</h2>
+<small>Top-up request #{{ active['id'] }}</small>
+</div>
+<div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
+</div>
+
+{% if details and details['message'] %}<div class="sc-msg">{{ details['message'] }}</div>{% endif %}
+
+<div class="sc-sec">School information</div>
+<div class="sc-grid">
+{% for label, value in info_rows %}
+<div class="sc-row"><div><small>{{ label }}</small><b>{{ value }}</b></div>
+<button type="button" class="sc-copy" data-copy="{{ value }}">Copy</button></div>
+{% endfor %}
+</div>
+
+<div class="sc-sec">Your request</div>
+<div class="sc-grid">
+{% for label, value in req_rows %}
+<div class="sc-row"><div><small>{{ label }}</small><b>{{ value }}</b></div>
+<button type="button" class="sc-copy" data-copy="{{ value }}">Copy</button></div>
+{% endfor %}
+</div>
+
+<div class="sc-actions"><button type="button" class="sc-copy" id="scall">Copy all</button></div>
+<p class="sc-note">This tab closes by itself when the time runs out. Your request stays pending until an admin reviews it.</p>
+</div>
+
+<script>
+(function () {
+  var panel = document.getElementById('schoolpanel');
+  var timerEl = document.getElementById('sctimer');
+  var left = parseInt(panel.getAttribute('data-left'), 10) || 0;
+
+  function fmt(s) {
+    var m = Math.floor(s / 60), r = s % 60;
+    return (m < 10 ? '0' : '') + m + ':' + (r < 10 ? '0' : '') + r;
+  }
+  function tick() {
+    if (left <= 0) {
+      panel.style.display = 'none';
+      window.location.reload();
+      return;
+    }
+    timerEl.textContent = fmt(left);
+    left--;
+    setTimeout(tick, 1000);
+  }
+  tick();
+
+  function copyText(text, btn) {
+    var old = btn.textContent;
+    function done() {
+      btn.textContent = 'Copied';
+      setTimeout(function () { btn.textContent = old; }, 1500);
+    }
+    function fallback() {
+      var ta = document.createElement('textarea');
+      ta.value = text;
+      ta.style.position = 'fixed';
+      ta.style.opacity = '0';
+      document.body.appendChild(ta);
+      ta.select();
+      try { document.execCommand('copy'); } catch (e) {}
+      document.body.removeChild(ta);
+      done();
+    }
+    if (navigator.clipboard && window.isSecureContext) {
+      navigator.clipboard.writeText(text).then(done, fallback);
+    } else {
+      fallback();
+    }
+  }
+
+  panel.querySelectorAll('.sc-row .sc-copy').forEach(function (b) {
+    b.addEventListener('click', function () { copyText(b.getAttribute('data-copy'), b); });
+  });
+
+  document.getElementById('scall').addEventListener('click', function () {
+    var lines = [];
+    panel.querySelectorAll('.sc-row').forEach(function (row) {
+      lines.push(row.querySelector('small').textContent + ': ' + row.querySelector('b').textContent);
+    });
+    copyText(lines.join('\\n'), this);
+  });
+})();
+</script>
+
+{% else %}
 <div class="card note">
-<h1>Top up (money)</h1>
+<h1>Top up</h1>
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
 <p style="white-space:pre-wrap">{{ instructions }}</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
 <input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 500.00" required>
-<label>Enter your Bank Account Number.</label>
-<input name="voucher_digits" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required>
-<label>Reason for topup.</label>
+<label>Reason for top-up</label>
 <input name="note" maxlength="100" placeholder="e.g. for my Level 2 upgrade">
-<p class="muted small">Scroll to Top-up history below then swipe right for top up voucher</p>
-<button class="primary">Request top-up</button>
+<h2 style="margin-top:20px">Tap the level you want</h2>
+<div class="tiles">
+{% for l in LEVELS %}
+<button type="submit" name="level" value="{{ l }}" class="tile t{{ l }}{{ ' me' if l == user['level'] }}" {% if l <= user['level'] %}disabled{% endif %}>
+<b>Level {{ l }}{% if l == user['level'] %} - your level{% endif %}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} per day</span>
+</button>
+{% endfor %}
+</div>
 </form>
 </div>
+{% endif %}
 
 <div class="card">
 <h2>Top-up history</h2>
 {% if history %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Note</th><th>Status</th><th>Your voucher code</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Level</th><th>Reason</th><th>Status</th></tr>
 {% for t in history %}
-<tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td><td class="muted">{{ t['note'] }}</td>
-<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
-<td>{% if t['issued_code'] %}<code>{{ t['issued_code'] }}</code>{% else %}-{% endif %}</td></tr>
+<tr><td>{{ t['created_at'][:16] }}</td><td>{{ money(t['amount']) }}</td>
+<td>{% if t['level'] %}<span class="badge">L{{ t['level'] }}</span>{% else %}-{% endif %}</td>
+<td class="muted">{{ t['note'] }}</td>
+<td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td></tr>
 {% endfor %}
 </table>
-<p class="muted small" style="margin-top:10px">Redeem a voucher code on the <a href="{{ url_for('upgrade') }}">Upgrade</a> page.</p>
 {% else %}<p class="muted">No top-up requests yet.</p>{% endif %}
 </div>
 """
@@ -3287,7 +3548,7 @@ UPGRADE_BODY = """
 Upgrade to Level {{ next_level }}</button>
 </form>
 {% if user['points'] < cost %}
-<p class="muted small" style="margin-top:10px">Not enough balance. Keep checking in to earn more, or <a href="{{ url_for('topup') }}">request a top-up</a> to get a voucher code.</p>
+<p class="muted small" style="margin-top:10px">Not enough balance. Keep checking in to earn more, or <a href="{{ url_for('topup') }}">request a top-up</a>.</p>
 {% endif %}
 {% else %}
 <p class="muted">You are already at the highest level.</p>
@@ -3295,11 +3556,11 @@ Upgrade to Level {{ next_level }}</button>
 </div>
 
 <div class="card">
-<h2>Redeem a voucher code</h2>
-<p class="muted">Enter voucher here to move to your level.</p>
+<h2>Redeem a level code</h2>
+<p class="muted">Enter a level code from the admin to move to that level.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Voucher code</label>
+<label>Level code</label>
 <input name="voucher" placeholder="e.g. L3-ABCD-EFGH" autocomplete="off" required>
 <button class="primary">Redeem</button>
 </form>
@@ -3424,6 +3685,74 @@ ADMIN_BODY = """
 </div>
 
 <div class="card">
+<h2>School top-up details (white tab)</h2>
+<p class="muted">This is what a member sees, and can copy, in the white tab that opens for 10 minutes after they tap a level on the Top up page. Only you can enter it. A member-specific entry replaces the global one for that member only. Leaving the flag empty keeps the current flag.</p>
+<form method="post" action="{{ url_for('admin_topup_details') }}" enctype="multipart/form-data">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Send to</label>
+<select name="scope" id="dscope">
+<option value="global">Everyone (global)</option>
+<option value="user">A specific member</option>
+</select>
+<div id="dtarget" hidden>
+<label>Member ID (see the ID column in All members) or cellphone number</label>
+<input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
+</div>
+<label>School name</label>
+<input name="school_name" maxlength="100" value="{{ gd['school_name'] if gd else '' }}">
+<label>Teacher's name</label>
+<input name="teacher_name" maxlength="100" value="{{ gd['teacher_name'] if gd else '' }}">
+<label>Student number</label>
+<input name="student_number" maxlength="100" value="{{ gd['student_number'] if gd else '' }}">
+<label>Reference number</label>
+<input name="reference_number" maxlength="100" value="{{ gd['reference_number'] if gd else '' }}">
+<label>Book number</label>
+<input name="book_number" maxlength="100" value="{{ gd['book_number'] if gd else '' }}">
+<label>Message (shown in red)</label>
+<textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
+<label>Small school flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<input type="file" name="flag" accept="image/png,image/jpeg,image/gif,image/webp">
+{% if gd and gd['flag'] %}<p class="muted small" style="margin-top:8px">Current global flag: <img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:24px;vertical-align:middle;border-radius:3px"></p>{% endif %}
+<button class="primary">Save school details</button>
+</form>
+<script>
+(function () {
+  var s = document.getElementById('dscope');
+  var box = document.getElementById('dtarget');
+  var inp = document.getElementById('dtarget_in');
+  function sync() {
+    var on = s.value === 'user';
+    box.hidden = !on;
+    inp.required = on;
+  }
+  s.addEventListener('change', sync);
+  sync();
+})();
+</script>
+
+{% if gd or specific_details %}
+<h2 style="margin-top:22px">Saved school details</h2>
+<table>
+<tr><th>For</th><th>School</th><th>Teacher</th><th>Student no.</th><th>Reference no.</th><th>Book no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+{% if gd %}
+<tr><td><b>Everyone</b></td><td>{{ gd['school_name'] or '-' }}</td><td>{{ gd['teacher_name'] or '-' }}</td><td>{{ gd['student_number'] or '-' }}</td><td>{{ gd['reference_number'] or '-' }}</td><td>{{ gd['book_number'] or '-' }}</td>
+<td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
+<td>{{ gd['updated_at'][:16] }}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global school details?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
+{% endif %}
+{% for s in specific_details %}
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['school_name'] or '-' }}</td><td>{{ s['teacher_name'] or '-' }}</td><td>{{ s['student_number'] or '-' }}</td><td>{{ s['reference_number'] or '-' }}</td><td>{{ s['book_number'] or '-' }}</td>
+<td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
+<td>{{ s['updated_at'][:16] }}</td>
+<td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
+{% endfor %}
+</table>
+{% endif %}
+</div>
+
+<div class="card">
 <h2>Top-up instruction text</h2>
 <p class="muted">Choose who sees this text on the Top up page. A member-specific instruction replaces the global one for that member only.</p>
 <form method="post" action="{{ url_for('admin_instructions') }}">
@@ -3488,24 +3817,22 @@ onsubmit="return confirm('Remove this member instruction?');">
 
 <div class="card">
 <h2>Top-up requests</h2>
-<p class="muted small">Approving a top-up only issues a voucher code to the member. It does not change their balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
+<p class="muted small">Approving a top-up only marks it approved. It does not change the member's balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Level</th><th>Reason</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
 <tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
+<td>{% if t['level'] %}<span class="badge">L{{ t['level'] }}</span>{% else %}-{% endif %}</td>
 <td class="muted">{{ t['note'] }}</td>
-<td><code>{{ t['voucher_digits'] }}</code> <code>{{ t['voucher_alpha5'] }}</code> <code>{{ t['voucher_alpha4'] }}</code></td>
 <td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
 <td>
 {% if t['status'] == 'PENDING' %}
 <form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='approve') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<select name="level" style="width:auto;padding:6px 8px" title="Voucher level">{% for l in LEVELS %}<option value="{{ l }}" {{ 'selected' if l == [t['user_level'] + 1, 7]|min }}>L{{ l }}</option>{% endfor %}</select>
 <button class="success">Approve</button></form>
 <form class="inline" method="post" action="{{ url_for('admin_topup', topup_id=t['id'], action='reject') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject</button></form>
-{% elif t['issued_code'] %}<code>{{ t['issued_code'] }}</code>
 {% endif %}
 </td></tr>
 {% endfor %}
