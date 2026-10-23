@@ -42,6 +42,7 @@ Run:
 import base64
 import hashlib
 import hmac
+import json
 import os
 import re
 import secrets
@@ -175,6 +176,9 @@ UPLOAD_DIR = os.path.abspath(os.environ.get(
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
+app.config["SESSION_COOKIE_HTTPONLY"] = True
+app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
 app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024     # photo uploads
 
 
@@ -486,7 +490,7 @@ def sms_configured():
 
 
 def send_sms(to, body):
-    """Send through Twilio. Returns "sent" or "failed". Runs in a worker thread."""
+    """Send through Twilio. Returns (True, "") or (False, reason)."""
     sid = os.environ["TWILIO_ACCOUNT_SID"].strip()
     token = os.environ["TWILIO_AUTH_TOKEN"].strip()
     sender = os.environ["TWILIO_FROM"].strip()
@@ -500,40 +504,26 @@ def send_sms(to, body):
     req.add_header("Authorization", "Basic " + auth)
     try:
         with urllib.request.urlopen(req, timeout=15):
-            return "sent"
+            return True, ""
     except urllib.error.HTTPError as exc:
-        # Twilio explains the problem in the response body (bad number,
-        # unverified trial recipient, wrong credentials, geo permissions...)
+        reason = f"HTTP {exc.code}"
         try:
-            detail = exc.read().decode("utf-8", "replace")[:500]
+            raw = exc.read().decode("utf-8", "replace")
+            info = json.loads(raw)
+            reason = (f"Twilio error {info.get('code')}: "
+                      f"{info.get('message')}")
         except Exception:
-            detail = ""
-        print(f"[sms:error] Twilio HTTP {exc.code} for {to}: {detail}",
-              flush=True)
-        return "failed"
+            pass
+        print(f"[sms:error] To {to}: {reason}", flush=True)
+        return False, reason
     except Exception as exc:
-        print(f"[sms:error] Could not reach Twilio for {to}: {exc!r}",
-              flush=True)
-        return "failed"
-
-
-def _deliver_sms(user_id, to, body):
-    """Background job: send, retry once, and free the resend timer on failure."""
-    for attempt in range(2):
-        if send_sms(to, body) == "sent":
-            return
-        time.sleep(1)
-    try:
-        conn = sqlite3.connect(DB_PATH, timeout=30)
-        conn.execute("UPDATE otps SET sent_ts=0 WHERE user_id=?", (user_id,))
-        conn.commit()
-        conn.close()
-    except Exception as exc:
-        print(f"[sms:error] Could not reset resend timer: {exc!r}", flush=True)
+        reason = f"could not reach Twilio ({exc!r})"
+        print(f"[sms:error] To {to}: {reason}", flush=True)
+        return False, reason
 
 
 def issue_otp(db, user):
-    """Create a one-time code and queue the SMS. Returns (ok, error, demo_code)."""
+    """Create a one-time code and send the SMS. Returns (ok, error, demo_code)."""
     now = time.time()
     row = db.execute("SELECT * FROM otps WHERE user_id=?",
                      (user["id"],)).fetchone()
@@ -564,7 +554,18 @@ def issue_otp(db, user):
     body = (f"Your VEDOVOUCHERS verification code is {code}. "
             "It expires in 10 minutes. Do not share it with anyone.")
     if sms_configured():
-        sms_executor.submit(_deliver_sms, user["id"], user["phone"], body)
+        # Wait for Twilio's answer so a failure is shown instead of hidden.
+        future = sms_executor.submit(send_sms, user["phone"], body)
+        try:
+            ok, reason = future.result(timeout=25)
+        except Exception as exc:
+            ok, reason = False, f"timeout ({exc!r})"
+        if not ok:
+            db.execute("UPDATE otps SET sent_ts=0 WHERE user_id=?",
+                       (user["id"],))
+            db.commit()
+            return (False, "The SMS could not be sent to "
+                           f"{mask_phone(user['phone'])}. {reason}", None)
         return True, None, None
 
     # DEMO mode: no SMS provider. Print the code and (by default) show it on
@@ -813,10 +814,23 @@ def csrf_token():
 
 @app.before_request
 def check_csrf():
-    if request.method == "POST":
-        sent = request.form.get("csrf_token", "")
-        if not sent or not secrets.compare_digest(sent, session.get("csrf", "")):
-            abort(400, "Invalid or missing CSRF token. Go back and reload.")
+    if request.method != "POST":
+        return None
+    sent = request.form.get("csrf_token", "")
+    good = session.get("csrf", "")
+    if sent and good and hmac.compare_digest(sent.encode(), good.encode()):
+        return None
+
+    # Expired page / lost session cookie: recover nicely on the sign-in pages.
+    ep = request.endpoint
+    if ep == "verify_resend" and request.headers.get(
+            "X-Requested-With") == "fetch":
+        return jsonify(ok=False, redirect=url_for("login"),
+                       message="Your page expired. Please log in again.")
+    if ep in ("login", "register", "verify", "verify_resend"):
+        flash("Your page expired. Please try again.", "error")
+        return redirect(url_for("register" if ep == "register" else "login"))
+    abort(400, "Invalid or missing CSRF token. Go back and reload.")
 
 
 @app.context_processor
@@ -1053,9 +1067,11 @@ def login():
                 # Cellphone not verified yet: the SMS code comes first.
                 session.clear()
                 session["pending_uid"] = user["id"]
-                row = db.execute("SELECT expires_ts FROM otps WHERE user_id=?",
-                                 (user["id"],)).fetchone()
-                if row is None or time.time() > row["expires_ts"]:
+                row = db.execute("SELECT expires_ts, sent_ts FROM otps "
+                                 "WHERE user_id=?", (user["id"],)).fetchone()
+                # sent_ts == 0 means the last SMS failed: send a fresh one.
+                if (row is None or row["sent_ts"] == 0
+                        or time.time() > row["expires_ts"]):
                     _send_code_and_flash(db, user["id"])
                 else:
                     flash("Enter the code we sent to "
