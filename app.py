@@ -8,7 +8,11 @@ Features
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID (no account number).
   * Top-ups collect 24 digits + 5 alphanumeric + 4 alphanumeric voucher information; only admin can read it
-  * Admin approval issues a voucher code to the member
+  * Admin approval issues a voucher code to the member. It does NOT add any
+    money to the balance.
+  * The balance only grows through the daily check-in tasks (and referral
+    bonuses, savings-pot interest, etc.), or when the admin adds balance to
+    a member by hand (Admin page > All members > Add balance).
   * Daily check-in (level reward / 24) with a special 7-day streak congratulation
   * Referral codes and team
   * Simulated TOP-UPS   : user requests  money, admin approves/rejects.
@@ -23,8 +27,8 @@ Features
   * PROFILE             : user (and admin) can see the details entered when
                           the account was created
   * Admin dashboard     : monitors users, balances, top-ups, withdrawals,
-                          pots, a full transaction ledger, and can RESET
-                          a member's password
+                          pots, a full transaction ledger, can ADD BALANCE to
+                          a member and RESET a member's password
 
 Verification code
   No SMS provider is used. The 6-digit code is shown inside the app on the
@@ -1915,7 +1919,8 @@ def admin_reset_password(user_id):
 @admin_required
 def admin_add_balance(user_id):
     """Admin adds balance to a member. It is written to the transaction
-    ledger, so it shows in the member's activity and the admin ledger."""
+    ledger, so it shows in the member's activity and the admin ledger.
+    This is the ONLY manual way money is added to a balance."""
     back = request.form.get("q", "").strip()[:30] or None
     cents = parse_amount(request.form.get("amount"), 1, ADMIN_ADD_MAX_CENTS)
     note = request.form.get("note", "").strip()[:100]
@@ -2000,18 +2005,20 @@ def admin_topup(topup_id, action):
 
     code = ""
     if action == "approve":
+        # Approving ONLY issues a voucher code to the member. The balance is
+        # NOT increased here: it grows through check-in, or when the admin
+        # uses "Add balance" on the member.
         code = new_voucher_code(level)
         db.execute(
             "INSERT INTO vouchers (code, level, issued_to, created_at) "
             "VALUES (?,?,?,?)", (code, level, t["user_id"], now_iso()))
         db.execute("UPDATE topups SET issued_code=? WHERE id=?",
                    (code, topup_id))
-        credit(db, t["user_id"], t["amount"], "TOPUP",
-               f"Top-up #{topup_id} approved (play money)")
     db.commit()
     msg = f"Top-up #{topup_id} {new_status.lower()}."
     if code:
-        msg += f" Voucher {code} (Level {level}) issued to the member."
+        msg += (f" Voucher {code} (Level {level}) issued to the member. "
+                "No balance was added.")
     flash(msg, "ok")
     return redirect(url_for("admin"))
 
@@ -3035,6 +3042,7 @@ TOPUP_BODY = """
 <p class="muted">Balance: <strong>{{ money(user['points']) }}</strong></p>
 <h2>{% if admin_msg %}Message from the admin{% else %}Instructions from the admin{% endif %}</h2>
 <p style="white-space:pre-wrap">{{ admin_msg or instructions }}</p>
+<p class="muted small">When the admin approves your request you receive a voucher code. Approval does not add money to your balance: your balance grows with your daily check-in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount (R) - {{ money(TOPUP_MIN_CENTS) }} to {{ money(TOPUP_MAX_CENTS) }}</label>
@@ -3167,7 +3175,7 @@ UPGRADE_BODY = """
 <h2>Rules</h2>
 <ul>
 <li>You can move up <b>one level at a time</b>.</li>
-<li>The cost is paid from your balance (top up first if you need more).</li>
+<li>The cost is paid from your balance (earn it with your daily check-in).</li>
 <li>The cost of a level = 50% of the difference between that level's total reward and the level below it.</li>
 <li>Upgrades are final: they cannot be refunded or reversed.</li>
 <li>A higher level means a higher daily check-in reward (level reward / 24).</li>
@@ -3185,7 +3193,7 @@ UPGRADE_BODY = """
 Upgrade to Level {{ next_level }}</button>
 </form>
 {% if user['points'] < cost %}
-<p class="muted small" style="margin-top:10px">Not enough balance. <a href="{{ url_for('topup') }}">Request a top-up</a>.</p>
+<p class="muted small" style="margin-top:10px">Not enough balance. Keep checking in to earn more, or <a href="{{ url_for('topup') }}">request a top-up</a> to get a voucher code.</p>
 {% endif %}
 {% else %}
 <p class="muted">You are already at the highest level.</p>
@@ -3343,6 +3351,7 @@ ADMIN_BODY = """
 
 <div class="card">
 <h2>Top-up requests</h2>
+<p class="muted small">Approving a top-up only issues a voucher code to the member. It does not change their balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
 {% if topups %}
 <table>
 <tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Note</th><th>Voucher information</th><th>Status</th><th>Action</th><th>Message to member</th></tr>
