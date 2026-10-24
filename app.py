@@ -743,7 +743,14 @@ def init_db():
 
     # Same safe upgrade for the other tables.
     extra_columns = {
-        "topups": {"level": "INTEGER NOT NULL DEFAULT 0"},
+        # Ensure legacy databases have the money columns expected by the
+        # admin templates. Some earlier deployments used a different schema.
+        "withdrawals": {"A_m": "INTEGER NOT NULL DEFAULT 0"},
+        "topups": {
+            "A_m": "INTEGER NOT NULL DEFAULT 0",
+            "level": "INTEGER NOT NULL DEFAULT 0",
+        },
+        "transactions": {"A_m": "INTEGER NOT NULL DEFAULT 0"},
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
         # Older deployed databases may already have this table without the
@@ -764,8 +771,17 @@ def init_db():
                 for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
         for column, definition in columns.items():
             if column not in have:
+                # If a legacy table used `amount`, preserve it when adding A_m.
+                legacy_amount = next(
+                    (name for name in ("amount", "amount_cents") if name in have),
+                    None,
+                ) if column == "A_m" else None
                 db.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
+                if legacy_amount:
+                    db.execute(
+                        f"UPDATE {table} SET A_m = COALESCE({legacy_amount}, 0)")
+                have.add(column)
 
     db.commit()
 
