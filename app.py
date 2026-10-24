@@ -2748,6 +2748,39 @@ input[type=file]{padding:10px;}
   .cg i.cf{display:none;}
   .ticker{overflow-x:auto;}
 }
+
+/* ---------- full-bleed community posts ---------- */
+.posts-section{
+  position:relative; width:100%; margin:0 0 22px; padding:0;
+  border:0; border-radius:0; background:transparent; box-shadow:none;
+  overflow:visible;
+}
+.posts-section .feedhead{padding:0 2px 12px;margin:0;}
+.posts-section .feedhead h2{font-size:1.25rem;letter-spacing:-.3px;}
+.posts-section .pill{background:rgba(31,214,164,.1);border:0;color:var(--brand);}
+.posts-section .hs{border:0;border-radius:0;background:transparent;box-shadow:none;}
+.posts-section .hs-stage{height:clamp(300px,66vw,690px);background:transparent;}
+.posts-section .hs-slide{border:0;border-radius:0;overflow:hidden;background:transparent;}
+.posts-section .hs-slide img{width:100%;height:100%;object-fit:contain;object-position:center;display:block;border:0;border-radius:0;box-shadow:none;}
+.posts-section .hs-shade{background:linear-gradient(180deg,rgba(2,7,11,.24) 0%,transparent 28%,rgba(2,7,11,.12) 48%,rgba(2,7,11,.88) 100%);}
+.posts-section .hs-count{background:rgba(3,10,16,.72);border:0;backdrop-filter:blur(8px);}
+.posts-section .hs figcaption{padding:54px 22px 34px;gap:6px;}
+.posts-section .post-label{align-self:flex-start;display:inline-flex;align-items:center;gap:7px;margin-bottom:2px;padding:5px 10px;border-radius:999px;background:var(--brand);color:#031016;font-size:.68rem;font-weight:800;letter-spacing:1.2px;}
+.posts-section .post-label:before{content:"";width:6px;height:6px;border-radius:50%;background:#031016;}
+.posts-section .hs figcaption small{color:#8ff5d8;font-size:.72rem;letter-spacing:1px;}
+.posts-section .hs figcaption strong{max-width:760px;font-size:clamp(1.05rem,2.4vw,1.65rem);line-height:1.3;font-weight:800;text-wrap:pretty;}
+.posts-section .hs-nav{width:44px;height:44px;background:rgba(3,10,16,.56);border:1px solid rgba(255,255,255,.18);}
+.posts-section .hs-bars{left:0;right:0;bottom:0;}
+.posts-section .hs-hint{margin:10px 2px 0;font-size:.78rem;}
+.posts-section .hs-empty{padding:48px 16px;text-align:center;border:1px dashed var(--line);border-radius:16px;background:rgba(11,23,33,.35);}
+.posts-section form[enctype="multipart/form-data"]{max-width:620px;margin:22px 0 0!important;padding:18px 0 0;border:0;border-top:1px solid var(--line);border-radius:0;background:transparent;}
+.lb-item img{border-radius:0!important;box-shadow:none!important;}
+@media(max-width:600px){
+  .posts-section .hs-stage{height:clamp(300px,100vw,520px);}
+  .posts-section .hs figcaption{padding:48px 15px 28px;}
+  .posts-section .hs-nav{width:36px;height:36px;}
+}
+
 </style>
 </head>
 <body>
@@ -2980,9 +3013,9 @@ DASH_BODY = """
 </div>
 </section>
 
-<div class="card">
+<section class="posts-section" aria-label="Latest community posts">
 <div class="feedhead">
-<h2>Latest</h2>
+<h2>Latest updates</h2>
 {% if posts %}<span class="pill">{{ posts|length }} post{{ 's' if posts|length > 1 }}</span>{% endif %}
 </div>
 {% if posts %}
@@ -3001,8 +3034,9 @@ DASH_BODY = """
 </form>
 {% endif %}
 <figcaption>
+<span class="post-label">VEDO COMMUNITY</span>
 <small>{{ p['created_at'][:10] }}</small>
-{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% endif %}
+{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% else %}<strong>Latest update</strong>{% endif %}
 </figcaption>
 </figure>
 {% endfor %}
@@ -3023,8 +3057,9 @@ DASH_BODY = """
 <figure class="lb-item">
 <img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}" loading="lazy">
 <figcaption>
+<span class="post-label">VEDO COMMUNITY</span>
 <small>{{ p['created_at'][:10] }}</small>
-{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% endif %}
+{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% else %}<strong>Latest update</strong>{% endif %}
 </figcaption>
 </figure>
 {% endfor %}
@@ -3160,7 +3195,7 @@ DASH_BODY = """
 <button class="primary">Post photo</button>
 </form>
 {% endif %}
-</div>
+</section>
 
 
 </div>
