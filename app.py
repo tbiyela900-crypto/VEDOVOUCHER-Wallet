@@ -4,13 +4,13 @@ Vedo Ai Investment  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit Bank Bank Bank Account Number + a CELLPHONE NUMBER that must be
+  * Sign-up uses an 11-digit Bank Account Number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
-    The verified cellphone number IS the login ID (no Bank Bank Bank Account Number).
+    The verified cellphone number IS the login ID.
   * TOP-UP page looks like the check-in page: the member taps a level tile,
     enters an amount and presses Enter. The tiles close and a WHITE details
     tab opens for 10 minutes showing the Bank Name, Reference, Amount,
-    PayShap and Bank Bank Account Number, a small Top-up flag and a red message. ALL of
+    PayShap and Bank Account Number, a small Top-up flag and a red message. ALL of
     that information is entered by the admin only (Admin page > Top-up
     details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
@@ -117,7 +117,7 @@ STREAK_DAYS = 7
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
 
 # --- Team tiers ------------------------------------------------------------
-# At each member count the team gets a name and a team Bank Bank Account Number that
+# At each member count the team gets a name and a team account number that
 # the member can view on the My Team page.
 TEAM_TIERS = [
     (5, "Bronze Team"),
@@ -177,7 +177,7 @@ app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
-app.config["MAX_CONTENT_LENGTH"] = 8 * 1024 * 1024     # photo uploads
+app.config["MAX_CONTENT_LENGTH"] = 30 * 1024 * 1024    # photo uploads (30 MB)
 
 
 # ============================================================================
@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS users (
     selected_level INTEGER NOT NULL DEFAULT 0,
     referral_code TEXT UNIQUE,
     referred_by INTEGER,
-    Bank_Account _number TEXT NOT NULL UNIQUE,
+    serial_number TEXT NOT NULL UNIQUE,
 
     last_checkin TEXT,
     streak INTEGER DEFAULT 0,
@@ -314,7 +314,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
     bank_name TEXT NOT NULL DEFAULT 'DEMO',
-    Bank_Account _number TEXT NOT NULL DEFAULT 'N/A',
+    account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
     status TEXT NOT NULL DEFAULT 'PENDING',
     created_at TEXT NOT NULL
@@ -332,12 +332,12 @@ CREATE TABLE IF NOT EXISTS topups (
 );
 
 CREATE TABLE IF NOT EXISTS topup_details (
-    user_id INTEGER PRIMARY KEY,
+    user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
     Bank_name TEXT NOT NULL DEFAULT '',
     Reference TEXT NOT NULL DEFAULT '',
     Amount TEXT NOT NULL DEFAULT '',
     PayShap TEXT NOT NULL DEFAULT '',
-    Bank_Account _number TEXT NOT NULL DEFAULT '',
+    Bank_Account_number TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL DEFAULT '',
     flag TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
@@ -397,7 +397,7 @@ CREATE TABLE IF NOT EXISTS team_tiers (
     user_id INTEGER NOT NULL REFERENCES users(id),
     members INTEGER NOT NULL,
     name TEXT NOT NULL,
-    Bank_Account _number TEXT NOT NULL UNIQUE,
+    account_number TEXT NOT NULL UNIQUE,
     created_at TEXT NOT NULL,
     UNIQUE(user_id, members)
 );
@@ -464,10 +464,10 @@ def new_referral_code(db):
             return code
 
 
-def new_team_Bank_Account _number(db):
+def new_team_account_number(db):
     while True:
         number = "TEAM-" + "".join(secrets.choice(string.digits) for _ in range(8))
-        if not db.execute("SELECT 1 FROM team_tiers WHERE Bank_Account _number=?",
+        if not db.execute("SELECT 1 FROM team_tiers WHERE account_number=?",
                           (number,)).fetchone():
             return number
 
@@ -623,7 +623,7 @@ def init_db():
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
         "points": "INTEGER NOT NULL DEFAULT 0",
-        "Bank_Account _number": "TEXT",
+        "serial_number": "TEXT",
         "phone": "TEXT",
         "phone_verified": "INTEGER NOT NULL DEFAULT 1",
         "selected_level": "INTEGER NOT NULL DEFAULT 0",
@@ -647,7 +647,7 @@ def init_db():
             "Reference": "TEXT NOT NULL DEFAULT ''",
             "Amount": "TEXT NOT NULL DEFAULT ''",
             "PayShap": "TEXT NOT NULL DEFAULT ''",
-            "Bank_Account _number": "TEXT NOT NULL DEFAULT ''",
+            "Bank_Account_number": "TEXT NOT NULL DEFAULT ''",
             "message": "TEXT NOT NULL DEFAULT ''",
             "flag": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
@@ -671,8 +671,8 @@ def init_db():
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real Bank Bank Account Number
-        admin_Bank_Account _number = "00000000000"
+        # Admin does not use a real Bank Account Number
+        admin_serial_number = "00000000000"
 
         db.execute(
             """
@@ -681,7 +681,7 @@ def init_db():
                 pw_hash,
                 level,
                 referral_code,
-                Bank_Account _number,
+                serial_number,
                 is_admin,
                 created_at
             )
@@ -692,7 +692,7 @@ def init_db():
                 generate_password_hash(admin_pass),
                 7,
                 new_referral_code(db),
-                admin_Bank_Account _number,
+                admin_serial_number,
                 1,
                 now_iso()
             )
@@ -837,7 +837,7 @@ def register():
         # The verified CELLPHONE NUMBER is the login ID. It is stored in the
         # `username` column (and in `phone`) so the rest of the app keeps
         # working unchanged.
-        Bank_Account _number = request.form.get("Bank_Account _number", "").strip()
+        serial_number = request.form.get("serial_number", "").strip()
         phone = normalize_sa_phone(request.form.get("phone", ""))
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
@@ -863,10 +863,10 @@ def register():
             error = ("Enter a valid South African cellphone number, "
                      "for example 082 123 4567 or +27 82 123 4567.")
 
-        # Validate Bank Bank Account Number (exactly 11 digits)
-        elif (not Bank_Account _number.isascii()
-                or not Bank_Account _number.isdigit()
-                or len(Bank_Account _number) != 11):
+        # Validate Bank Account Number (exactly 11 digits)
+        elif (not serial_number.isascii()
+                or not serial_number.isdigit()
+                or len(serial_number) != 11):
             error = "Bank Account Number must contain exactly 11 digits."
 
         # Validate password
@@ -917,15 +917,15 @@ def register():
                              "verified. Log in with it and your password to "
                              "get a new SMS code.")
 
-        # Check duplicate Bank Bank Account Number
+        # Check duplicate Bank Account Number
         if not error:
             existing_serial = db.execute(
-                "SELECT 1 FROM users WHERE Bank_Account _number=?",
-                (Bank_Account _number,)
+                "SELECT 1 FROM users WHERE serial_number=?",
+                (serial_number,)
             ).fetchone()
 
             if existing_serial:
-                error = "That Bank Bank Account Number is already registered."
+                error = "That Bank Account Number is already registered."
 
         # Display validation errors
         if error:
@@ -942,7 +942,7 @@ def register():
                     level,
                     referral_code,
                     referred_by,
-                    Bank_Account _number,
+                    serial_number,
                     phone,
                     phone_verified,
                     created_at
@@ -955,7 +955,7 @@ def register():
                     start_level,
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
-                    Bank_Account _number,
+                    serial_number,
                     phone,
                     0,
                     now_iso()
@@ -989,7 +989,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That cellphone number or Bank Bank Account Number is already registered.",
+                "That cellphone number or Bank Account Number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1588,7 +1588,7 @@ def topup():
             ("Reference", val("Reference")),
             ("Amount", val("Amount")),
             ("PayShap", val("PayShap")),
-            ("Bank Bank Account Number", val("Bank_Account _number")),
+            ("Bank Account Number", val("Bank_Account_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
@@ -1628,7 +1628,7 @@ def withdraw():
 
         db.execute(
             "INSERT INTO withdrawals (user_id, amount, bank_name, "
-            "Bank_Account _number, account_holder, status, created_at) "
+            "account_number, account_holder, status, created_at) "
             "VALUES (?, ?, 'DEMO', 'N/A', ?, 'PENDING', ?)",
             (user["id"], cents, user["username"], now_iso()))
         db.commit()
@@ -1670,25 +1670,25 @@ def team():
         referrer = db.execute("SELECT username FROM users WHERE id=?",
                               (user["referred_by"],)).fetchone()
 
-    # Team tiers: a name and a team Bank Bank Account Number unlock at 5/10/15/20 members
+    # Team tiers: a name and a team account number unlock at 5/10/15/20 members
     count = len(members)
     tiers = []
     for size, name in TEAM_TIERS:
         row = db.execute(
-            "SELECT Bank_Account _number FROM team_tiers WHERE user_id=? AND members=?",
+            "SELECT account_number FROM team_tiers WHERE user_id=? AND members=?",
             (user["id"], size)).fetchone()
         if row is None and count >= size:
             db.execute(
                 "INSERT OR IGNORE INTO team_tiers "
-                "(user_id, members, name, Bank_Account _number, created_at) "
+                "(user_id, members, name, account_number, created_at) "
                 "VALUES (?,?,?,?,?)",
-                (user["id"], size, name, new_team_Bank_Account _number(db), now_iso()))
+                (user["id"], size, name, new_team_account_number(db), now_iso()))
             db.commit()
             row = db.execute(
-                "SELECT Bank_Account _number FROM team_tiers "
+                "SELECT account_number FROM team_tiers "
                 "WHERE user_id=? AND members=?", (user["id"], size)).fetchone()
         tiers.append({"size": size, "name": name,
-                      "number": row["Bank_Account _number"] if row else None})
+                      "number": row["account_number"] if row else None})
     reached = [t for t in tiers if t["number"]]
     team_name = reached[-1]["name"] if reached else None
     next_tier = next((t for t in tiers if not t["number"]), None)
@@ -1967,7 +1967,7 @@ def admin():
     if q:
         digits = re.sub(r"\D", "", q).lstrip("0")
         phone_like = f"%{digits}%" if digits else like
-        users_sql += ("WHERE u.username LIKE ? OR u.Bank_Account _number LIKE ? "
+        users_sql += ("WHERE u.username LIKE ? OR u.serial_number LIKE ? "
                       "OR u.referral_code LIKE ? OR u.phone LIKE ? ")
         users_args = (like, like, like, phone_like)
     else:
@@ -2098,7 +2098,7 @@ def admin_topup_details():
 
     fields = {key: request.form.get(key, "").strip()[:100]
               for key in ("Bank_name", "Reference", "Amount",
-                          "PayShap", "Bank_Account _number")}
+                          "PayShap", "Bank_Account_number")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2118,18 +2118,18 @@ def admin_topup_details():
 
     db.execute(
         "INSERT INTO topup_details (user_id, Bank_name, Reference, "
-        "Amount, PayShap, Bank_Account _number, message, flag, "
+        "Amount, PayShap, Bank_Account_number, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
         "Bank_name=excluded.Bank_name, "
         "Reference=excluded.Reference, "
         "Amount=excluded.Amount, "
         "PayShap=excluded.PayShap, "
-        "Bank_Account _number=excluded.Bank_Account _number, message=excluded.message, "
+        "Bank_Account_number=excluded.Bank_Account_number, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
         (target_id, fields["Bank_name"], fields["Reference"],
          fields["Amount"], fields["PayShap"],
-         fields["Bank_Account _number"], message, flag, now_iso()))
+         fields["Bank_Account_number"], message, flag, now_iso()))
     try:
         db.commit()
     except sqlite3.Error:
@@ -2850,7 +2850,7 @@ REGISTER_BODY = """
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Bank Account Number (11 digits)</label>
-<input name="Bank_Account _number" value="{{ form.get('Bank_Account _number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
+<input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
 <p class="muted small" style="margin-top:6px">A 6-digit code will be shown on the next page to verify this number.</p>
@@ -3077,8 +3077,8 @@ DASH_BODY = """
 {% if me['is_admin'] %}
 <form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Post a photo (PNG, JPG, GIF or WEBP, max 8 MB)</label>
-<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp/mp4" required>
+<label>Post a photo (PNG, JPG, GIF or WEBP, max 30 MB)</label>
+<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
 <label>Caption</label>
 <input name="caption" maxlength="300" placeholder="Write a caption for this photo">
 <button class="primary">Post photo</button>
@@ -3541,7 +3541,7 @@ TEAM_BODY = """
 <div class="card">
 <h2>Team levels{% if team_name %} - you are <span class="pos">{{ team_name }}</span>{% endif %}</h2>
 {% if next_tier %}
-<p class="muted">{{ members|length }} of {{ next_tier['size'] }} members. Reach {{ next_tier['size'] }} members to unlock <b>{{ next_tier['name'] }}</b> and its team Bank Bank Account Number.</p>
+<p class="muted">{{ members|length }} of {{ next_tier['size'] }} members. Reach {{ next_tier['size'] }} members to unlock <b>{{ next_tier['name'] }}</b> and its team Bank Account Number.</p>
 <div class="bar" style="margin-bottom:14px"><b style="width:{{ tier_pct }}%"></b></div>
 {% else %}<p class="muted">Your team reached the top level.</p>{% endif %}
 <div class="tiers">
@@ -3550,7 +3550,7 @@ TEAM_BODY = """
 <b>{{ t['name'] }}</b>
 <span>{{ t['size'] }} members</span>
 {% if t['number'] %}
-<small>Team Bank Bank Account Number</small>
+<small>Team Bank Account Number</small>
 <code>{{ t['number'] }}</code>
 <button type="button" class="ghost" onclick="navigator.clipboard.writeText('{{ t['number'] }}');this.textContent='Copied';">Copy</button>
 {% else %}
@@ -3700,7 +3700,7 @@ PROFILE_BODY = """
 </div>
 <dl class="kv">
 <div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
-<div><dt>Bank Bank Account Number</dt><dd>{{ member['Bank_Account _number'] }}</dd></div>
+<div><dt>Bank Account Number</dt><dd>{{ member['serial_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
@@ -3717,7 +3717,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Bank Bank Account Number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Bank Account Number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -3759,10 +3759,10 @@ ADMIN_BODY = """
 <label>PayShap</label>
 <input name="PayShap" maxlength="100" value="{{ gd['PayShap'] if gd else '' }}">
 <label>Bank Account Number</label>
-<input name="Bank_Account _number" maxlength="100" value="{{ gd['Bank_Account _number'] if gd else '' }}">
+<input name="Bank_Account_number" maxlength="100" value="{{ gd['Bank_Account_number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
-<label>Small Top-up flag (PNG, JPG, GIF or WEBP, max 8 MB)</label>
+<label>Small Top-up flag (PNG, JPG, GIF or WEBP, max 30 MB)</label>
 <input type="file" name="flag" accept="image/png,image/jpeg,image/gif,image/webp">
 {% if gd and gd['flag'] %}<p class="muted small" style="margin-top:8px">Current global flag: <img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:24px;vertical-align:middle;border-radius:3px"></p>{% endif %}
 <button class="primary">Save Top-up details</button>
@@ -3787,14 +3787,14 @@ ADMIN_BODY = """
 <table>
 <tr><th>For</th><th>Bank name</th><th>Reference</th><th>Amount</th><th>PayShap</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Bank_Account _number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Bank_Account_number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global Top-up details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['PayShap'] or '-' }}</td><td>{{ s['Bank_Account _number'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['PayShap'] or '-' }}</td><td>{{ s['Bank_Account_number'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
@@ -4011,4 +4011,3 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
-
