@@ -4,13 +4,13 @@ Vedo Ai Investment  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit Bank Account Number + a CELLPHONE NUMBER that must be
+  * Sign-up uses an 11-digit BA_A Number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID.
   * TOP-UP page looks like the check-in page: the member taps a level tile,
-    enters an amount and presses Enter. The tiles close and a WHITE details
-    tab opens for 10 minutes showing the Bank Name, Reference, Amount,
-    PayShap and Bank Account Number, a small Top-up flag and a red message. ALL of
+    enters an A_m and presses Enter. The tiles close and a WHITE details
+    tab opens for 10 minutes showing the BA_n, Reference, A_m,
+    P_s and BA_A Number, a small Top-up flag and a red message. ALL of
     that information is entered by the admin only (Admin page > Top-up
     details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
@@ -56,6 +56,7 @@ Run:
 """
 
 import hashlib
+import json
 import hmac
 import os
 import re
@@ -222,7 +223,7 @@ WITHDRAW_MIN_CENTS = 1000       # R10
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
-    "Enter the amount and the reason for the top-up, then tap the level you "
+    "Enter the A_m and the reason for the top-up, then tap the level you "
     "want. A tab with the top up details will open for 10 minutes. An admin "
     "will review your request and approve or reject it."
 )
@@ -284,8 +285,8 @@ def icon(name):
 # ============================================================================
 
 def money(cents):
-    amount = Decimal(int(cents or 0)) / Decimal(100)
-    return f"R{amount:,.2f}"
+    A_m = Decimal(int(cents or 0)) / Decimal(100)
+    return f"R{A_m:,.2f}"
 
 
 def daily_reward_cents(level):
@@ -323,14 +324,14 @@ def pot_interest_cents(principal_cents, weeks):
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def parse_amount(text, minimum, maximum=None):
-    """Parse a Rand amount string into cents. Returns None if invalid."""
+def parse_A_m(text, minimum, maximum=None):
+    """Parse a Rand A_m string into cents. Returns None if invalid."""
     try:
-        amount = Decimal((text or "").strip()).quantize(
+        A_m = Decimal((text or "").strip()).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
         return None
-    cents = int(amount * 100)
+    cents = int(A_m * 100)
     if cents < minimum:
         return None
     if maximum is not None and cents > maximum:
@@ -381,8 +382,8 @@ CREATE TABLE IF NOT EXISTS checkins (
 CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    amount INTEGER NOT NULL,
-    bank_name TEXT NOT NULL DEFAULT 'DEMO',
+    A_m INTEGER NOT NULL,
+    BA_n TEXT NOT NULL DEFAULT 'DEMO',
     account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -392,7 +393,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    amount INTEGER NOT NULL,
+    A_m INTEGER NOT NULL,
     level INTEGER NOT NULL DEFAULT 0,
     note TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -402,11 +403,11 @@ CREATE TABLE IF NOT EXISTS topups (
 
 CREATE TABLE IF NOT EXISTS topup_details (
     user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
-    Bank_name TEXT NOT NULL DEFAULT '',
+    BA_n TEXT NOT NULL DEFAULT '',
     Reference TEXT NOT NULL DEFAULT '',
-    Amount TEXT NOT NULL DEFAULT '',
-    PayShap TEXT NOT NULL DEFAULT '',
-    Bank_Account_number TEXT NOT NULL DEFAULT '',
+    A_m TEXT NOT NULL DEFAULT '',
+    P_s TEXT NOT NULL DEFAULT '',
+    BA_Account_number TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL DEFAULT '',
     flag TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
@@ -429,7 +430,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     kind TEXT NOT NULL,
-    amount INTEGER NOT NULL,
+    A_m INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
@@ -482,6 +483,42 @@ CREATE TABLE IF NOT EXISTS user_instructions (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
     updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS vedo_events (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL UNIQUE,
+    title TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
+    starts_at TEXT NOT NULL DEFAULT '', ends_at TEXT NOT NULL DEFAULT '',
+    entry_cost INTEGER NOT NULL DEFAULT 0, correct_reward INTEGER NOT NULL DEFAULT 50,
+    incorrect_deduction INTEGER NOT NULL DEFAULT 10, referral_target INTEGER NOT NULL DEFAULT 10,
+    referral_entry_points INTEGER NOT NULL DEFAULT 0, referral_from_level INTEGER NOT NULL DEFAULT 1,
+    referral_to_level INTEGER NOT NULL DEFAULT 2, voucher_points_min INTEGER NOT NULL DEFAULT 50,
+    voucher_points_max INTEGER NOT NULL DEFAULT 200, spins_per_day INTEGER NOT NULL DEFAULT 1,
+    prizes_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS vedo_event_entries (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
+    user_id INTEGER NOT NULL REFERENCES users(id), joined_at TEXT NOT NULL,
+    progress INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ACTIVE',
+    metadata TEXT NOT NULL DEFAULT '{}', UNIQUE(event_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS vedo_event_results (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
+    user_id INTEGER NOT NULL REFERENCES users(id), result_type TEXT NOT NULL,
+    points_delta INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS vedo_quiz_attempts (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
+    user_id INTEGER NOT NULL REFERENCES users(id), question_key TEXT NOT NULL,
+    answer_key TEXT NOT NULL, correct INTEGER NOT NULL, points_delta INTEGER NOT NULL,
+    created_at TEXT NOT NULL, UNIQUE(event_id,user_id,question_key)
+);
+CREATE TABLE IF NOT EXISTS vedo_spin_daily (
+    user_id INTEGER NOT NULL REFERENCES users(id), event_id INTEGER NOT NULL REFERENCES vedo_events(id),
+    spin_day TEXT NOT NULL, spins INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,event_id,spin_day)
+);
+CREATE TABLE IF NOT EXISTS vedo_audit_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER NOT NULL REFERENCES users(id),
+    action TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL
 );
 """
 
@@ -633,12 +670,12 @@ def set_setting(db, key, value):
         (key, value))
 
 
-def add_tx(db, user_id, kind, amount_cents, note=""):
+def add_tx(db, user_id, kind, A_m_cents, note=""):
     """Write a ledger line (positive = credit, negative = debit)."""
     db.execute(
-        "INSERT INTO transactions (user_id, kind, amount, note, created_at) "
+        "INSERT INTO transactions (user_id, kind, A_m, note, created_at) "
         "VALUES (?,?,?,?,?)",
-        (user_id, kind, int(amount_cents), note, now_iso()))
+        (user_id, kind, int(A_m_cents), note, now_iso()))
 
 
 def credit(db, user_id, cents, kind, note=""):
@@ -712,11 +749,11 @@ def init_db():
         # Older deployed databases may already have this table without the
         # newer fields. Add missing columns safely before the admin POST uses them.
         "topup_details": {
-            "Bank_name": "TEXT NOT NULL DEFAULT ''",
+            "BA_n": "TEXT NOT NULL DEFAULT ''",
             "Reference": "TEXT NOT NULL DEFAULT ''",
-            "Amount": "TEXT NOT NULL DEFAULT ''",
-            "PayShap": "TEXT NOT NULL DEFAULT ''",
-            "Bank_Account_number": "TEXT NOT NULL DEFAULT ''",
+            "A_m": "TEXT NOT NULL DEFAULT ''",
+            "P_s": "TEXT NOT NULL DEFAULT ''",
+            "BA_Account_number": "TEXT NOT NULL DEFAULT ''",
             "message": "TEXT NOT NULL DEFAULT ''",
             "flag": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
@@ -740,7 +777,7 @@ def init_db():
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real Bank Account Number
+        # Admin does not use a real BA_A Number
         admin_serial_number = "00000000000"
 
         db.execute(
@@ -938,11 +975,11 @@ def register():
             error = ("Enter a valid South African cellphone number, "
                      "for example 082 123 4567 or +27 82 123 4567.")
 
-        # Validate Bank Account Number (exactly 11 digits)
+        # Validate BA_A Number (exactly 11 digits)
         elif (not serial_number.isascii()
                 or not serial_number.isdigit()
                 or len(serial_number) != 11):
-            error = "Bank Account Number must contain exactly 11 digits."
+            error = "BA_A Number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -992,7 +1029,7 @@ def register():
                              "verified. Log in with it and your password to "
                              "get a new SMS code.")
 
-        # Check duplicate Bank Account Number
+        # Check duplicate BA_A Number
         if not error:
             existing_serial = db.execute(
                 "SELECT 1 FROM users WHERE serial_number=?",
@@ -1000,7 +1037,7 @@ def register():
             ).fetchone()
 
             if existing_serial:
-                error = "That Bank Account Number is already registered."
+                error = "That BA_A Number is already registered."
 
         # Display validation errors
         if error:
@@ -1064,7 +1101,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That cellphone number or Bank Account Number is already registered.",
+                "That cellphone number or BA_A Number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1552,7 +1589,7 @@ def get_topup_details(db, user_id):
 @app.route("/topup/select-level", methods=["POST"])
 @login_required
 def topup_select_level():
-    """Create a pending top-up request after the member selects a level and amount."""
+    """Create a pending top-up request after the member selects a level and A_m."""
     db = get_db()
     user = current_user()
     try:
@@ -1560,12 +1597,12 @@ def topup_select_level():
     except (TypeError, ValueError):
         return jsonify(ok=False, message="Choose a valid level."), 400
 
-    cents = parse_amount(request.form.get("amount"),
+    cents = parse_A_m(request.form.get("A_m"),
                          TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
     if cents is None:
         return jsonify(
             ok=False,
-            message=(f"Enter an amount between {money(TOPUP_MIN_CENTS)} "
+            message=(f"Enter an A_m between {money(TOPUP_MIN_CENTS)} "
                      f"and {money(TOPUP_MAX_CENTS)}.")
         ), 400
     if level not in LEVELS or level <= user["level"]:
@@ -1580,11 +1617,11 @@ def topup_select_level():
     db.execute("UPDATE users SET selected_level=? WHERE id=?",
                (level, user["id"]))
     db.execute(
-        "INSERT INTO topups (user_id, amount, level, note, status, created_at) "
+        "INSERT INTO topups (user_id, A_m, level, note, status, created_at) "
         "VALUES (?,?,?, '', 'PENDING', ?)",
         (user["id"], cents, level, now_iso()))
     db.commit()
-    return jsonify(ok=True, level=level, amount=money(cents),
+    return jsonify(ok=True, level=level, A_m=money(cents),
                    message=f"Request for Level {level} sent.")
 
 
@@ -1595,7 +1632,7 @@ def topup():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_amount(request.form.get("amount"),
+        cents = parse_A_m(request.form.get("A_m"),
                              TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
         note = request.form.get("note", "").strip()[:100]
         try:
@@ -1604,7 +1641,7 @@ def topup():
             level = 0
 
         if cents is None:
-            flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
+            flash(f"Enter an A_m between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
             return redirect(url_for("topup"))
 
@@ -1620,7 +1657,7 @@ def topup():
             return redirect(url_for("topup"))
 
         db.execute(
-            "INSERT INTO topups (user_id, amount, level, note, status, "
+            "INSERT INTO topups (user_id, A_m, level, note, status, "
             "created_at) VALUES (?,?,?,?, 'PENDING', ?)",
             (user["id"], cents, level, note, now_iso()))
         db.commit()
@@ -1659,15 +1696,15 @@ def topup():
             return (details[key] if details and details[key] else "-")
 
         info_rows = [
-            ("Bank Name", val("Bank_name")),
+            ("BA_n", val("BA_n")),
             ("Reference", val("Reference")),
-            ("Amount", val("Amount")),
-            ("PayShap", val("PayShap")),
-            ("Bank Account Number", val("Bank_Account_number")),
+            ("A_m", val("A_m")),
+            ("P_s", val("P_s")),
+            ("BA_A Number", val("BA_Account_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
-            ("Amount", money(active["amount"])),
+            ("A_m", money(active["A_m"])),
             ("Reason", active["note"] or "-"),
         ]
 
@@ -1689,9 +1726,9 @@ def withdraw():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_amount(request.form.get("amount"), WITHDRAW_MIN_CENTS)
+        cents = parse_A_m(request.form.get("A_m"), WITHDRAW_MIN_CENTS)
         if cents is None:
-            flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).",
+            flash(f"Enter a valid A_m (minimum {money(WITHDRAW_MIN_CENTS)}).",
                   "error")
             return redirect(url_for("withdraw"))
 
@@ -1702,7 +1739,7 @@ def withdraw():
             return redirect(url_for("withdraw"))
 
         db.execute(
-            "INSERT INTO withdrawals (user_id, amount, bank_name, "
+            "INSERT INTO withdrawals (user_id, A_m, BA_n, "
             "account_number, account_holder, status, created_at) "
             "VALUES (?, ?, 'DEMO', 'N/A', ?, 'PENDING', ?)",
             (user["id"], cents, user["username"], now_iso()))
@@ -1735,7 +1772,7 @@ def team():
         (user["id"],)).fetchall()
 
     earned = db.execute(
-        "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
+        "SELECT COALESCE(SUM(A_m),0) AS s FROM transactions "
         "WHERE user_id=? AND kind='REFERRAL'", (user["id"],)).fetchone()["s"]
 
     team_points = sum(m["points"] for m in members)
@@ -1868,7 +1905,7 @@ def pots():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_amount(request.form.get("amount"), POT_MIN_CENTS)
+        cents = parse_A_m(request.form.get("A_m"), POT_MIN_CENTS)
         try:
             weeks = int(request.form.get("weeks", 0))
         except ValueError:
@@ -2172,8 +2209,8 @@ def admin_topup_details():
         target_id, label = 0, "everyone"
 
     fields = {key: request.form.get(key, "").strip()[:100]
-              for key in ("Bank_name", "Reference", "Amount",
-                          "PayShap", "Bank_Account_number")}
+              for key in ("BA_n", "Reference", "A_m",
+                          "P_s", "BA_Account_number")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2192,19 +2229,19 @@ def admin_topup_details():
         flag = new_flag
 
     db.execute(
-        "INSERT INTO topup_details (user_id, Bank_name, Reference, "
-        "Amount, PayShap, Bank_Account_number, message, flag, "
+        "INSERT INTO topup_details (user_id, BA_n, Reference, "
+        "A_m, P_s, BA_A,ccount_number, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
-        "Bank_name=excluded.Bank_name, "
+        "BA_n=excluded.BA_n, "
         "Reference=excluded.Reference, "
-        "Amount=excluded.Amount, "
-        "PayShap=excluded.PayShap, "
-        "Bank_Account_number=excluded.Bank_Account_number, message=excluded.message, "
+        "A_m=excluded.A_m, "
+        "P_s=excluded.P_s, "
+        "BA_Account_number=excluded.BA_Account_number, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
-        (target_id, fields["Bank_name"], fields["Reference"],
-         fields["Amount"], fields["PayShap"],
-         fields["Bank_Account_number"], message, flag, now_iso()))
+        (target_id, fields["BA_n"], fields["Reference"],
+         fields["A_m"], fields["P_s"],
+         fields["BA_Account_number"], message, flag, now_iso()))
     try:
         db.commit()
     except sqlite3.Error:
@@ -2282,11 +2319,11 @@ def admin_add_balance(user_id):
     ledger, so it shows in the member's activity and the admin ledger.
     This is the ONLY manual way money is added to a balance."""
     back = request.form.get("q", "").strip()[:30] or None
-    cents = parse_amount(request.form.get("amount"), 1, ADMIN_ADD_MAX_CENTS)
+    cents = parse_A_m(request.form.get("A_m"), 1, ADMIN_ADD_MAX_CENTS)
     note = request.form.get("note", "").strip()[:100]
 
     if cents is None:
-        flash(f"Enter an amount from R0.01 to {money(ADMIN_ADD_MAX_CENTS)}.",
+        flash(f"Enter an A_m from R0.01 to {money(ADMIN_ADD_MAX_CENTS)}.",
               "error")
         return redirect(url_for("admin", q=back))
 
@@ -2358,7 +2395,7 @@ def admin_withdrawal(withdrawal_id, action):
 
     # Completing only changes the demo status. NO real money moves.
     if action == "reject":
-        credit(db, w["user_id"], w["amount"], "WITHDRAW_REFUND",
+        credit(db, w["user_id"], w["A_m"], "WITHDRAW_REFUND",
                f"Withdrawal #{withdrawal_id} rejected - refunded")
     db.commit()
     flash(f"Withdrawal #{withdrawal_id} {new_status.lower()}.", "ok")
@@ -2799,8 +2836,9 @@ input[type=file]{padding:10px;}
 <div class="tabs">
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
+<a class="{{ 'active' if ep in ['events_home','event_detail'] }}" href="{{ url_for('events_home') }}">Events</a>
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_events'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a><a href="{{ url_for('admin_events') }}">Event Control</a>{% endif %}
 </div>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -2958,7 +2996,7 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Bank Account Number (11 digits)</label>
+<label>BA_A Number (11 digits)</label>
 <input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
@@ -3244,15 +3282,15 @@ DASH_BODY = """
 <h2>Recent activity</h2>
 {% if recent_tx %}
 {% set txs = recent_tx|reverse|list %}
-{% set mx = txs|map(attribute='amount')|map('abs')|max %}
+{% set mx = txs|map(attribute='A_m')|map('abs')|max %}
 <div class="bars" aria-hidden="true">
-{% for t in txs %}<i class="{{ 'up' if t['amount'] > 0 else 'dn' }}" style="height:{{ [((t['amount']|abs) / mx * 100)|round|int, 8]|max }}%"></i>{% endfor %}
+{% for t in txs %}<i class="{{ 'up' if t['A_m'] > 0 else 'dn' }}" style="height:{{ [((t['A_m']|abs) / mx * 100)|round|int, 8]|max }}%"></i>{% endfor %}
 </div>
 {% for t in recent_tx %}
 <div class="tx">
 <div class="av">{{ t['kind'][:1] }}</div>
 <div class="who"><b>{{ t['kind']|replace('_',' ')|title }}</b><span>{{ t['created_at'][:16] }}{% if t['note'] %} - {{ t['note'] }}{% endif %}</span></div>
-<div class="amt {{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</div>
+<div class="amt {{ 'pos' if t['A_m'] > 0 else 'neg' }}">{{ '+' if t['A_m'] > 0 }}{{ money(t['A_m']) }}</div>
 </div>
 {% endfor %}
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
@@ -3470,7 +3508,7 @@ TOPUP_BODY = """
 <div class="sc-head">
 {% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="Top-up flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['Bank_name'] if details and details['Bank_name'] else ' Top-up details' }}</h2>
+<h2>{{ details['BA_n'] if details and details['BA_n'] else ' Top-up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
@@ -3526,11 +3564,11 @@ TOPUP_BODY = """
 {% endfor %}
 </div>
 <section class="join-step" id="joinStep" hidden>
-<p class="join-level" id="joinTitle">Choose an amount for this level</p>
-<p class="level-hint" id="joinInfo">Enter your top-up amount then press Enter.</p>
-<form id="topupAmountForm" novalidate>
-<label for="topupAmount">Amount (R)</label>
-<input id="topupAmount" name="amount" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter amount (R10–R50,000)" required>
+<p class="join-level" id="joinTitle">Choose an A_m for this level</p>
+<p class="level-hint" id="joinInfo">Enter your top-up A_m then press Enter.</p>
+<form id="topupA_mForm" novalidate>
+<label for="topupA_m">A_m (R)</label>
+<input id="topupA_m" name="A_m" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter A_m (R10–R50,000)" required>
 <button type="submit" class="primary" id="enterTopup">Enter</button>
 </form>
 <p id="saveStatus" class="level-hint" role="status" aria-live="polite"></p>
@@ -3543,8 +3581,8 @@ TOPUP_BODY = """
   var title=document.getElementById('joinTitle');
   var info=document.getElementById('joinInfo');
   var status=document.getElementById('saveStatus');
-  var form=document.getElementById('topupAmountForm');
-  var amountInput=document.getElementById('topupAmount');
+  var form=document.getElementById('topupA_mForm');
+  var A_mInput=document.getElementById('topupA_m');
   var enterButton=document.getElementById('enterTopup');
   var selectedLevel=null;
   var csrf={{ csrf_token()|tojson }};
@@ -3557,10 +3595,10 @@ TOPUP_BODY = """
       btn.classList.add('selected');
       step.hidden=false;
       title.textContent='Level '+selectedLevel+' selected';
-      info.textContent='Enter your amount, then press Enter. The Top up details will open for 10 minutes.';
+      info.textContent='Enter your A_m, then press Enter. The Top up details will open for 10 minutes.';
       status.textContent='';
-      amountInput.value='';
-      amountInput.focus();
+      A_mInput.value='';
+      A_mInput.focus();
       step.scrollIntoView({behavior:'smooth',block:'nearest'});
     });
   });
@@ -3568,18 +3606,18 @@ TOPUP_BODY = """
   form.addEventListener('submit',function(ev){
     ev.preventDefault();
     if(!selectedLevel){status.textContent='Tap a level first.';return;}
-    var amount=amountInput.value.trim();
-    var numeric=Number(amount);
-    if(!amount || !Number.isFinite(numeric) || numeric<10 || numeric>50000){
-      status.textContent='Enter an amount from R10 to R50,000.';
-      amountInput.focus();
+    var A_m=A_mInput.value.trim();
+    var numeric=Number(A_m);
+    if(!A_m || !Number.isFinite(numeric) || numeric<10 || numeric>50000){
+      status.textContent='Enter an A_m from R10 to R50,000.';
+      A_mInput.focus();
       return;
     }
     enterButton.disabled=true;
     status.textContent='Sending your request…';
     var fd=new FormData();
     fd.append('level',selectedLevel);
-    fd.append('amount',amount);
+    fd.append('A_m',A_m);
     fd.append('csrf_token',csrf);
     fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
       .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not send request.');return data;});})
@@ -3607,8 +3645,8 @@ WITHDRAW_BODY = """
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
-<input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
+<label>A_m (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
+<input name="A_m" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
 <button class="primary">Request withdrawal</button>
 </form>
 </div>
@@ -3617,9 +3655,9 @@ WITHDRAW_BODY = """
 <h2>Withdrawal history</h2>
 {% if withdrawals %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Status</th></tr>
+<tr><th>Date</th><th>A_m</th><th>Status</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['amount']) }}</td>
+<tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['A_m']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td></tr>
 {% endfor %}
 </table>
@@ -3745,13 +3783,13 @@ POTS_BODY = """
 <div class="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
-annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
+annual rate shown below</b>. This is not a multiplier: interest = A_m x annual rate x weeks / 52.
 Collect after the lock period ends. Closing a pot early returns your money but forfeits the interest.</p>
 <p>Available balance: <strong>{{ money(user['points']) }}</strong></p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Amount to lock (R) - minimum {{ money(POT_MIN_CENTS) }}</label>
-<input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 1000.00" required>
+<label>A_m to lock (R) - minimum {{ money(POT_MIN_CENTS) }}</label>
+<input name="A_m" type="number" step="0.01" min="10" placeholder="e.g. 1000.00" required>
 <label>Lock period</label>
 <select name="weeks">
 {% for w in POT_WEEKS %}
@@ -3811,7 +3849,7 @@ PROFILE_BODY = """
 </div>
 <dl class="kv">
 <div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
-<div><dt>Bank Account Number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>BA_A Number</dt><dd>{{ member['serial_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
@@ -3828,7 +3866,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Bank Account Number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, BA_A Number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -3861,16 +3899,16 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>Bank name</label>
-<input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
+<label>BA_n</label>
+<input name="BA_n" maxlength="100" value="{{ gd['BA_n'] if gd else '' }}">
 <label>Reference</label>
 <input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
-<label>Amount</label>
-<input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
-<label>PayShap</label>
-<input name="PayShap" maxlength="100" value="{{ gd['PayShap'] if gd else '' }}">
-<label>Bank Account Number</label>
-<input name="Bank_Account_number" maxlength="100" value="{{ gd['Bank_Account_number'] if gd else '' }}">
+<label>A_m</label>
+<input name="A_m" maxlength="100" value="{{ gd['A_m'] if gd else '' }}">
+<label>P_s</label>
+<input name="P_s" maxlength="100" value="{{ gd['P_s'] if gd else '' }}">
+<label>BA_A Number</label>
+<input name="BA_Account_number" maxlength="100" value="{{ gd['BA_Account_number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small Top-up flag (PNG, JPG, GIF or WEBP, max 30 MB)</label>
@@ -3896,16 +3934,16 @@ ADMIN_BODY = """
 {% if gd or specific_details %}
 <h2 style="margin-top:22px">Saved Top-up details</h2>
 <table>
-<tr><th>For</th><th>Bank name</th><th>Reference</th><th>Amount</th><th>PayShap</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>BA_n</th><th>Reference</th><th>A_m</th><th>P_s</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['Bank_Account_number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['BA_n'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['A_m'] or '-' }}</td><td>{{ gd['P_s'] or '-' }}</td><td>{{ gd['BA_Account_number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global Top-up details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['PayShap'] or '-' }}</td><td>{{ s['Bank_Account_number'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['BA_n'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['A_m'] or '-' }}</td><td>{{ s['P_s'] or '-' }}</td><td>{{ s['BA_Account_number'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
@@ -3983,9 +4021,9 @@ onsubmit="return confirm('Remove this member instruction?');">
 <p class="muted small">Approving a top-up only marks it approved. It does not change the member's balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Level</th><th>Reason</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>A_m</th><th>Level</th><th>Reason</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
-<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
+<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['A_m']) }}</td>
 <td>{% if t['level'] %}<span class="badge">L{{ t['level'] }}</span>{% else %}-{% endif %}</td>
 <td class="muted">{{ t['note'] }}</td>
 <td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
@@ -4007,9 +4045,9 @@ onsubmit="return confirm('Remove this member instruction?');">
 <h2>Withdrawal requests</h2>
 {% if withdrawals %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>A_m</th><th>Status</th><th>Action</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['amount']) }}</td>
+<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['A_m']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td>
 <td>
 {% if w['status'] == 'PENDING' %}
@@ -4035,10 +4073,10 @@ onsubmit="return confirm('Remove this member instruction?');">
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_add_balance', user_id=u['id']) }}"
-onsubmit="return confirm('Add this amount to account {{ u['username'] }}?');">
+onsubmit="return confirm('Add this A_m to account {{ u['username'] }}?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="q" value="{{ q }}">
-<input class="pwbox" style="width:105px" name="amount" type="number" step="0.01" min="0.01" placeholder="Amount (R)" required>
+<input class="pwbox" style="width:105px" name="A_m" type="number" step="0.01" min="0.01" placeholder="A_m (R)" required>
 <input class="pwbox" name="note" maxlength="100" placeholder="Note (optional)">
 <button class="success">Add</button>
 </form>
@@ -4073,10 +4111,10 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 <h2>Transaction ledger (latest 60)</h2>
 {% if ledger %}
 <table>
-<tr><th>Date</th><th>User</th><th>Type</th><th>Amount</th><th>Details</th></tr>
+<tr><th>Date</th><th>User</th><th>Type</th><th>A_m</th><th>Details</th></tr>
 {% for t in ledger %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ t['kind'] }}</td>
-<td class="{{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</td>
+<td class="{{ 'pos' if t['A_m'] > 0 else 'neg' }}">{{ '+' if t['A_m'] > 0 }}{{ money(t['A_m']) }}</td>
 <td class="muted">{{ t['note'] }}</td></tr>
 {% endfor %}
 </table>
@@ -4108,12 +4146,294 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 </div>
 """
 
+
+# VEDO EVENTS: admin-controlled event configuration and server-side outcomes.
+EVENT_DEFAULTS = [
+    ("wheel","Spin the Wheel",100,50,10,10,0,1,2,50,200,1,
+     '[{"name":"Big Prize","points":500,"weight":2,"limit":2},{"name":"Medium Prize","points":100,"weight":8,"limit":8},{"name":"Small Prize","points":25,"weight":30,"limit":30},{"name":"No Prize","points":0,"weight":60,"limit":60}]'),
+    ("quiz","Educational Quiz",0,50,10,10,0,1,2,50,200,1,"[]"),
+    ("referral","Referral Challenge",0,50,10,10,0,1,4,50,200,1,"[]"),
+    ("savings","Savings Challenge",0,50,10,10,0,1,2,50,200,1,"[]"),
+    ("voucher","Voucher Day",0,50,10,10,0,1,7,50,200,1,"[]"),
+]
+QUIZ_QUESTIONS = [
+ {"key":"q1","category":"General Knowledge","question":"Which country is known as the Land of the Rising Sun?","answers":[("a","China"),("b","Japan"),("c","South Korea"),("d","Thailand")],"correct":"b","explanation":"Japan is commonly known as the Land of the Rising Sun."},
+ {"key":"q2","category":"Science","question":"Which planet is known as the Red Planet?","answers":[("a","Earth"),("b","Mars"),("c","Venus"),("d","Jupiter")],"correct":"b","explanation":"Iron oxide on Mars gives it a reddish appearance."},
+ {"key":"q3","category":"Mathematics","question":"What is 8 × 7?","answers":[("a","54"),("b","56"),("c","64"),("d","48")],"correct":"b","explanation":"Eight multiplied by seven equals 56."},
+ {"key":"q4","category":"Environment","question":"Which gas do plants absorb during photosynthesis?","answers":[("a","Oxygen"),("b","Nitrogen"),("c","Carbon dioxide"),("d","Hydrogen")],"correct":"c","explanation":"Plants use carbon dioxide during photosynthesis."},
+ {"key":"q5","category":"Technology","question":"What does URL stand for?","answers":[("a","Uniform Resource Locator"),("b","Universal Record Link"),("c","User Reference List"),("d","Unified Route Line")],"correct":"a","explanation":"URL stands for Uniform Resource Locator."},
+]
+def ensure_vedo_events():
+    db=sqlite3.connect(DB_PATH,timeout=30)
+    try:
+        for x in EVENT_DEFAULTS:
+            typ,title,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,prizes=x
+            db.execute("""INSERT OR IGNORE INTO vedo_events
+            (event_type,title,enabled,entry_cost,correct_reward,incorrect_deduction,
+             referral_target,referral_entry_points,referral_from_level,referral_to_level,
+             voucher_points_min,voucher_points_max,spins_per_day,prizes_json,updated_at)
+            VALUES (?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)""",
+            (typ,title,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,prizes,now_iso()))
+        db.commit()
+    finally: db.close()
+ensure_vedo_events()
+
+def event_row(db, typ):
+    return db.execute("SELECT * FROM vedo_events WHERE event_type=?",(typ,)).fetchone()
+def event_is_live(ev):
+    if not ev or not ev["enabled"]: return False
+    now=datetime.now(timezone.utc).replace(tzinfo=None)
+    try:
+        start=datetime.fromisoformat(ev["starts_at"]) if ev["starts_at"] else None
+        end=datetime.fromisoformat(ev["ends_at"]) if ev["ends_at"] else None
+    except ValueError: return False
+    return not ((start and start>now) or (end and end<now))
+def audit_event(db, action, details):
+    u=current_user()
+    if u: db.execute("INSERT INTO vedo_audit_log(admin_id,action,details,created_at) VALUES (?,?,?,?)",
+                     (u["id"],action,details[:1000],now_iso()))
+
+@app.route("/events")
+@login_required
+def events_home():
+    db=get_db(); rows=db.execute("SELECT * FROM vedo_events ORDER BY id").fetchall()
+    ent={r["event_id"]:r for r in db.execute("SELECT event_id,progress,status FROM vedo_event_entries WHERE user_id=?",(current_user()["id"],)).fetchall()}
+    events=[]
+    for r in rows:
+        d=dict(r); d["live"]=event_is_live(r); d["entry"]=ent.get(r["id"]); events.append(d)
+    pots=db.execute("SELECT * FROM savings_pots WHERE user_id=? AND status='LOCKED' ORDER BY matures_at",(current_user()["id"],)).fetchall()
+    return page(EVENTS_BODY,events=events,pots=pots)
+
+@app.route("/events/<event_type>",methods=["GET","POST"])
+@login_required
+def event_detail(event_type):
+    if event_type not in {"wheel","quiz","referral","savings","voucher"}: abort(404)
+    db=get_db(); ev=event_row(db,event_type)
+    if ev is None: abort(404)
+    user=current_user()
+    entry=db.execute("SELECT * FROM vedo_event_entries WHERE event_id=? AND user_id=?",(ev["id"],user["id"])).fetchone()
+    if request.method=="POST":
+        if not event_is_live(ev):
+            flash("This event is not currently open.","error")
+            return redirect(url_for("event_detail",event_type=event_type))
+        if event_type=="referral":
+            if entry:
+                flash("You have already joined this challenge.","info")
+            elif int(user["level"] or 0)<int(ev["referral_from_level"]):
+                flash(f"You must be at least Level {ev['referral_from_level']} to join.","error")
+            else:
+                cost=max(0,int(ev["referral_entry_points"]))*100
+                if cost and not debit(db,user["id"],cost,"REFERRAL_ENTRY",f"Joined Referral Challenge #{ev['id']}"):
+                    db.rollback(); flash("Not enough points to join.","error")
+                else:
+                    db.execute("INSERT OR IGNORE INTO vedo_event_entries(event_id,user_id,joined_at,progress,status,metadata) VALUES (?,?,?,0,'ACTIVE','{}')",(ev["id"],user["id"],now_iso()))
+                    db.commit(); flash("You joined the Referral Challenge.","ok")
+        elif event_type=="voucher":
+            if entry: flash("You have already opened an envelope for this event.","error")
+            else:
+                low=max(0,int(ev["voucher_points_min"])); high=max(low,int(ev["voucher_points_max"]))
+                reward=secrets.randbelow(high-low+1)+low
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    db.execute("INSERT INTO vedo_event_entries(event_id,user_id,joined_at,progress,status,metadata) VALUES (?,?,?,1,'CLAIMED','{}')",(ev["id"],user["id"],now_iso()))
+                    credit(db,user["id"],reward*100,"VOUCHER_DAY",f"Guaranteed points envelope, event #{ev['id']}")
+                    db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"voucher",reward*100,"Guaranteed points envelope",now_iso()))
+                    db.commit(); flash(f"Your envelope contained {reward:,} points. Your balance has been updated.","ok")
+                except sqlite3.IntegrityError:
+                    db.rollback(); flash("This event has already been claimed.","error")
+        elif event_type=="wheel":
+            today_key=today().isoformat()
+            db.execute("BEGIN IMMEDIATE")
+            try:
+                sr=db.execute("SELECT spins FROM vedo_spin_daily WHERE user_id=? AND event_id=? AND spin_day=?",(user["id"],ev["id"],today_key)).fetchone()
+                used=sr["spins"] if sr else 0
+                if used>=max(1,int(ev["spins_per_day"])):
+                    db.rollback(); flash("You have used all spins for today.","error")
+                    return redirect(url_for("event_detail",event_type=event_type))
+                prizes=json.loads(ev["prizes_json"] or "[]"); available=[]
+                for pr in prizes:
+                    used_n=db.execute("SELECT COUNT(*) n FROM vedo_event_results WHERE event_id=? AND result_type=?",(ev["id"],"wheel:"+str(pr.get("name","")))).fetchone()["n"]
+                    if used_n<max(0,int(pr.get("limit",0))): available.append(pr)
+                total=sum(max(0,int(pr.get("weight",1))) for pr in available)
+                if not available or total<=0:
+                    db.rollback(); flash("No configured wheel outcomes remain.","error")
+                    return redirect(url_for("event_detail",event_type=event_type))
+                pick=secrets.randbelow(total); prize=available[-1]
+                for pr in available:
+                    w=max(0,int(pr.get("weight",1)))
+                    if pick<w: prize=pr; break
+                    pick-=w
+                cost=max(0,int(ev["entry_cost"]))*100
+                if cost and not debit(db,user["id"],cost,"WHEEL_SPIN",f"Wheel spin event #{ev['id']}"):
+                    db.rollback(); flash("Not enough points to spin.","error")
+                    return redirect(url_for("event_detail",event_type=event_type))
+                points=max(0,int(prize.get("points",0)))
+                if points: credit(db,user["id"],points*100,"WHEEL_PRIZE",f"{prize['name']} from event #{ev['id']}")
+                db.execute("INSERT INTO vedo_spin_daily(user_id,event_id,spin_day,spins) VALUES (?,?,?,1) ON CONFLICT(user_id,event_id,spin_day) DO UPDATE SET spins=spins+1",(user["id"],ev["id"],today_key))
+                db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"wheel:"+str(prize.get("name","Prize")),points*100,str(prize.get("name","Prize")),now_iso()))
+                db.commit(); flash(f"You received {prize.get('name','Prize')}: {points:,} points.","ok")
+            except Exception:
+                db.rollback(); app.logger.exception("Wheel outcome failed"); flash("Spin could not be processed. Please try again.","error")
+        elif event_type=="quiz":
+            qkey=request.form.get("question_key",""); answer=request.form.get("answer","")
+            q=next((q for q in QUIZ_QUESTIONS if q["key"]==qkey),None)
+            if not q: flash("Question not found.","error")
+            elif db.execute("SELECT 1 FROM vedo_quiz_attempts WHERE event_id=? AND user_id=? AND question_key=?",(ev["id"],user["id"],qkey)).fetchone():
+                flash("You have already answered that question.","error")
+            else:
+                correct=answer==q["correct"]; delta=int(ev["correct_reward"]) if correct else -int(ev["incorrect_deduction"])
+                db.execute("BEGIN IMMEDIATE")
+                try:
+                    if delta<0 and not debit(db,user["id"],-delta,"QUIZ_DEDUCTION",f"Incorrect quiz answer {qkey}"):
+                        db.rollback(); flash("Your points balance is too low for this disclosed deduction.","error")
+                        return redirect(url_for("event_detail",event_type=event_type))
+                    if delta>0: credit(db,user["id"],delta,"QUIZ_REWARD",f"Correct quiz answer {qkey}")
+                    db.execute("INSERT INTO vedo_quiz_attempts(event_id,user_id,question_key,answer_key,correct,points_delta,created_at) VALUES (?,?,?,?,?,?,?)",(ev["id"],user["id"],qkey,answer,int(correct),delta,now_iso()))
+                    db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"quiz",delta,qkey,now_iso()))
+                    db.commit(); flash(("Correct!" if correct else "Incorrect.")+f" {delta:+d} points.","ok" if correct else "error")
+                except sqlite3.IntegrityError:
+                    db.rollback(); flash("Answer already recorded.","error")
+        else:
+            flash("Your savings pots continue independently. Manage them on the Savings Pots page.","info")
+        return redirect(url_for("event_detail",event_type=event_type))
+    user=current_user()
+    entry=db.execute("SELECT * FROM vedo_event_entries WHERE event_id=? AND user_id=?",(ev["id"],user["id"])).fetchone()
+    balance=db.execute("SELECT points FROM users WHERE id=?",(user["id"],)).fetchone()["points"]
+    sr=db.execute("SELECT spins FROM vedo_spin_daily WHERE user_id=? AND event_id=? AND spin_day=?",(user["id"],ev["id"],today().isoformat())).fetchone() if event_type=="wheel" else None
+    questions=[]
+    if event_type=="quiz":
+        for q in QUIZ_QUESTIONS:
+            ans=db.execute("SELECT correct,points_delta FROM vedo_quiz_attempts WHERE event_id=? AND user_id=? AND question_key=?",(ev["id"],user["id"],q["key"])).fetchone()
+            questions.append({**q,"answered":bool(ans),"result":ans})
+    progress=entry["progress"] if entry else 0
+    if event_type=="referral":
+        progress=db.execute("SELECT COUNT(*) n FROM users WHERE referred_by=? AND level>=?",(user["id"],max(1,int(ev["referral_from_level"])))).fetchone()["n"]
+        if entry:
+            if progress >= int(ev["referral_target"]) and entry["status"] == "ACTIVE":
+                # Admin-configured promotion destination; apply once after target verification.
+                destination = max(1, min(7, int(ev["referral_to_level"])))
+                db.execute("UPDATE users SET level=? WHERE id=? AND level<?",
+                           (destination, user["id"], destination))
+                db.execute("UPDATE vedo_event_entries SET progress=?,status='COMPLETED' WHERE id=?",
+                           (progress, entry["id"]))
+                db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",
+                           (ev["id"], user["id"], "referral_promotion", 0,
+                            f"Promotion to Level {destination}", now_iso()))
+                db.commit()
+            else:
+                db.execute("UPDATE vedo_event_entries SET progress=? WHERE id=?",(progress,entry["id"])); db.commit()
+    results=db.execute("SELECT * FROM vedo_event_results WHERE event_id=? AND user_id=? ORDER BY id DESC LIMIT 10",(ev["id"],user["id"])).fetchall()
+    pots=db.execute("SELECT * FROM savings_pots WHERE user_id=? AND status='LOCKED' ORDER BY matures_at",(user["id"],)).fetchall()
+    return page(EVENT_DETAIL_BODY,event=ev,live=event_is_live(ev),entry=entry,balance=balance,
+                used_spins=sr["spins"] if sr else 0,questions=questions,progress=progress,results=results,savings_pots=pots)
+
+@app.route("/admin/events",methods=["GET","POST"])
+@admin_required
+def admin_events():
+    db=get_db()
+    if request.method=="POST":
+        typ=request.form.get("event_type",""); ev=event_row(db,typ)
+        if not ev: abort(400)
+        try:
+            enabled=int(request.form.get("enabled")=="1")
+            starts=request.form.get("starts_at","").strip()[:16].replace("T"," ")
+            ends=request.form.get("ends_at","").strip()[:16].replace("T"," ")
+            if starts and ends and starts>=ends: raise ValueError("End must be after start.")
+            cost=max(0,int(request.form.get("entry_cost","0")))
+            correct=max(0,int(request.form.get("correct_reward","50")))
+            deduct=max(0,int(request.form.get("incorrect_deduction","10")))
+            target=max(1,min(1000,int(request.form.get("referral_target","10"))))
+            entry=max(0,int(request.form.get("referral_entry_points","0")))
+            fromlvl=max(1,min(7,int(request.form.get("referral_from_level","1"))))
+            tolvl=max(1,min(7,int(request.form.get("referral_to_level","2"))))
+            vmin=max(0,int(request.form.get("voucher_points_min","50")))
+            vmax=max(vmin,int(request.form.get("voucher_points_max","200")))
+            spins=max(1,min(100,int(request.form.get("spins_per_day","1"))))
+            prizes=json.loads(request.form.get("prizes_json","[]"))
+            if not isinstance(prizes,list) or len(prizes)>20: raise ValueError("Wheel prizes must be a list of up to 20 outcomes.")
+            for pr in prizes:
+                if not isinstance(pr,dict) or not str(pr.get("name","")).strip(): raise ValueError("Every prize needs a name.")
+                pr["points"]=max(0,min(1000000,int(pr.get("points",0))))
+                pr["weight"]=max(0,min(1000000,int(pr.get("weight",1))))
+                pr["limit"]=max(0,min(1000000,int(pr.get("limit",0))))
+            if typ=="wheel" and not prizes: raise ValueError("Configure at least one wheel outcome.")
+        except (ValueError,TypeError,json.JSONDecodeError) as exc:
+            flash(f"Settings not saved: {exc}","error"); return redirect(url_for("admin_events"))
+        db.execute("""UPDATE vedo_events SET enabled=?,starts_at=?,ends_at=?,entry_cost=?,correct_reward=?,
+        incorrect_deduction=?,referral_target=?,referral_entry_points=?,referral_from_level=?,referral_to_level=?,
+        voucher_points_min=?,voucher_points_max=?,spins_per_day=?,prizes_json=?,updated_at=? WHERE event_type=?""",
+        (enabled,starts,ends,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,json.dumps(prizes),now_iso(),typ))
+        audit_event(db,"EVENT_SETTINGS",f"{typ}: enabled={enabled}; starts={starts}; ends={ends}")
+        db.commit(); flash(f"{ev['title']} settings saved.","ok"); return redirect(url_for("admin_events"))
+    rows=db.execute("SELECT * FROM vedo_events ORDER BY id").fetchall()
+    stats={r["event_type"]:{"entries":db.execute("SELECT COUNT(*) n FROM vedo_event_entries WHERE event_id=?",(r["id"],)).fetchone()["n"],
+                           "results":db.execute("SELECT COUNT(*) n FROM vedo_event_results WHERE event_id=?",(r["id"],)).fetchone()["n"]} for r in rows}
+    logs=db.execute("SELECT a.*,u.username FROM vedo_audit_log a JOIN users u ON u.id=a.admin_id ORDER BY a.id DESC LIMIT 20").fetchall()
+    return page(ADMIN_EVENTS_BODY,events=rows,stats=stats,logs=logs)
+
+
+EVENTS_BODY = """
+<div class="card note"><h1>Vedo Events & Challenges</h1><p class="muted">Join weekly events, track progress, and collect eligible rewards. Active savings pots continue independently.</p></div>
+<div class="grid">
+{% for e in events %}<div class="card">
+<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h2>{{ e['title'] }}</h2><span class="pill">{{ 'OPEN' if e['live'] else ('SCHEDULED' if e['enabled'] else 'CLOSED') }}</span></div>
+{% if e['event_type']=='wheel' %}<p class="muted">Spin for admin-configured prizes. The server enforces outcome limits.</p>
+{% elif e['event_type']=='quiz' %}<p class="muted">Correct answers earn points; incorrect answers deduct the amount shown before you start.</p>
+{% elif e['event_type']=='referral' %}<p class="muted">Opt in, refer members and track progress toward the admin-selected destination level.</p>
+{% elif e['event_type']=='savings' %}<p class="muted">Your existing savings pots keep progressing even when this event is closed.</p>
+{% else %}<p class="muted">Open one envelope and receive guaranteed points, with bonus vouchers subject to published availability.</p>{% endif %}
+{% if e['entry'] %}<p><b>Your status:</b> {{ e['entry']['status'] }} · Progress {{ e['entry']['progress'] }}</p>{% endif %}
+{% if e['starts_at'] %}<p class="small muted">Starts: {{ e['starts_at'] }} UTC</p>{% endif %}{% if e['ends_at'] %}<p class="small muted">Closes: {{ e['ends_at'] }} UTC</p>{% endif %}
+<a class="button primary" href="{{ url_for('event_detail',event_type=e['event_type']) }}">View event</a></div>{% endfor %}
+</div>
+{% if pots %}<div class="card"><h2>My active savings progress</h2>{% for p in pots %}<p><b>{{ money(p['principal']) }}</b> committed · {{ p['weeks'] }} weeks · Matures {{ p['matures_at'][:10] }} · <span class="pill">ACTIVE</span></p>{% endfor %}<p class="muted small">Savings progress is independent of Referral Challenge participation.</p></div>{% endif %}
+"""
+
+EVENT_DETAIL_BODY = """
+<div class="card note"><a href="{{ url_for('events_home') }}">← All events</a><h1 style="margin-top:12px">{{ event['title'] }}</h1><p class="muted">{{ 'Event is open' if live else 'Event is currently closed to new actions.' }}</p>
+{% if event['starts_at'] or event['ends_at'] %}<p class="small muted">Starts {{ event['starts_at'] or 'immediately' }} UTC · Closes {{ event['ends_at'] or 'not scheduled' }} UTC</p>{% endif %}
+<div class="stats"><div class="stat"><b>{{ money(balance) }}</b><span>Points balance</span></div>
+{% if event['event_type']=='wheel' %}<div class="stat"><b>{{ used_spins }}/{{ event['spins_per_day'] }}</b><span>Spins used today</span></div>{% endif %}
+{% if event['event_type']=='referral' %}<div class="stat"><b>{{ progress }}/{{ event['referral_target'] }}</b><span>Referral progress</span></div>{% endif %}
+{% if event['event_type']=='quiz' %}<div class="stat"><b>+{{ event['correct_reward'] }}</b><span>Correct answer</span></div><div class="stat"><b>-{{ event['incorrect_deduction'] }}</b><span>Incorrect answer</span></div>{% endif %}</div></div>
+{% if event['event_type']=='wheel' %}<div class="card"><h2>Spin the Wheel</h2><p class="muted">Server-controlled results. Prize quantities are capped by admin settings.</p><p>Cost: <b>{{ event['entry_cost'] }} points per spin</b>. Limit: <b>{{ event['spins_per_day'] }} per day</b>.</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" {% if not live or used_spins>=event['spins_per_day'] %}disabled{% endif %}>Spin now</button></form>
+<h3>Configured outcomes</h3><div class="grid">{% for p in event['prizes_json']|from_json %}<div class="stat"><b>{{ p['name'] }}</b><span>{{ p['points'] }} points · max {{ p['limit'] }}</span></div>{% endfor %}</div></div>
+{% elif event['event_type']=='quiz' %}<div class="card"><h2>Educational Quiz</h2><p class="muted">Correct: +{{ event['correct_reward'] }} points. Incorrect: −{{ event['incorrect_deduction'] }} points. Deductions are disclosed before submission.</p>
+{% for q in questions %}<div class="card" style="margin:12px 0"><div style="display:flex;justify-content:space-between;gap:8px"><b>Question {{ loop.index }} of {{ questions|length }}</b><span class="pill">{{ q['category'] }}</span></div><p>{{ q['question'] }}</p>
+{% if q['answered'] %}<p class="{{ 'pos' if q['result']['correct'] else 'neg' }}">{{ 'Correct' if q['result']['correct'] else 'Incorrect' }} · {{ '%+d'|format(q['result']['points_delta']) }} points</p>
+{% else %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="question_key" value="{{ q['key'] }}">{% for key,label in q['answers'] %}<label style="display:block;margin:8px 0"><input type="radio" name="answer" value="{{ key }}" required> {{ label }}</label>{% endfor %}<button class="primary" {% if not live %}disabled{% endif %}>Submit answer</button></form>{% endif %}</div>{% endfor %}</div>
+{% elif event['event_type']=='referral' %}<div class="card"><h2>Referral Challenge</h2><p>Entry commitment: <b>{{ event['referral_entry_points'] }} points</b>. Target: <b>{{ event['referral_target'] }} verified referrals</b>. Eligible starting level: {{ event['referral_from_level'] }}. Destination level: {{ event['referral_to_level'] }}.</p><p class="muted">This version counts direct referrals who reach the configured minimum level. Recharge-based qualification needs to be connected to a verified payment workflow.</p>
+{% if entry %}<div class="progress"><div style="width:{{ [100,progress*100/event['referral_target']]|min }}%"></div></div><p><b>{{ progress }} / {{ event['referral_target'] }}</b> qualifying referrals</p><p>Status: {{ entry['status'] }}</p>
+{% else %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><input type="checkbox" required> I agree to the point commitment and published rules.</label><button class="primary" {% if not live %}disabled{% endif %}>Join Referral Challenge</button></form>{% endif %}</div>
+{% elif event['event_type']=='voucher' %}<div class="card" style="text-align:center"><div style="font-size:4rem">✉️</div><h2>Open your reward envelope</h2><p>Every eligible member receives guaranteed points between {{ event['voucher_points_min'] }} and {{ event['voucher_points_max'] }}.</p><form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" {% if not live or entry %}disabled{% endif %}>Open my envelope</button></form>{% if entry %}<p class="muted">Already claimed for this event.</p>{% endif %}</div>
+{% else %}<div class="card"><h2>Savings continue independently</h2><p>Existing savings pots continue toward maturity even if this event is paused. Visit <a href="{{ url_for('pots') }}">Savings pots</a> to manage them.</p>{% for p in savings_pots %}<p>{{ money(p['principal']) }} committed · {{ p['weeks'] }} weeks · maturity {{ p['matures_at'][:10] }}</p>{% else %}<p class="muted">No active savings pots.</p>{% endfor %}</div>{% endif %}
+{% if results %}<div class="card"><h2>Your recent results</h2><table><tr><th>Date</th><th>Result</th><th>Points delta (cents)</th><th>Details</th></tr>{% for r in results %}<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['result_type'] }}</td><td>{{ r['points_delta'] }}</td><td>{{ r['detail'] }}</td></tr>{% endfor %}</table></div>{% endif %}
+"""
+
+ADMIN_EVENTS_BODY = """
+<div class="card note"><h1>Event Control Centre</h1><p class="muted">Enable, schedule and configure each event independently. Closing enrolment does not stop existing savings pots or delete results.</p></div>
+{% for e in events %}<div class="card"><h2>{{ e['title'] }}</h2><p class="muted small">Entries {{ stats[e['event_type']]['entries'] }} · Results {{ stats[e['event_type']]['results'] }} · Updated {{ e['updated_at'] }}</p>
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_type" value="{{ e['event_type'] }}">
+<label><input type="checkbox" name="enabled" value="1" {% if e['enabled'] %}checked{% endif %}> Enable event</label>
+<div class="grid"><div><label>Starts at (UTC)</label><input type="datetime-local" name="starts_at" value="{{ e['starts_at'].replace(' ','T') if e['starts_at'] else '' }}"></div>
+<div><label>Closes at (UTC)</label><input type="datetime-local" name="ends_at" value="{{ e['ends_at'].replace(' ','T') if e['ends_at'] else '' }}"></div>
+<div><label>Wheel cost (points)</label><input type="number" min="0" name="entry_cost" value="{{ e['entry_cost'] }}"></div><div><label>Spins per day</label><input type="number" min="1" max="100" name="spins_per_day" value="{{ e['spins_per_day'] }}"></div>
+<div><label>Correct answer reward</label><input type="number" min="0" name="correct_reward" value="{{ e['correct_reward'] }}"></div><div><label>Incorrect answer deduction</label><input type="number" min="0" name="incorrect_deduction" value="{{ e['incorrect_deduction'] }}"></div>
+<div><label>Referral entry commitment (points)</label><input type="number" min="0" name="referral_entry_points" value="{{ e['referral_entry_points'] }}"></div><div><label>Referral target</label><input type="number" min="1" max="1000" name="referral_target" value="{{ e['referral_target'] }}"></div>
+<div><label>Starting level</label><select name="referral_from_level">{% for l in LEVELS %}<option value="{{ l }}" {% if e['referral_from_level']==l %}selected{% endif %}>Level {{ l }}</option>{% endfor %}</select></div>
+<div><label>Promotion destination</label><select name="referral_to_level">{% for l in LEVELS %}<option value="{{ l }}" {% if e['referral_to_level']==l %}selected{% endif %}>Level {{ l }}</option>{% endfor %}</select></div>
+<div><label>Voucher guaranteed minimum points</label><input type="number" min="0" name="voucher_points_min" value="{{ e['voucher_points_min'] }}"></div><div><label>Voucher guaranteed maximum points</label><input type="number" min="0" name="voucher_points_max" value="{{ e['voucher_points_max'] }}"></div></div>
+{% if e['event_type']=='wheel' %}<label>Wheel prize JSON: name, points, weight, limit</label><textarea name="prizes_json" rows="7" spellcheck="false">{{ e['prizes_json'] }}</textarea>{% else %}<input type="hidden" name="prizes_json" value="{{ e['prizes_json'] }}">{% endif %}
+<button class="primary">Save settings</button></form></div>{% endfor %}
+<div class="card"><h2>Recent admin audit log</h2>{% if logs %}<table><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th></tr>{% for l in logs %}<tr><td>{{ l['created_at'] }}</td><td>{{ l['username'] }}</td><td>{{ l['action'] }}</td><td>{{ l['details'] }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">No changes recorded yet.</p>{% endif %}</div>
+"""
+
 app.jinja_loader = DictLoader({"base": BASE})
+app.jinja_env.filters["from_json"] = json.loads
+app.jinja_env.filters["from_json"] = json.loads
 
 
-# ============================================================================
-# START
-# ============================================================================
+
 
 if __name__ == "__main__":
     init_db()
