@@ -2860,7 +2860,7 @@ REGISTER_BODY = """
 <input name="confirm" type="password" autocomplete="new-password" required>
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
-<label>Level code from the admin (optional)</label>
+<label>Level code  (optional)</label>
 <input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. L1-ABCD-EFGH" autocomplete="off">
 <button class="primary" style="width:100%">Create account</button>
 </form>
