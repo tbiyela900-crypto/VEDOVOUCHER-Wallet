@@ -3189,212 +3189,114 @@ GAMES_BODY = """
 """
 
 SPIN_BODY = """
+<style>
+.spin-layout{display:grid;grid-template-columns:minmax(280px,1fr) minmax(260px,.8fr);gap:22px;align-items:center}
+.spin-stage{display:flex;flex-direction:column;align-items:center;padding:18px 8px 24px;overflow:hidden}
+.wheel-shell{position:relative;width:min( min(78vw,390px),100%);aspect-ratio:1;margin:16px auto 22px;filter:drop-shadow(0 14px 20px #0003)}
+.wheel-canvas{display:block;width:100%;height:100%;border-radius:50%;border:8px solid #f5d77a;box-shadow:inset 0 0 0 4px #342456;transform:rotate(0deg);transition:transform 4.2s cubic-bezier(.12,.72,.08,1);background:#241b45}
+.wheel-pointer{position:absolute;z-index:2;top:-8px;left:50%;transform:translateX(-50%);width:0;height:0;border-left:19px solid transparent;border-right:19px solid transparent;border-top:43px solid #fff1a7;filter:drop-shadow(0 3px 3px #0008)}
+.wheel-hub{position:absolute;left:50%;top:50%;transform:translate(-50%,-50%);width:76px;height:76px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 35% 25%,#fff4b8,#f5b92d 55%,#9d4e16);border:5px solid #fff2b1;color:#38204f;font-weight:1000;font-size:13px;box-shadow:0 4px 12px #0006;pointer-events:none}
+.spin-title{text-align:center;font-size:13px;font-weight:800;letter-spacing:2px;text-transform:uppercase;color:var(--muted)}
+.spin-action{min-width:180px;font-size:17px!important;padding:14px 28px!important;border-radius:999px!important;box-shadow:0 7px 0 #0002,0 12px 24px #0002}
+.spin-prize{font-size:18px;font-weight:800;text-align:center;padding:14px;border-radius:14px;background:var(--s2);border:1px solid var(--line);min-height:52px}
+@media(max-width:720px){.spin-layout{grid-template-columns:1fr}.wheel-shell{width:min(78vw,340px)}}
+</style>
 <div class="card note">
-<h1>&#127920; Vedo Spin &amp; Win</h1>
-<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
-<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
-<span class="muted small"> {{ window }} &middot; {{ limit_text }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
-<div class="reel" id="reel">{{ 'Ready to spin?' }}</div>
-<div id="spinout"></div>
-<p class="muted">Plays left: <b id="left">{{ info.left }}</b> &middot; Balance: <b id="bal">{{ money(user['points']) }}</b></p>
-<button type="button" class="primary" id="spinbtn" {% if info.error %}disabled{% endif %}>Spin</button>
-{% if info.error %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
-</div>
-
-<div class="card">
-<h2>Prizes and odds</h2>
-<p class="muted small">The result is chosen by the server, not by your phone. A prize that runs out of stock leaves the draw and the odds are recalculated.</p>
-<table>
-<tr><th>Prize</th><th>What you get</th><th>Chance</th><th>Left</th></tr>
-{% for o in odds %}
-<tr><td>{{ o.label }}</td><td>{{ o.what or '-' }}</td>
-<td>{% if o.sold_out %}<span class="badge err">Unavailable</span>{% else %}{{ o.chance }}%{% endif %}</td>
-<td>{{ 'unlimited' if o.left is none else o.left }}</td></tr>
-{% endfor %}
-</table>
-</div>
-
-<div class="card">
-<h2>My spins</h2>
-{% if mine %}
-<table>
-<tr><th>Date</th><th>Result</th><th>Voucher</th></tr>
-{% for m in mine %}<tr><td>{{ m['created_at'][:16] }}</td><td>{{ m['result'] }}</td><td>{% if m['voucher'] %}<code>{{ m['voucher'] }}</code>{% else %}-{% endif %}</td></tr>{% endfor %}
-</table>
-{% else %}<p class="muted">No spins yet.</p>{% endif %}
-</div>
-
+<h1>🎰 Vedo Spin &amp; Win</h1><p class="muted"><a href="{{ url_for('games_hub') }}">← All games</a></p>
+<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span> <span class="muted small">{{ window }} · {{ limit_text }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p>
+<div class="spin-layout"><div class="spin-stage">
+<div class="spin-title">Give the wheel a spin!</div>
+<div class="wheel-shell"><div class="wheel-pointer"></div><canvas id="realwheel" class="wheel-canvas" width="600" height="600" aria-label="Prize wheel"></canvas><div class="wheel-hub">VEDO<br>PLAY</div></div>
+<button type="button" class="primary spin-action" id="spinbtn" {% if info.error %}disabled{% endif %}>SPIN NOW</button>
+<p class="muted small">Tap the button and watch the wheel turn. The server confirms your result.</p>
+</div><div>
+<div class="spin-prize" id="spinout" aria-live="polite">{{ 'Ready when you are!' if not info.error else info.error }}</div>
+<p class="muted">Plays left: <b id="left">{{ info.left }}</b><br>Points balance: <b id="bal">{{ money(user['points']) }}</b></p>
+{% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}
+<h3>Prize odds</h3><p class="muted small">Odds are shown before you play. Sold-out prizes are removed from the draw.</p>
+<div style="max-height:300px;overflow:auto"><table><tr><th>Prize</th><th>Chance</th><th>Left</th></tr>{% for o in odds %}<tr><td>{{ o.label }}<br><span class="muted small">{{ o.what or '-' }}</span></td><td>{% if o.sold_out %}Unavailable{% else %}{{ o.chance }}%{% endif %}</td><td>{{ 'Unlimited' if o.left is none else o.left }}</td></tr>{% endfor %}</table></div>
+</div></div></div>
+<div class="card"><h2>🏆 My spins</h2>{% if mine %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Result</th><th>Voucher</th></tr>{% for m in mine %}<tr><td>{{ m['created_at'][:16] }}</td><td>{{ m['result'] }}</td><td>{% if m['voucher'] %}<code>{{ m['voucher'] }}</code>{% else %}—{% endif %}</td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your spin history will appear here.</p>{% endif %}</div>
 <script>
-(function () {
-  var btn = document.getElementById('spinbtn');
-  var reel = document.getElementById('reel');
-  var out = document.getElementById('spinout');
-  var labels = {{ labels|tojson }};
-  var CSRF = {{ csrf_token()|tojson }};
-  if (!btn) { return; }
-
-  function say(text, kind) {
-    out.innerHTML = '';
-    var d = document.createElement('div');
-    d.className = 'flash ' + kind;
-    d.textContent = text;
-    out.appendChild(d);
-  }
-
-  btn.addEventListener('click', function () {
-    btn.disabled = true;
-    out.innerHTML = '';
-    var i = 0;
-    var timer = setInterval(function () { reel.textContent = labels[i++ % labels.length]; }, 90);
-    var started = Date.now();
-    var fd = new FormData();
-    fd.append('csrf_token', CSRF);
-    fetch('{{ url_for("spin_play") }}', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
-      .catch(function () { return { ok: false, error: 'Network problem. Please try again.' }; })
-      .then(function (res) {
-        var wait = Math.max(0, 2200 - (Date.now() - started));
-        setTimeout(function () {
-          clearInterval(timer);
-          if (!res.ok) {
-            reel.textContent = 'Ready to spin?';
-            say(res.error, 'error');
-            btn.disabled = false;
-            return;
-          }
-          reel.textContent = res.label;
-          say(res.text, 'ok');
-          document.getElementById('bal').textContent = res.balance;
-          document.getElementById('left').textContent = res.left;
-          if (res.left > 0) { btn.disabled = false; }
-          else { setTimeout(function () { window.location.reload(); }, 3500); }
-        }, wait);
-      });
-  });
+(function(){
+ const canvas=document.getElementById('realwheel'),ctx=canvas.getContext('2d'),btn=document.getElementById('spinbtn'),out=document.getElementById('spinout');
+ const labels={{ labels|tojson }},csrf={{ csrf_token()|tojson }}; if(!canvas||!btn)return;
+ const colors=['#6b4eff','#f04e8a','#ffb52e','#16a995','#3878f5','#a44be0','#ed6c37','#1a9cce'];
+ const step=Math.PI*2/Math.max(labels.length,1); ctx.clearRect(0,0,600,600);
+ labels.forEach((label,i)=>{let a=-Math.PI/2+i*step;ctx.beginPath();ctx.moveTo(300,300);ctx.arc(300,300,284,a,a+step);ctx.closePath();ctx.fillStyle=colors[i%colors.length];ctx.fill();ctx.strokeStyle='#fff4c4';ctx.lineWidth=4;ctx.stroke();ctx.save();ctx.translate(300,300);ctx.rotate(a+step/2);ctx.textAlign='right';ctx.fillStyle='#fff';ctx.font='bold '+(labels.length>8?'19':'23')+'px system-ui,sans-serif';let txt=String(label);if(txt.length>23)txt=txt.slice(0,21)+'…';ctx.shadowColor='#0007';ctx.shadowBlur=3;ctx.fillText(txt,250,7,205);ctx.restore();});
+ let busy=false;
+ btn.addEventListener('click',async()=>{if(busy)return;busy=true;btn.disabled=true;out.textContent='The wheel is spinning…';out.className='spin-prize';
+  const fd=new FormData();fd.append('csrf_token',csrf);let res;
+  try{const r=await fetch('{{ url_for("spin_play") }}',{method:'POST',body:fd,credentials:'same-origin'});res=await r.json();}catch(e){res={ok:false,error:'Connection problem. Please try again.'};}
+  if(!res.ok){out.textContent=res.error||'Unable to spin right now.';busy=false;btn.disabled=false;return;}
+  let idx=labels.indexOf(res.label);if(idx<0)idx=0;const target=360*5-(idx+.5)*(360/labels.length);canvas.style.transform='rotate('+target+'deg)';
+  setTimeout(()=>{out.textContent='🎉 '+res.text;out.style.borderColor='#28b989';document.getElementById('bal').textContent=res.balance;document.getElementById('left').textContent=res.left;busy=false;if(res.left>0)btn.disabled=false;else btn.textContent='NO PLAYS LEFT';},4300);
+ });
 })();
 </script>
 """
 
 BRAIN_BODY = """
-<div class="card note">
-<h1>&#129504; Vedo Brain Battle</h1>
-<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
-<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
-<span class="muted small"> {{ window }} &middot; {{ limit_text }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
-<p>Each round has up to <b>{{ gm['questions_per_round'] }}</b> random questions. Every correct answer pays its points straight into your wallet (up to {{ money(pool['mx']) }} per question). Wrong answers earn nothing and nothing is taken away.</p>
-<p class="muted">Plays left: <b>{{ info.left }}</b> &middot; Questions in the pool: {{ pool['n'] }}</p>
-{% if open_round %}
-<a class="btnlink" href="{{ url_for('brain_round', rid=open_round['id']) }}">Continue your round</a>
-{% else %}
-<form method="post" action="{{ url_for('brain_start') }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="primary" {% if info.error %}disabled{% endif %}>Start a round</button>
-</form>
-{% if info.error %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
-{% endif %}
-</div>
-<div class="card">
-<h2>My rounds</h2>
-{% if rounds %}
-<table>
-<tr><th>Date</th><th>Correct</th><th>Earned</th><th>Status</th><th></th></tr>
-{% for r in rounds %}
-<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['correct_n'] if r['status'] == 'DONE' else '-' }}</td>
-<td>{{ money(r['score']) }}</td>
-<td><span class="badge {{ 'ok' if r['status']=='DONE' else 'wait' }}">{{ r['status'] }}</span></td>
-<td><a href="{{ url_for('brain_round', rid=r['id']) }}">{{ 'Review' if r['status']=='DONE' else 'Continue' }}</a></td></tr>
-{% endfor %}
-</table>
-{% else %}<p class="muted">No rounds yet.</p>{% endif %}
-</div>
+<style>
+.brain-hero{padding:24px!important;background:linear-gradient(130deg,#173d39,#152a45 60%,#382654)!important;color:white;border:1px solid #2b7268!important;border-radius:18px}
+.brain-hero h1{color:white}.brain-hero p{color:#d2e9e6}
+.book-wrap{max-width:850px;margin:20px auto;perspective:1000px}
+.question-book{position:relative;padding:24px 26px 24px 43px;border-radius:8px 18px 18px 8px;background:repeating-linear-gradient(0deg,#fffdf2 0,#fffdf2 31px,#dce8ef 32px);color:#203044;box-shadow:inset 8px 0 #194e47,inset 12px 0 #2e8b77,0 14px 30px #0002;border:1px solid #c8d2d7}
+.question-book:before{content:'VEDO BRAIN BATTLE  •  CHALLENGE BOOK';display:block;font-size:11px;letter-spacing:1.5px;font-weight:900;color:#247466;margin-bottom:16px}
+.question-book .muted{color:#5f6e7d}.question-book h2{color:#173d39;font-size:19px;line-height:1.45}
+.question-number{display:inline-grid;place-items:center;width:34px;height:34px;border-radius:50%;background:#1b806e;color:white;font-weight:900;margin-right:8px}
+.question-book .opt{background:#fffef8;color:#203044;border-color:#c9d6d5;box-shadow:0 2px 0 #dce4e2}.question-book .opt:hover{border-color:#198c78;background:#eafff8}
+@media(max-width:560px){.question-book{padding:18px 15px 18px 28px}.brain-hero{padding:18px!important}}
+</style>
+<div class="card brain-hero"><h1>🧠 Vedo Brain Battle</h1><p>Open your challenge book, choose your answers, and collect points for correct answers.</p><p><a href="{{ url_for('games_hub') }}" style="color:#bff8e9">← All games</a></p><p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span> <span class="small">{{ window }} · {{ limit_text }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p></div>
+<div class="card"><h2>📘 Your challenge book</h2><p>Each round has up to <b>{{ gm['questions_per_round'] }}</b> questions. Every correct answer earns points (up to {{ money(pool['mx']) }} per question). Incorrect answers earn no points; no points are deducted.</p><p class="muted">Plays left: <b>{{ info.left }}</b> · Questions available: {{ pool['n'] }}</p>{% if open_round %}<a class="btnlink" href="{{ url_for('brain_round', rid=open_round['id']) }}">Continue reading →</a>{% else %}<form method="post" action="{{ url_for('brain_start') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" {% if info.error %}disabled{% endif %}>📖 Open question book</button></form>{% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}{% endif %}</div>
+<div class="card"><h2>🏅 My completed rounds</h2>{% if rounds %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Correct</th><th>Points earned</th><th>Status</th><th></th></tr>{% for r in rounds %}<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['correct_n'] if r['status']=='DONE' else '—' }}</td><td>{{ money(r['score']) }}</td><td>{{ r['status'] }}</td><td><a href="{{ url_for('brain_round', rid=r['id']) }}">{{ 'Review' if r['status']=='DONE' else 'Continue' }}</a></td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your results will be recorded here.</p>{% endif %}</div>
 """
 
 BRAIN_ROUND_BODY = """
-<div class="card note">
-<h1>Brain Battle round #{{ rnd['id'] }}</h1>
-<p class="muted"><a href="{{ url_for('brain_page') }}">&larr; Back to Brain Battle</a></p>
-{% if rnd['status'] == 'DONE' %}
-<p><strong class="pos">Round finished.</strong> {{ rnd['correct_n'] }} of {{ questions|length }} correct, you earned <b>{{ money(rnd['score']) }}</b>.</p>
-{% else %}
-<p class="muted">Pick one answer for each question, then submit. You can only submit once.</p>
-{% endif %}
-</div>
-<form method="post" action="{{ url_for('brain_round', rid=rnd['id']) }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-{% for q in questions %}
-{% set mine = answers.get(q['id'], 0) %}
-<div class="card">
-<h2>{{ loop.index }}. {{ q['question'] }} <span class="muted small">({{ money(q['points']) }})</span></h2>
-{% for n, text in [(1, q['a']), (2, q['b']), (3, q['c']), (4, q['d'])] %}
-<label class="opt{% if rnd['status'] == 'DONE' %}{{ ' right' if n == q['correct'] }}{{ ' wrong' if n == mine and n != q['correct'] }}{% endif %}">
-<input type="radio" name="q{{ q['id'] }}" value="{{ n }}" {% if rnd['status'] == 'DONE' %}disabled{% if n == mine %} checked{% endif %}{% endif %}>
-<span>{{ text }}</span>
-</label>
-{% endfor %}
-</div>
-{% endfor %}
-{% if rnd['status'] == 'OPEN' %}<button class="primary">Submit answers</button>{% endif %}
-</form>
+<style>
+.round-top{background:linear-gradient(130deg,#153b36,#1b3150);color:#fff;padding:22px!important}.round-top h1{color:#fff}
+.book-wrap{max-width:850px;margin:18px auto}.question-book{padding:22px 25px 24px 42px;border-radius:8px 16px 16px 8px;background:repeating-linear-gradient(0deg,#fffdf2 0,#fffdf2 31px,#dce8ef 32px);color:#203044;box-shadow:inset 8px 0 #194e47,inset 12px 0 #2e8b77,0 12px 28px #0002;border:1px solid #c8d2d7;margin-bottom:18px}
+.question-book .muted{color:#657585}.question-book h2{color:#173d39;line-height:1.5}.question-book .opt{background:#fffef8;color:#203044;border-color:#c9d6d5}.question-book .opt:hover{border-color:#198c78;background:#eafff8}.question-book .opt.right{background:#d7f9e8;border-color:#21a779}.question-book .opt.wrong{background:#ffe2e2;border-color:#d85b65}
+@media(max-width:560px){.question-book{padding:18px 14px 18px 27px}}
+</style>
+<div class="card round-top"><h1>📘 Question Book · Round #{{ rnd['id'] }}</h1><p><a href="{{ url_for('brain_page') }}" style="color:#c5f7e9">← Back to Brain Battle</a></p>{% if rnd['status']=='DONE' %}<p>Round complete! You answered <b>{{ rnd['correct_n'] }} of {{ questions|length }}</b> correctly and earned <b>{{ money(rnd['score']) }}</b>.</p>{% else %}<p>Read each question and select one answer. Turn the page by submitting your answers.</p>{% endif %}</div>
+<form method="post" action="{{ url_for('brain_round', rid=rnd['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% for q in questions %}{% set mine = answers.get(q['id'], 0) %}<div class="book-wrap"><section class="question-book"><div style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:#25806e">PAGE {{ loop.index }} OF {{ questions|length }}</div><h2><span class="question-number">{{ loop.index }}</span>{{ q['question'] }}</h2><p class="muted small">Reward for correct answer: <b>{{ money(q['points']) }}</b></p>{% for n, text in [(1,q['a']),(2,q['b']),(3,q['c']),(4,q['d'])] %}<label class="opt{% if rnd['status']=='DONE' %}{{ ' right' if n==q['correct'] }}{{ ' wrong' if n==mine and n!=q['correct'] }}{% endif %}"><input type="radio" name="q{{ q['id'] }}" value="{{ n }}" {% if rnd['status']=='DONE' %}disabled{% if n==mine %} checked{% endif %}{% endif %}><span><b>{{ ['A','B','C','D'][n-1] }}.</b> {{ text }}</span></label>{% endfor %}</section></div>{% endfor %}
+{% if rnd['status']=='OPEN' %}<button class="primary" style="display:block;margin:18px auto;padding:14px 26px">✓ Submit answers &amp; reveal score</button>{% else %}<a class="btnlink" href="{{ url_for('brain_page') }}">Back to game lobby</a>{% endif %}</form>
 """
 
+
 ENVELOPE_BODY = """
-<div class="card note">
-<h1>&#9993; Vedo Mystery Envelope</h1>
-<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
-<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
-<span class="muted small"> {{ window }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
-<div class="envelope" id="env">&#9993;</div>
-<div id="envout">
-{% if claimed %}
-<div class="flash ok">You already opened this envelope: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}. Voucher code: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>
-{% endif %}
-</div>
-<p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
-<button type="button" class="primary" id="envbtn" {% if info.error %}disabled{% endif %}>Open my envelope</button>
-{% if info.error and not claimed %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
-</div>
-<div class="card">
-<h2>Rules</h2>
-<ul>
-<li>Every eligible member gets the guaranteed reward of <b>{{ money(gm['min_reward']) }}</b> in points.</li>
-<li>Bonus voucher: a <b>{{ gm['bonus_chance'] }}%</b> chance of a Level {{ gm['bonus_level'] }} voucher, while stock lasts. Vouchers left: <b>{{ gm['bonus_stock'] }}</b>.</li>
-<li>Each envelope can be claimed once per member per event.</li>
-<li>All rewards are recorded in your points wallet and reward history.</li>
-</ul>
-</div>
+<style>
+.env-scene{display:flex;flex-direction:column;align-items:center;padding:26px 12px 32px;min-height:300px;overflow:hidden}
+.env-stage{position:relative;width:260px;height:190px;margin:22px auto 14px;perspective:900px}
+.real-envelope{position:absolute;left:0;bottom:0;width:260px;height:160px;cursor:pointer;filter:drop-shadow(0 15px 14px #0003);transition:transform .25s ease}
+.real-envelope:hover{transform:translateY(-4px)}
+.env-back{position:absolute;inset:0;background:linear-gradient(145deg,#ffdf8e,#d99439);border:2px solid #b87528;border-radius:8px}
+.env-paper{position:absolute;z-index:1;left:19px;bottom:15px;width:222px;height:120px;padding:13px 10px;box-sizing:border-box;background:#fffdf1;color:#45321b;text-align:center;border-radius:5px;box-shadow:0 2px 9px #0002;transform:translateY(0);transition:transform 1.1s cubic-bezier(.2,.8,.2,1);font-weight:800}
+.env-paper .paper-small{font-size:10px;letter-spacing:1.5px;color:#96702c}.env-paper .paper-result{font-size:18px;margin-top:12px;color:#167858;overflow-wrap:anywhere}
+.env-front{position:absolute;z-index:3;inset:0;background:linear-gradient(135deg,#f7c65e,#d98d2c);clip-path:polygon(0 0,50% 56%,100% 0,100% 100%,0 100%);border-radius:8px}
+.env-flap{position:absolute;z-index:4;top:0;left:0;width:100%;height:100%;background:linear-gradient(145deg,#ffe6a0,#e5a640);clip-path:polygon(0 0,100% 0,50% 61%);transform-origin:top center;transition:transform .7s ease;filter:drop-shadow(0 3px 2px #8b551b55)}
+.env-seal{position:absolute;z-index:5;left:50%;top:58%;transform:translate(-50%,-50%);width:48px;height:48px;border-radius:50%;display:grid;place-items:center;background:radial-gradient(circle at 30% 25%,#fff0b9,#c83b4b);border:3px solid #fff0b9;color:#fff;font-size:21px;box-shadow:0 3px 7px #0003;transition:opacity .25s}
+.env-stage.opened .env-flap{transform:rotateX(180deg);z-index:0}.env-stage.opened .env-paper{transform:translateY(-105px);z-index:6}.env-stage.opened .env-seal{opacity:0}.env-stage.opened .real-envelope{cursor:default}
+.env-open-btn{border-radius:999px!important;padding:13px 26px!important;font-size:16px!important;background:linear-gradient(135deg,#f5c34f,#ed8e2b)!important;color:#38230b!important;font-weight:900!important;box-shadow:0 6px 0 #a35c1e55}
+.env-confetti{font-size:25px;letter-spacing:7px;text-align:center;min-height:34px}
+@media(max-width:420px){.env-stage{transform:scale(.9);margin:8px auto}.env-scene{padding-left:0;padding-right:0}}
+</style>
+<div class="card note"><h1>✉️ Vedo Mystery Envelope</h1><p class="muted"><a href="{{ url_for('games_hub') }}">← All games</a></p><p><span class="badge {{ 'ok' if info.status=='OPEN' else 'wait' }}">{{ status_text }}</span> <span class="muted small">{{ window }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p><p>There’s a surprise waiting inside. Tap the envelope and open your reward letter.</p>
+<div class="env-scene"><div class="env-stage {% if claimed %}opened{% endif %}" id="envstage"><div class="real-envelope" id="env" role="img" aria-label="Mystery reward envelope"><div class="env-back"></div><div class="env-paper" id="envpaper"><div class="paper-small">VEDO REWARD LETTER</div><div class="paper-result" id="paperresult">YOUR SURPRISE<br>IS INSIDE</div></div><div class="env-front"></div><div class="env-flap"></div><div class="env-seal">V</div></div></div><div class="env-confetti" id="envconfetti">✦ ✉ ✦</div><div id="envout" aria-live="polite">{% if claimed %}<div class="flash ok">Already opened: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}<br>Voucher: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>{% else %}<p class="muted">Your sealed envelope is ready.</p>{% endif %}</div><button type="button" class="primary env-open-btn" id="envbtn" {% if info.error %}disabled{% endif %}>{{ 'Envelope opened' if claimed else '🎁 Open my envelope' }}</button><p class="muted">Points balance: <b id="bal">{{ money(user['points']) }}</b></p>{% if info.error and not claimed %}<p class="muted small">{{ info.error }}</p>{% endif %}</div></div>
+<div class="card"><h2>✨ What’s inside?</h2><ul><li>Guaranteed reward: <b>{{ money(gm['min_reward']) }} points</b>.</li><li>Bonus chance: <b>{{ gm['bonus_chance'] }}%</b> to receive a Level {{ gm['bonus_level'] }} voucher while stock lasts.</li><li>One envelope per member per event. Your reward is saved to your wallet and history.</li></ul></div>
 <script>
-(function () {
-  var btn = document.getElementById('envbtn');
-  var env = document.getElementById('env');
-  var out = document.getElementById('envout');
-  var CSRF = {{ csrf_token()|tojson }};
-  if (!btn) { return; }
-  btn.addEventListener('click', function () {
-    btn.disabled = true;
-    env.classList.add('shake');
-    var fd = new FormData();
-    fd.append('csrf_token', CSRF);
-    fetch('{{ url_for("envelope_open") }}', { method: 'POST', body: fd, credentials: 'same-origin' })
-      .then(function (r) { return r.json(); })
-      .catch(function () { return { ok: false, error: 'Network problem. Please try again.' }; })
-      .then(function (res) {
-        setTimeout(function () {
-          env.classList.remove('shake');
-          out.innerHTML = '';
-          var d = document.createElement('div');
-          d.className = 'flash ' + (res.ok ? 'ok' : 'error');
-          d.textContent = res.ok ? res.text : res.error;
-          out.appendChild(d);
-          if (res.ok) {
-            env.innerHTML = '&#127881;';
-            document.getElementById('bal').textContent = res.balance;
-          } else { btn.disabled = false; }
-        }, 1200);
-      });
-  });
+(function(){const btn=document.getElementById('envbtn'),stage=document.getElementById('envstage'),out=document.getElementById('envout'),paper=document.getElementById('paperresult'),confetti=document.getElementById('envconfetti'),csrf={{ csrf_token()|tojson }};if(!btn||!stage)return;
+{% if claimed %}btn.disabled=true;paper.textContent={{ claimed['result']|tojson }};{% else %}
+let busy=false;btn.addEventListener('click',async()=>{if(busy)return;busy=true;btn.disabled=true;btn.textContent='Opening your surprise…';stage.classList.add('opened');confetti.textContent='✦ ✨ ✦';const fd=new FormData();fd.append('csrf_token',csrf);let res;try{const r=await fetch('{{ url_for("envelope_open") }}',{method:'POST',body:fd,credentials:'same-origin'});res=await r.json();}catch(e){res={ok:false,error:'Connection problem. Please try again.'};}
+setTimeout(()=>{if(res.ok){paper.textContent=res.text;out.innerHTML='';const d=document.createElement('div');d.className='flash ok';d.textContent='🎉 '+res.text;out.appendChild(d);document.getElementById('bal').textContent=res.balance;btn.textContent='Reward revealed!';confetti.textContent='🎉 ✨ 🎁 ✨ 🎉';}else{stage.classList.remove('opened');btn.disabled=false;btn.textContent='🎁 Open my envelope';out.textContent=res.error||'Please try again.';busy=false;}},900);
+});{% endif %}
 })();
 </script>
 """
+
 
 ADMIN_GAMES_BODY = """
 <div class="card note">
