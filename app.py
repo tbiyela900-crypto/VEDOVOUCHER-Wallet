@@ -3112,35 +3112,79 @@ def admin_question_action(qid, action):
 # ---------------------------------------------------- Games templates ------
 
 GAMES_BODY = """
-<div class="card note">
-<h1>Vedo games</h1>
-<p class="muted">Play to win points and vouchers. Rewards go straight to your Vedo points wallet and show in your reward history. The rules, odds and limits are set by the admin and are shown on every game page.</p>
+<style>
+.games-hero{position:relative;overflow:hidden;padding:28px!important;border:1px solid #293b65!important;background:radial-gradient(circle at 90% 0%,rgba(129,92,255,.30),transparent 34%),linear-gradient(135deg,#10172d,#1b2450 58%,#251849)!important;color:#fff}
+.games-hero h1{font-size:clamp(28px,4vw,38px);margin:0 0 8px;letter-spacing:-1px}
+.games-hero p{max-width:680px;color:#c9d2f4;margin:0}
+.games-kicker{display:inline-flex;align-items:center;gap:7px;font-size:12px;font-weight:800;letter-spacing:1.4px;text-transform:uppercase;color:#c8baff;margin-bottom:12px}
+.games-kicker:before{content:"";width:7px;height:7px;border-radius:50%;background:#9c82ff;box-shadow:0 0 12px #9c82ff}
+.games-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(235px,1fr));gap:18px;margin:20px 0 24px}
+.game-tile{position:relative;overflow:hidden;display:flex;flex-direction:column;min-height:280px;padding:22px;border-radius:20px;border:1px solid #303b5c;background:linear-gradient(155deg,#1a2340,#111827 72%);color:#fff;box-shadow:0 12px 30px rgba(0,0,0,.16);transition:transform .18s ease,border-color .18s ease}
+.game-tile:hover{transform:translateY(-4px);border-color:#8272ff}
+.game-tile:after{content:"";position:absolute;width:150px;height:150px;border-radius:50%;right:-65px;top:-65px;background:rgba(130,104,255,.13);pointer-events:none}
+.game-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px}
+.game-icon{display:grid;place-items:center;width:66px;height:66px;border-radius:18px;font-size:35px;background:linear-gradient(135deg,#45338e,#252c5c);border:1px solid #6252a8;box-shadow:inset 0 1px 0 rgba(255,255,255,.15)}
+.game-tile:nth-child(2) .game-icon{background:linear-gradient(135deg,#0d776f,#17435a);border-color:#258f87}
+.game-tile:nth-child(3) .game-icon{background:linear-gradient(135deg,#a45a19,#61371d);border-color:#c17a32}
+.game-status{font-size:11px;font-weight:800;text-transform:uppercase;letter-spacing:.7px;padding:6px 9px;border-radius:999px;background:#27314b;color:#d7def6;white-space:nowrap}
+.game-status.live{background:#123e35;color:#83f0c3}
+.game-tile h2{font-size:21px;line-height:1.25;margin:20px 0 8px;color:#fff}
+.game-tile p{font-size:14px;line-height:1.6;color:#b7c2dc;margin:0 0 18px}
+.game-bottom{margin-top:auto;display:flex;align-items:center;justify-content:space-between;gap:10px}
+.game-plays{font-size:12px;color:#aab6d4}
+.game-action{display:inline-flex;align-items:center;justify-content:center;gap:8px;text-decoration:none!important;padding:11px 15px;border-radius:11px;background:linear-gradient(135deg,#8d76ff,#6b54dc);color:#fff!important;font-weight:800;font-size:13px;box-shadow:0 6px 16px rgba(108,82,220,.25)}
+.game-action:hover{filter:brightness(1.1)}
+.game-action.disabled{opacity:.45;pointer-events:none}
+.game-alert{font-size:12px!important;color:#ffcf9d!important;background:rgba(158,91,32,.14);border:1px solid rgba(216,146,70,.25);padding:9px 11px;border-radius:10px;margin:0 0 14px!important}
+.game-history{overflow-x:auto}
+.game-history table{min-width:600px}
+@media(max-width:560px){.games-hero{padding:22px!important}.game-tile{min-height:250px;padding:18px}.game-tile h2{margin-top:16px}}
+</style>
+<div class="card games-hero">
+  <div class="games-kicker">Vedo Play Zone</div>
+  <h1>Pick your game. Play for rewards.</h1>
+  <p>Spin, test your knowledge, or open a mystery envelope. Your game results and eligible rewards are added to your Vedo points wallet.</p>
 </div>
-<div class="gcards">
+
+<div class="games-grid">
 {% for c in cards %}
-<div class="gcard">
-<div class="gemoji">{{ c.emoji }}</div>
-<h2>{{ c.title }}</h2>
-<p class="muted">{{ c.blurb }}</p>
-<p><span class="badge {{ 'ok' if c.status == 'OPEN' else 'wait' }}">{{ c.status_text }}</span>
-{% if c.status == 'OPEN' %}<span class="muted small"> &middot; {{ c.left }} play(s) left</span>{% endif %}</p>
-{% if c.error %}<p class="muted small">{{ c.error }}</p>{% endif %}
-<a class="btnlink" href="{{ c.url }}">Open</a>
-</div>
+  <article class="game-tile">
+    <div class="game-top">
+      <div class="game-icon">{{ c.emoji }}</div>
+      <span class="game-status {{ 'live' if c.status == 'OPEN' else '' }}">{{ c.status_text }}</span>
+    </div>
+    <h2>{{ c.title }}</h2>
+    <p>{{ c.blurb }}</p>
+    {% if c.error %}<p class="game-alert">{{ c.error }}</p>{% endif %}
+    <div class="game-bottom">
+      <span class="game-plays">{% if c.status == 'OPEN' %}{{ c.left }} play(s) left{% else %}Check availability{% endif %}</span>
+      <a class="game-action {{ 'disabled' if c.status != 'OPEN' else '' }}" href="{{ c.url }}">Play now <span aria-hidden="true">→</span></a>
+    </div>
+  </article>
 {% endfor %}
 </div>
+
 <div class="card">
-<h2>My reward history</h2>
-{% if history %}
-<table>
-<tr><th>Date</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
-{% for h in history %}
-<tr><td>{{ h['created_at'][:16] }}</td><td>{{ GAMES[h['game']] }}</td><td>{{ h['result'] }}</td>
-<td class="{{ 'pos' if h['amount'] > 0 }}">{{ money(h['amount']) if h['amount'] > 0 else '-' }}</td>
-<td>{% if h['voucher'] %}<code>{{ h['voucher'] }}</code>{% else %}-{% endif %}</td></tr>
-{% endfor %}
-</table>
-{% else %}<p class="muted">No game rewards yet. Pick a game above.</p>{% endif %}
+  <h2>🏆 My reward history</h2>
+  <p class="muted small">Your recent game results and rewards.</p>
+  {% if history %}
+  <div class="game-history">
+  <table>
+    <tr><th>Date</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
+    {% for h in history %}
+    <tr>
+      <td>{{ h['created_at'][:16] }}</td>
+      <td>{{ GAMES[h['game']] }}</td>
+      <td>{{ h['result'] }}</td>
+      <td class="{{ 'pos' if h['amount'] > 0 }}">{{ money(h['amount']) if h['amount'] > 0 else '-' }}</td>
+      <td>{% if h['voucher'] %}<code>{{ h['voucher'] }}</code>{% else %}-{% endif %}</td>
+    </tr>
+    {% endfor %}
+  </table>
+  </div>
+  {% else %}
+  <p class="muted">No game rewards yet. Choose a game above to get started.</p>
+  {% endif %}
 </div>
 """
 
@@ -5264,3 +5308,4 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
