@@ -4,7 +4,7 @@ Vedo Ai Investment  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit serial number + a CELLPHONE NUMBER that must be
+  * Sign-up uses an 11-digit Account number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID (no account number).
   * TOP-UP page looks like the check-in page: the member taps a level tile,
@@ -282,7 +282,7 @@ CREATE TABLE IF NOT EXISTS users (
     selected_level INTEGER NOT NULL DEFAULT 0,
     referral_code TEXT UNIQUE,
     referred_by INTEGER,
-    serial_number TEXT NOT NULL UNIQUE,
+    Account_number TEXT NOT NULL UNIQUE,
 
     last_checkin TEXT,
     streak INTEGER DEFAULT 0,
@@ -623,7 +623,7 @@ def init_db():
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
         "points": "INTEGER NOT NULL DEFAULT 0",
-        "serial_number": "TEXT",
+        "Account_number": "TEXT",
         "phone": "TEXT",
         "phone_verified": "INTEGER NOT NULL DEFAULT 1",
         "selected_level": "INTEGER NOT NULL DEFAULT 0",
@@ -671,8 +671,8 @@ def init_db():
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real serial number
-        admin_serial_number = "00000000000"
+        # Admin does not use a real Account number
+        admin_Account_number = "00000000000"
 
         db.execute(
             """
@@ -681,7 +681,7 @@ def init_db():
                 pw_hash,
                 level,
                 referral_code,
-                serial_number,
+                Account_number,
                 is_admin,
                 created_at
             )
@@ -692,7 +692,7 @@ def init_db():
                 generate_password_hash(admin_pass),
                 7,
                 new_referral_code(db),
-                admin_serial_number,
+                admin_Account_number,
                 1,
                 now_iso()
             )
@@ -837,7 +837,7 @@ def register():
         # The verified CELLPHONE NUMBER is the login ID. It is stored in the
         # `username` column (and in `phone`) so the rest of the app keeps
         # working unchanged.
-        serial_number = request.form.get("serial_number", "").strip()
+        Account_number = request.form.get("Account_number", "").strip()
         phone = normalize_sa_phone(request.form.get("phone", ""))
         password = request.form.get("password", "")
         confirm = request.form.get("confirm", "")
@@ -863,11 +863,11 @@ def register():
             error = ("Enter a valid South African cellphone number, "
                      "for example 082 123 4567 or +27 82 123 4567.")
 
-        # Validate serial number (exactly 11 digits)
-        elif (not serial_number.isascii()
-                or not serial_number.isdigit()
-                or len(serial_number) != 11):
-            error = "Serial number must contain exactly 11 digits."
+        # Validate Account number (exactly 11 digits)
+        elif (not Account_number.isascii()
+                or not Account_number.isdigit()
+                or len(Account_number) != 11):
+            error = "Account number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -917,15 +917,15 @@ def register():
                              "verified. Log in with it and your password to "
                              "get a new SMS code.")
 
-        # Check duplicate serial number
+        # Check duplicate Account number
         if not error:
             existing_serial = db.execute(
-                "SELECT 1 FROM users WHERE serial_number=?",
-                (serial_number,)
+                "SELECT 1 FROM users WHERE Account_number=?",
+                (Account_number,)
             ).fetchone()
 
             if existing_serial:
-                error = "That serial number is already registered."
+                error = "That Account number is already registered."
 
         # Display validation errors
         if error:
@@ -942,7 +942,7 @@ def register():
                     level,
                     referral_code,
                     referred_by,
-                    serial_number,
+                    Account_number,
                     phone,
                     phone_verified,
                     created_at
@@ -955,7 +955,7 @@ def register():
                     start_level,
                     new_referral_code(db),
                     referrer["id"] if referrer else None,
-                    serial_number,
+                    Account_number,
                     phone,
                     0,
                     now_iso()
@@ -989,7 +989,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That cellphone number or serial number is already registered.",
+                "That cellphone number or Account number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1967,7 +1967,7 @@ def admin():
     if q:
         digits = re.sub(r"\D", "", q).lstrip("0")
         phone_like = f"%{digits}%" if digits else like
-        users_sql += ("WHERE u.username LIKE ? OR u.serial_number LIKE ? "
+        users_sql += ("WHERE u.username LIKE ? OR u.Account_number LIKE ? "
                       "OR u.referral_code LIKE ? OR u.phone LIKE ? ")
         users_args = (like, like, like, phone_like)
     else:
@@ -2849,8 +2849,8 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Serial number (11 digits)</label>
-<input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
+<label>Account number (11 digits)</label>
+<input name="Account_number" value="{{ form.get('Account_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
 <p class="muted small" style="margin-top:6px">A 6-digit code will be shown on the next page to verify this number.</p>
@@ -3700,7 +3700,7 @@ PROFILE_BODY = """
 </div>
 <dl class="kv">
 <div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
-<div><dt>Serial number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>Account number</dt><dd>{{ member['Account_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
@@ -3717,7 +3717,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, serial number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Account number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
