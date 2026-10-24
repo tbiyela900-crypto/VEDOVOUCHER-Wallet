@@ -4,21 +4,37 @@ Vedo Ai Investment  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit BA_A Number + a CELLPHONE NUMBER that must be
+  * Sign-up uses an 11-digit BA Number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID.
   * TOP-UP page looks like the check-in page: the member taps a level tile,
-    enters an A_m and presses Enter. The tiles close and a WHITE details
-    tab opens for 10 minutes showing the BA_n, Reference, A_m,
-    P_s and BA_A Number, a small Top-up flag and a red message. ALL of
+    enters an amount and presses Enter. The tiles close and a WHITE details
+    tab opens for 10 minutes showing the Bank Name, Reference, Amount,
+    PayShap and BA Number, a small Top-up flag and a red message. ALL of
     that information is entered by the admin only (Admin page > Top-up
     details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
     money to the balance.
   * The balance only grows through the daily check-in tasks (and referral
-    bonuses, savings-pot interest, etc.), or when the admin adds balance to
-    a member by hand (Admin page > All members > Add balance).
-  * Daily check-in (level reward / 24) with a special 7-day streak congratulation
+    bonuses, savings-pot interest, game rewards, etc.), or when the admin
+    adds balance to a member by hand (Admin page > All members > Add balance).
+  * Daily check-in (level reward / 24)
+  * PHASE 1 GAMES (Games tab, admin controls on Admin > Games admin):
+      - Vedo Spin & Win      : weighted prize spin. The admin sets the prizes,
+                               the odds (weights), the stock (= how many
+                               members can win each prize), spin limits and
+                               the event schedule. Odds are shown to members.
+      - Vedo Brain Battle    : answer questions, earn points per correct
+                               answer. Admin manages questions, points,
+                               round size, limits and schedule.
+      - Vedo Mystery Envelope: every eligible member gets the guaranteed
+                               minimum reward set by the admin, plus a
+                               published chance of a bonus voucher while the
+                               voucher stock lasts. One claim per member
+                               per event.
+    Every result is decided on the server, written to the points wallet
+    (transaction ledger) and to the reward history / winner records.
+    Daily Streak is NOT part of Phase 1 (hidden; can be added later).
   * Referral codes and team
   * Simulated WITHDRAWALS: user requests a cash-out of money,
                           admin approves/rejects (rejected = refunded).
@@ -56,7 +72,6 @@ Run:
 """
 
 import hashlib
-import json
 import hmac
 import os
 import re
@@ -185,7 +200,7 @@ DAILY_REWARD_CENTS = {
     for lvl in LEVELS
 }
 
-STREAK_DAYS = 7
+STREAK_DAYS = 7                           # streak is tracked but hidden (not Phase 1)
 REFERRAL_BONUS_PER_LEVEL_CENTS = 20000    # R2000 x new member's level
 
 # --- Team tiers ------------------------------------------------------------
@@ -223,7 +238,7 @@ WITHDRAW_MIN_CENTS = 1000       # R10
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
-    "Enter the A_m and the reason for the top-up, then tap the level you "
+    "Enter the amount and the reason for the top-up, then tap the level you "
     "want. A tab with the top up details will open for 10 minutes. An admin "
     "will review your request and approve or reject it."
 )
@@ -241,6 +256,25 @@ POT_MIN_CENTS = 1000            # R10
 
 # --- Check-in tasks / admin photos ----------------------------------------
 TASK_WAIT_SECONDS = 5           # each tap loads for 5 seconds
+
+# --- Phase 1 games ---------------------------------------------------------
+GAMES = {
+    "SPIN": "Vedo Spin & Win",
+    "BRAIN": "Vedo Brain Battle",
+    "ENVELOPE": "Vedo Mystery Envelope",
+}
+PRIZE_KINDS = {
+    "POINTS": "Points",
+    "VOUCHER": "Level voucher",
+    "ITEM": "Item / prize",
+    "NONE": "No prize",
+}
+STATUS_TEXT = {
+    "OPEN": "Open",
+    "PAUSED": "Paused",
+    "UPCOMING": "Not started",
+    "CLOSED": "Closed",
+}
 
 app = Flask(__name__)
 app.secret_key = _load_secret_key()
@@ -266,6 +300,10 @@ ICONS = {
     "pots": '<rect x="4" y="10" width="16" height="10" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/>',
     "profile": '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
     "admin": '<path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/>',
+    "games": ('<rect x="3" y="8" width="18" height="13" rx="2"/>'
+              '<path d="M12 8v13M3 13h18"/>'
+              '<path d="M12 8c-3 0-4-4-1.5-4S12 8 12 8z"/>'
+              '<path d="M12 8c3 0 4-4 1.5-4S12 8 12 8z"/>'),
     "fingerprint": ('<path d="M3.5 10A9 9 0 0120.5 10"/>'
                     '<path d="M6 13a6 6 0 0112 0v1.5"/>'
                     '<path d="M9 20c.6-1.5 1-3 1-5v-3a2 2 0 014 0v3c0 2.5.5 4 1.5 5.5"/>'),
@@ -285,8 +323,8 @@ def icon(name):
 # ============================================================================
 
 def money(cents):
-    A_m = Decimal(int(cents or 0)) / Decimal(100)
-    return f"R{A_m:,.2f}"
+    amount = Decimal(int(cents or 0)) / Decimal(100)
+    return f"R{amount:,.2f}"
 
 
 def daily_reward_cents(level):
@@ -324,14 +362,14 @@ def pot_interest_cents(principal_cents, weeks):
     return int(value.quantize(Decimal("1"), rounding=ROUND_HALF_UP))
 
 
-def parse_A_m(text, minimum, maximum=None):
-    """Parse a Rand A_m string into cents. Returns None if invalid."""
+def parse_amount(text, minimum, maximum=None):
+    """Parse a Rand amount string into cents. Returns None if invalid."""
     try:
-        A_m = Decimal((text or "").strip()).quantize(
+        amount = Decimal((text or "").strip()).quantize(
             Decimal("0.01"), rounding=ROUND_HALF_UP)
     except Exception:
         return None
-    cents = int(A_m * 100)
+    cents = int(amount * 100)
     if cents < minimum:
         return None
     if maximum is not None and cents > maximum:
@@ -382,8 +420,8 @@ CREATE TABLE IF NOT EXISTS checkins (
 CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    A_m INTEGER NOT NULL,
-    BA_n TEXT NOT NULL DEFAULT 'DEMO',
+    amount INTEGER NOT NULL,
+    bank_name TEXT NOT NULL DEFAULT 'DEMO',
     account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -393,7 +431,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
 CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
-    A_m INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
     level INTEGER NOT NULL DEFAULT 0,
     note TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -403,11 +441,11 @@ CREATE TABLE IF NOT EXISTS topups (
 
 CREATE TABLE IF NOT EXISTS topup_details (
     user_id INTEGER PRIMARY KEY,          -- 0 = everyone, otherwise a member
-    BA_n TEXT NOT NULL DEFAULT '',
+    Bank_name TEXT NOT NULL DEFAULT '',
     Reference TEXT NOT NULL DEFAULT '',
-    A_m TEXT NOT NULL DEFAULT '',
-    P_s TEXT NOT NULL DEFAULT '',
-    BA_Account_number TEXT NOT NULL DEFAULT '',
+    Amount TEXT NOT NULL DEFAULT '',
+    PayShap TEXT NOT NULL DEFAULT '',
+    BA_number TEXT NOT NULL DEFAULT '',
     message TEXT NOT NULL DEFAULT '',
     flag TEXT NOT NULL DEFAULT '',
     updated_at TEXT NOT NULL
@@ -430,7 +468,7 @@ CREATE TABLE IF NOT EXISTS transactions (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     kind TEXT NOT NULL,
-    A_m INTEGER NOT NULL,
+    amount INTEGER NOT NULL,
     note TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
@@ -484,41 +522,72 @@ CREATE TABLE IF NOT EXISTS user_instructions (
     text TEXT NOT NULL,
     updated_at TEXT NOT NULL
 );
-CREATE TABLE IF NOT EXISTS vedo_events (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, event_type TEXT NOT NULL UNIQUE,
-    title TEXT NOT NULL, enabled INTEGER NOT NULL DEFAULT 0,
-    starts_at TEXT NOT NULL DEFAULT '', ends_at TEXT NOT NULL DEFAULT '',
-    entry_cost INTEGER NOT NULL DEFAULT 0, correct_reward INTEGER NOT NULL DEFAULT 50,
-    incorrect_deduction INTEGER NOT NULL DEFAULT 10, referral_target INTEGER NOT NULL DEFAULT 10,
-    referral_entry_points INTEGER NOT NULL DEFAULT 0, referral_from_level INTEGER NOT NULL DEFAULT 1,
-    referral_to_level INTEGER NOT NULL DEFAULT 2, voucher_points_min INTEGER NOT NULL DEFAULT 50,
-    voucher_points_max INTEGER NOT NULL DEFAULT 200, spins_per_day INTEGER NOT NULL DEFAULT 1,
-    prizes_json TEXT NOT NULL DEFAULT '[]', updated_at TEXT NOT NULL
+
+-- ---------------------------------------------------------------- games ---
+-- One row per game: schedule, limits and (for the envelope) reward rules.
+-- Times are stored in UTC as 'YYYY-MM-DD HH:MM'. event_no goes up when the
+-- admin starts a new event, which resets everybody's play limits.
+CREATE TABLE IF NOT EXISTS games (
+    game TEXT PRIMARY KEY,
+    active INTEGER NOT NULL DEFAULT 1,
+    starts_at TEXT NOT NULL DEFAULT '',
+    ends_at TEXT NOT NULL DEFAULT '',
+    max_plays INTEGER NOT NULL DEFAULT 1,
+    period TEXT NOT NULL DEFAULT 'EVENT',          -- EVENT or DAY
+    event_no INTEGER NOT NULL DEFAULT 1,
+    min_level INTEGER NOT NULL DEFAULT 0,
+    min_reward INTEGER NOT NULL DEFAULT 0,         -- envelope guaranteed cents
+    bonus_level INTEGER NOT NULL DEFAULT 1,        -- envelope bonus voucher level
+    bonus_stock INTEGER NOT NULL DEFAULT 0,        -- envelope vouchers left
+    bonus_chance INTEGER NOT NULL DEFAULT 0,       -- envelope bonus chance %
+    questions_per_round INTEGER NOT NULL DEFAULT 5
 );
-CREATE TABLE IF NOT EXISTS vedo_event_entries (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
-    user_id INTEGER NOT NULL REFERENCES users(id), joined_at TEXT NOT NULL,
-    progress INTEGER NOT NULL DEFAULT 0, status TEXT NOT NULL DEFAULT 'ACTIVE',
-    metadata TEXT NOT NULL DEFAULT '{}', UNIQUE(event_id,user_id)
+
+-- Spin & Win prizes. weight = odds. stock = max winners (NULL = unlimited).
+CREATE TABLE IF NOT EXISTS spin_prizes (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    label TEXT NOT NULL,
+    kind TEXT NOT NULL DEFAULT 'POINTS',
+    value INTEGER NOT NULL DEFAULT 0,              -- cents, or voucher level
+    weight INTEGER NOT NULL DEFAULT 1,
+    stock INTEGER,
+    won INTEGER NOT NULL DEFAULT 0,
+    enabled INTEGER NOT NULL DEFAULT 1
 );
-CREATE TABLE IF NOT EXISTS vedo_event_results (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
-    user_id INTEGER NOT NULL REFERENCES users(id), result_type TEXT NOT NULL,
-    points_delta INTEGER NOT NULL DEFAULT 0, detail TEXT NOT NULL DEFAULT '', created_at TEXT NOT NULL
+
+CREATE TABLE IF NOT EXISTS brain_questions (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    question TEXT NOT NULL,
+    a TEXT NOT NULL, b TEXT NOT NULL, c TEXT NOT NULL, d TEXT NOT NULL,
+    correct INTEGER NOT NULL,                      -- 1..4
+    points INTEGER NOT NULL DEFAULT 0,             -- cents per correct answer
+    enabled INTEGER NOT NULL DEFAULT 1
 );
-CREATE TABLE IF NOT EXISTS vedo_quiz_attempts (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, event_id INTEGER NOT NULL REFERENCES vedo_events(id),
-    user_id INTEGER NOT NULL REFERENCES users(id), question_key TEXT NOT NULL,
-    answer_key TEXT NOT NULL, correct INTEGER NOT NULL, points_delta INTEGER NOT NULL,
-    created_at TEXT NOT NULL, UNIQUE(event_id,user_id,question_key)
+
+CREATE TABLE IF NOT EXISTS brain_rounds (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    event_no INTEGER NOT NULL DEFAULT 1,
+    question_ids TEXT NOT NULL,
+    answers TEXT NOT NULL DEFAULT '',
+    score INTEGER NOT NULL DEFAULT 0,
+    correct_n INTEGER NOT NULL DEFAULT 0,
+    status TEXT NOT NULL DEFAULT 'OPEN',
+    created_at TEXT NOT NULL,
+    finished_at TEXT
 );
-CREATE TABLE IF NOT EXISTS vedo_spin_daily (
-    user_id INTEGER NOT NULL REFERENCES users(id), event_id INTEGER NOT NULL REFERENCES vedo_events(id),
-    spin_day TEXT NOT NULL, spins INTEGER NOT NULL DEFAULT 0, PRIMARY KEY(user_id,event_id,spin_day)
-);
-CREATE TABLE IF NOT EXISTS vedo_audit_log (
-    id INTEGER PRIMARY KEY AUTOINCREMENT, admin_id INTEGER NOT NULL REFERENCES users(id),
-    action TEXT NOT NULL, details TEXT NOT NULL, created_at TEXT NOT NULL
+
+-- Reward history / winner records for all three games.
+CREATE TABLE IF NOT EXISTS game_plays (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id),
+    game TEXT NOT NULL,
+    event_no INTEGER NOT NULL DEFAULT 1,
+    result TEXT NOT NULL DEFAULT '',
+    kind TEXT NOT NULL DEFAULT 'NONE',
+    amount INTEGER NOT NULL DEFAULT 0,
+    voucher TEXT NOT NULL DEFAULT '',
+    created_at TEXT NOT NULL
 );
 """
 
@@ -670,12 +739,12 @@ def set_setting(db, key, value):
         (key, value))
 
 
-def add_tx(db, user_id, kind, A_m_cents, note=""):
+def add_tx(db, user_id, kind, amount_cents, note=""):
     """Write a ledger line (positive = credit, negative = debit)."""
     db.execute(
-        "INSERT INTO transactions (user_id, kind, A_m, note, created_at) "
+        "INSERT INTO transactions (user_id, kind, amount, note, created_at) "
         "VALUES (?,?,?,?,?)",
-        (user_id, kind, int(A_m_cents), note, now_iso()))
+        (user_id, kind, int(amount_cents), note, now_iso()))
 
 
 def credit(db, user_id, cents, kind, note=""):
@@ -713,6 +782,52 @@ def page(body, **ctx):
 # DATABASE INITIALISATION
 # ============================================================================
 
+def seed_games(db):
+    """Starter settings, prizes and questions (only when the tables are empty).
+    The admin can change or delete all of it on Admin > Games admin."""
+    defaults = {
+        "SPIN": dict(max_plays=3, period="DAY"),
+        "BRAIN": dict(max_plays=1, period="DAY", questions_per_round=5),
+        "ENVELOPE": dict(max_plays=1, period="EVENT", min_reward=500,
+                         bonus_level=1, bonus_stock=2, bonus_chance=10),
+    }
+    for game, d in defaults.items():
+        db.execute(
+            "INSERT OR IGNORE INTO games (game, max_plays, period, "
+            "min_reward, bonus_level, bonus_stock, bonus_chance, "
+            "questions_per_round) VALUES (?,?,?,?,?,?,?,?)",
+            (game, d.get("max_plays", 1), d.get("period", "EVENT"),
+             d.get("min_reward", 0), d.get("bonus_level", 1),
+             d.get("bonus_stock", 0), d.get("bonus_chance", 0),
+             d.get("questions_per_round", 5)))
+
+    if not db.execute("SELECT 1 FROM spin_prizes").fetchone():
+        for label, kind, value, weight, stock in (
+                ("Better luck next time", "NONE", 0, 50, None),
+                ("R5 points", "POINTS", 500, 30, None),
+                ("R20 points", "POINTS", 2000, 15, 50),
+                ("R100 points", "POINTS", 10000, 4, 10),
+                ("Level 1 voucher", "VOUCHER", 1, 1, 2)):
+            db.execute(
+                "INSERT INTO spin_prizes (label, kind, value, weight, stock) "
+                "VALUES (?,?,?,?,?)", (label, kind, value, weight, stock))
+
+    if not db.execute("SELECT 1 FROM brain_questions").fetchone():
+        for q, a, b, c, d, correct in (
+                ("Which ocean lies on the east coast of South Africa?",
+                 "Indian Ocean", "Atlantic Ocean", "Pacific Ocean",
+                 "Arctic Ocean", 1),
+                ("How many days are there in a week?", "5", "6", "7", "8", 3),
+                ("What is 12 x 3?", "24", "36", "33", "39", 2),
+                ("Which planet is closest to the Sun?", "Venus", "Mercury",
+                 "Earth", "Mars", 2),
+                ("What does ATM stand for?", "Automated Teller Machine",
+                 "Annual Transfer Method", "Account Tax Manager",
+                 "Automatic Trade Market", 1)):
+            db.execute(
+                "INSERT INTO brain_questions (question, a, b, c, d, correct, "
+                "points) VALUES (?,?,?,?,?,?,200)", (q, a, b, c, d, correct))
+
 
 def init_db():
     db = sqlite3.connect(DB_PATH)
@@ -743,24 +858,17 @@ def init_db():
 
     # Same safe upgrade for the other tables.
     extra_columns = {
-        # Ensure legacy databases have the money columns expected by the
-        # admin templates. Some earlier deployments used a different schema.
-        "withdrawals": {"A_m": "INTEGER NOT NULL DEFAULT 0"},
-        "topups": {
-            "A_m": "INTEGER NOT NULL DEFAULT 0",
-            "level": "INTEGER NOT NULL DEFAULT 0",
-        },
-        "transactions": {"A_m": "INTEGER NOT NULL DEFAULT 0"},
+        "topups": {"level": "INTEGER NOT NULL DEFAULT 0"},
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
         # Older deployed databases may already have this table without the
         # newer fields. Add missing columns safely before the admin POST uses them.
         "topup_details": {
-            "BA_n": "TEXT NOT NULL DEFAULT ''",
+            "Bank_name": "TEXT NOT NULL DEFAULT ''",
             "Reference": "TEXT NOT NULL DEFAULT ''",
-            "A_m": "TEXT NOT NULL DEFAULT ''",
-            "P_s": "TEXT NOT NULL DEFAULT ''",
-            "BA_Account_number": "TEXT NOT NULL DEFAULT ''",
+            "Amount": "TEXT NOT NULL DEFAULT ''",
+            "PayShap": "TEXT NOT NULL DEFAULT ''",
+            "BA_number": "TEXT NOT NULL DEFAULT ''",
             "message": "TEXT NOT NULL DEFAULT ''",
             "flag": "TEXT NOT NULL DEFAULT ''",
             "updated_at": "TEXT NOT NULL DEFAULT ''",
@@ -771,17 +879,8 @@ def init_db():
                 for r in db.execute(f"PRAGMA table_info({table})").fetchall()}
         for column, definition in columns.items():
             if column not in have:
-                # If a legacy table used `amount`, preserve it when adding A_m.
-                legacy_amount = next(
-                    (name for name in ("amount", "amount_cents") if name in have),
-                    None,
-                ) if column == "A_m" else None
                 db.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-                if legacy_amount:
-                    db.execute(
-                        f"UPDATE {table} SET A_m = COALESCE({legacy_amount}, 0)")
-                have.add(column)
 
     db.commit()
 
@@ -793,7 +892,7 @@ def init_db():
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real BA_A Number
+        # Admin does not use a real BA Number
         admin_serial_number = "00000000000"
 
         db.execute(
@@ -850,6 +949,9 @@ def init_db():
             )
 
             print(f"  Level {level}: {code}")
+
+    # Phase 1 games: starter settings, prizes and questions
+    seed_games(db)
 
     # Top-up instructions
     if not db.execute(
@@ -948,6 +1050,7 @@ def inject_globals():
         "pot_interest": pot_interest_cents,
         "icon": icon,
         "mask_phone": mask_phone,
+        "GAMES": GAMES,
         "welcome_text": get_setting(get_db(), "welcome_text",
                                     DEFAULT_WELCOME_TEXT),
     }
@@ -991,11 +1094,11 @@ def register():
             error = ("Enter a valid South African cellphone number, "
                      "for example 082 123 4567 or +27 82 123 4567.")
 
-        # Validate BA_A Number (exactly 11 digits)
+        # Validate BA Number (exactly 11 digits)
         elif (not serial_number.isascii()
                 or not serial_number.isdigit()
                 or len(serial_number) != 11):
-            error = "BA_A Number must contain exactly 11 digits."
+            error = "BA Number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -1045,7 +1148,7 @@ def register():
                              "verified. Log in with it and your password to "
                              "get a new SMS code.")
 
-        # Check duplicate BA_A Number
+        # Check duplicate BA Number
         if not error:
             existing_serial = db.execute(
                 "SELECT 1 FROM users WHERE serial_number=?",
@@ -1053,7 +1156,7 @@ def register():
             ).fetchone()
 
             if existing_serial:
-                error = "That BA_A Number is already registered."
+                error = "That BA Number is already registered."
 
         # Display validation errors
         if error:
@@ -1117,7 +1220,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That cellphone number or BA_A Number is already registered.",
+                "That cellphone number or BA Number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1329,8 +1432,6 @@ def dashboard():
         "WHERE user_id=? AND status='LOCKED'", (user["id"],)).fetchone()["s"]
 
     reward = daily_reward_cents(user["level"])
-    milestone = bool(done and user["streak"] > 0
-                     and user["streak"] % STREAK_DAYS == 0)
 
     task_total = tasks_for_level(user["level"])
     task_done = db.execute(
@@ -1343,7 +1444,7 @@ def dashboard():
     return page(DASH_BODY, task_total=task_total, task_done=task_done,
                 posts=posts, user=user, done=done, next_streak=next_streak,
                 history=history, recent_tx=recent_tx, locked=locked,
-                reward=reward, milestone=milestone, STREAK_DAYS=STREAK_DAYS)
+                reward=reward)
 
 
 @app.route("/checkin")
@@ -1476,7 +1577,7 @@ def checkin_complete(n):
     milestone = False
     streak = 0
     if completed >= total:
-        # All tasks done: the day counts as checked in (streak, history).
+        # All tasks done: the day counts as checked in (history).
         _done, streak = checkin_state(user)
         inserted = db.execute(
             "INSERT OR IGNORE INTO checkins (user_id, day, reward, bonus) "
@@ -1485,8 +1586,7 @@ def checkin_complete(n):
             finished = True
             db.execute("UPDATE users SET streak=?, last_checkin=? WHERE id=?",
                        (streak, day, user["id"]))
-            # Every 7th day in a row earns a special congratulation (no money).
-            milestone = streak % STREAK_DAYS == 0
+            # Daily Streak is not part of Phase 1: no streak celebration.
     db.commit()
 
     points = db.execute("SELECT points FROM users WHERE id=?",
@@ -1498,7 +1598,7 @@ def checkin_complete(n):
 
 
 # ---------------------------------------------------------------------------
-# Admin photo posts (shown on the check-in page)
+# Admin photo posts (shown on the dashboard)
 # ---------------------------------------------------------------------------
 
 def _image_ext(data):
@@ -1605,7 +1705,7 @@ def get_topup_details(db, user_id):
 @app.route("/topup/select-level", methods=["POST"])
 @login_required
 def topup_select_level():
-    """Create a pending top-up request after the member selects a level and A_m."""
+    """Create a pending top-up request after the member selects a level and amount."""
     db = get_db()
     user = current_user()
     try:
@@ -1613,12 +1713,12 @@ def topup_select_level():
     except (TypeError, ValueError):
         return jsonify(ok=False, message="Choose a valid level."), 400
 
-    cents = parse_A_m(request.form.get("A_m"),
+    cents = parse_amount(request.form.get("amount"),
                          TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
     if cents is None:
         return jsonify(
             ok=False,
-            message=(f"Enter an A_m between {money(TOPUP_MIN_CENTS)} "
+            message=(f"Enter an amount between {money(TOPUP_MIN_CENTS)} "
                      f"and {money(TOPUP_MAX_CENTS)}.")
         ), 400
     if level not in LEVELS or level <= user["level"]:
@@ -1633,11 +1733,11 @@ def topup_select_level():
     db.execute("UPDATE users SET selected_level=? WHERE id=?",
                (level, user["id"]))
     db.execute(
-        "INSERT INTO topups (user_id, A_m, level, note, status, created_at) "
+        "INSERT INTO topups (user_id, amount, level, note, status, created_at) "
         "VALUES (?,?,?, '', 'PENDING', ?)",
         (user["id"], cents, level, now_iso()))
     db.commit()
-    return jsonify(ok=True, level=level, A_m=money(cents),
+    return jsonify(ok=True, level=level, amount=money(cents),
                    message=f"Request for Level {level} sent.")
 
 
@@ -1648,7 +1748,7 @@ def topup():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_A_m(request.form.get("A_m"),
+        cents = parse_amount(request.form.get("amount"),
                              TOPUP_MIN_CENTS, TOPUP_MAX_CENTS)
         note = request.form.get("note", "").strip()[:100]
         try:
@@ -1657,7 +1757,7 @@ def topup():
             level = 0
 
         if cents is None:
-            flash(f"Enter an A_m between {money(TOPUP_MIN_CENTS)} and "
+            flash(f"Enter an amount between {money(TOPUP_MIN_CENTS)} and "
                   f"{money(TOPUP_MAX_CENTS)}.", "error")
             return redirect(url_for("topup"))
 
@@ -1673,7 +1773,7 @@ def topup():
             return redirect(url_for("topup"))
 
         db.execute(
-            "INSERT INTO topups (user_id, A_m, level, note, status, "
+            "INSERT INTO topups (user_id, amount, level, note, status, "
             "created_at) VALUES (?,?,?,?, 'PENDING', ?)",
             (user["id"], cents, level, note, now_iso()))
         db.commit()
@@ -1712,15 +1812,15 @@ def topup():
             return (details[key] if details and details[key] else "-")
 
         info_rows = [
-            ("BA_n", val("BA_n")),
+            ("Bank Name", val("Bank_name")),
             ("Reference", val("Reference")),
-            ("A_m", val("A_m")),
-            ("P_s", val("P_s")),
-            ("BA_A Number", val("BA_Account_number")),
+            ("Amount", val("Amount")),
+            ("PayShap", val("PayShap")),
+            ("BA Number", val("BA_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
-            ("A_m", money(active["A_m"])),
+            ("Amount", money(active["amount"])),
             ("Reason", active["note"] or "-"),
         ]
 
@@ -1742,9 +1842,9 @@ def withdraw():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_A_m(request.form.get("A_m"), WITHDRAW_MIN_CENTS)
+        cents = parse_amount(request.form.get("amount"), WITHDRAW_MIN_CENTS)
         if cents is None:
-            flash(f"Enter a valid A_m (minimum {money(WITHDRAW_MIN_CENTS)}).",
+            flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).",
                   "error")
             return redirect(url_for("withdraw"))
 
@@ -1755,7 +1855,7 @@ def withdraw():
             return redirect(url_for("withdraw"))
 
         db.execute(
-            "INSERT INTO withdrawals (user_id, A_m, BA_n, "
+            "INSERT INTO withdrawals (user_id, amount, bank_name, "
             "account_number, account_holder, status, created_at) "
             "VALUES (?, ?, 'DEMO', 'N/A', ?, 'PENDING', ?)",
             (user["id"], cents, user["username"], now_iso()))
@@ -1788,7 +1888,7 @@ def team():
         (user["id"],)).fetchall()
 
     earned = db.execute(
-        "SELECT COALESCE(SUM(A_m),0) AS s FROM transactions "
+        "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
         "WHERE user_id=? AND kind='REFERRAL'", (user["id"],)).fetchone()["s"]
 
     team_points = sum(m["points"] for m in members)
@@ -1921,7 +2021,7 @@ def pots():
     user = current_user()
 
     if request.method == "POST":
-        cents = parse_A_m(request.form.get("A_m"), POT_MIN_CENTS)
+        cents = parse_amount(request.form.get("amount"), POT_MIN_CENTS)
         try:
             weeks = int(request.form.get("weeks", 0))
         except ValueError:
@@ -2225,8 +2325,8 @@ def admin_topup_details():
         target_id, label = 0, "everyone"
 
     fields = {key: request.form.get(key, "").strip()[:100]
-              for key in ("BA_n", "Reference", "A_m",
-                          "P_s", "BA_Account_number")}
+              for key in ("Bank_name", "Reference", "Amount",
+                          "PayShap", "BA_number")}
     message = request.form.get("message", "").strip()[:500]
 
     old = db.execute("SELECT * FROM topup_details WHERE user_id=?",
@@ -2245,19 +2345,19 @@ def admin_topup_details():
         flag = new_flag
 
     db.execute(
-        "INSERT INTO topup_details (user_id, BA_n, Reference, "
-        "A_m, P_s, BA_A,ccount_number, message, flag, "
+        "INSERT INTO topup_details (user_id, Bank_name, Reference, "
+        "Amount, PayShap, BA_number, message, flag, "
         "updated_at) VALUES (?,?,?,?,?,?,?,?,?) "
         "ON CONFLICT(user_id) DO UPDATE SET "
-        "BA_n=excluded.BA_n, "
+        "Bank_name=excluded.Bank_name, "
         "Reference=excluded.Reference, "
-        "A_m=excluded.A_m, "
-        "P_s=excluded.P_s, "
-        "BA_Account_number=excluded.BA_Account_number, message=excluded.message, "
+        "Amount=excluded.Amount, "
+        "PayShap=excluded.PayShap, "
+        "BA_number=excluded.BA_number, message=excluded.message, "
         "flag=excluded.flag, updated_at=excluded.updated_at",
-        (target_id, fields["BA_n"], fields["Reference"],
-         fields["A_m"], fields["P_s"],
-         fields["BA_Account_number"], message, flag, now_iso()))
+        (target_id, fields["Bank_name"], fields["Reference"],
+         fields["Amount"], fields["PayShap"],
+         fields["BA_number"], message, flag, now_iso()))
     try:
         db.commit()
     except sqlite3.Error:
@@ -2335,11 +2435,11 @@ def admin_add_balance(user_id):
     ledger, so it shows in the member's activity and the admin ledger.
     This is the ONLY manual way money is added to a balance."""
     back = request.form.get("q", "").strip()[:30] or None
-    cents = parse_A_m(request.form.get("A_m"), 1, ADMIN_ADD_MAX_CENTS)
+    cents = parse_amount(request.form.get("amount"), 1, ADMIN_ADD_MAX_CENTS)
     note = request.form.get("note", "").strip()[:100]
 
     if cents is None:
-        flash(f"Enter an A_m from R0.01 to {money(ADMIN_ADD_MAX_CENTS)}.",
+        flash(f"Enter an amount from R0.01 to {money(ADMIN_ADD_MAX_CENTS)}.",
               "error")
         return redirect(url_for("admin", q=back))
 
@@ -2411,11 +2511,984 @@ def admin_withdrawal(withdrawal_id, action):
 
     # Completing only changes the demo status. NO real money moves.
     if action == "reject":
-        credit(db, w["user_id"], w["A_m"], "WITHDRAW_REFUND",
+        credit(db, w["user_id"], w["amount"], "WITHDRAW_REFUND",
                f"Withdrawal #{withdrawal_id} rejected - refunded")
     db.commit()
     flash(f"Withdrawal #{withdrawal_id} {new_status.lower()}.", "ok")
     return redirect(url_for("admin"))
+
+
+# ============================================================================
+# PHASE 1 GAMES: Spin & Win, Brain Battle, Mystery Envelope
+# ============================================================================
+# Fair-play rules built into the code:
+#   * Every result is decided on the SERVER (secrets module). The browser only
+#     shows the answer, it can never choose or change it.
+#   * Limits, stock and rewards are checked inside one write transaction
+#     (BEGIN IMMEDIATE), so a double-click or two phones cannot beat them.
+#   * Every reward goes through credit() into the points wallet / ledger and
+#     into game_plays (reward history + admin winner records).
+#   * The odds, stock and rules are shown to members on each game page.
+#   * The admin sets prizes, odds, stock, limits and schedule. There is no
+#     feature to secretly change the outcome of one member.
+
+def _int(value, default=0, lo=0, hi=10 ** 9):
+    try:
+        n = int(str(value).strip())
+    except (TypeError, ValueError):
+        return default
+    return max(lo, min(hi, n))
+
+
+def begin_write(db):
+    """Start a write transaction that locks the database right away."""
+    if db.in_transaction:
+        db.commit()
+    db.execute("BEGIN IMMEDIATE")
+
+
+def game_status(row):
+    now = now_iso()[:16]
+    if not row["active"]:
+        return "PAUSED"
+    if row["starts_at"] and now < row["starts_at"]:
+        return "UPCOMING"
+    if row["ends_at"] and now >= row["ends_at"]:
+        return "CLOSED"
+    return "OPEN"
+
+
+def plays_used(db, user_id, row):
+    if row["game"] == "BRAIN":
+        sql = ("SELECT COUNT(*) FROM brain_rounds "
+               "WHERE user_id=? AND event_no=?")
+        args = [user_id, row["event_no"]]
+    else:
+        sql = ("SELECT COUNT(*) FROM game_plays "
+               "WHERE user_id=? AND event_no=? AND game=?")
+        args = [user_id, row["event_no"], row["game"]]
+    if row["period"] == "DAY":
+        sql += " AND substr(created_at,1,10)=?"
+        args.append(today().isoformat())
+    return db.execute(sql, args).fetchone()[0]
+
+
+def game_gate(db, user, game):
+    """Can this member play now? Returns a dict with the settings row, the
+    status, the number of plays left and an error text (None = can play)."""
+    row = db.execute("SELECT * FROM games WHERE game=?", (game,)).fetchone()
+    status = game_status(row)
+    used = plays_used(db, user["id"], row)
+    left = max(0, row["max_plays"] - used)
+    error = None
+    if status == "PAUSED":
+        error = "This game is paused by the admin."
+    elif status == "UPCOMING":
+        error = f"This game starts on {row['starts_at']} UTC."
+    elif status == "CLOSED":
+        error = "This game has closed."
+    elif user["level"] < row["min_level"]:
+        error = f"You need Level {row['min_level']} or higher to play."
+    elif left <= 0:
+        error = ("You already claimed your envelope." if game == "ENVELOPE"
+                 else "You have used all your plays.")
+    return {"g": row, "status": status, "left": left, "used": used,
+            "error": error}
+
+
+def log_play(db, user_id, game, event_no, result, kind, amount=0, voucher=""):
+    db.execute(
+        "INSERT INTO game_plays (user_id, game, event_no, result, kind, "
+        "amount, voucher, created_at) VALUES (?,?,?,?,?,?,?,?)",
+        (user_id, game, event_no, result, kind, amount, voucher, now_iso()))
+
+
+def issue_voucher(db, user_id, level):
+    """A fresh level code that only this member can redeem."""
+    code = new_voucher_code(level)
+    db.execute(
+        "INSERT INTO vouchers (code, level, issued_to, created_at) "
+        "VALUES (?,?,?,?)", (code, level, user_id, now_iso()))
+    return code
+
+
+def prize_text(p):
+    if p["kind"] == "POINTS":
+        return f"{money(p['value'])} points"
+    if p["kind"] == "VOUCHER":
+        return f"Level {p['value']} voucher"
+    return ""
+
+
+def _window_text(row):
+    if row["starts_at"] and row["ends_at"]:
+        return f"{row['starts_at']} to {row['ends_at']} UTC"
+    if row["starts_at"]:
+        return f"from {row['starts_at']} UTC"
+    if row["ends_at"]:
+        return f"until {row['ends_at']} UTC"
+    return "no closing time set"
+
+
+def _limit_text(row):
+    per = "per day" if row["period"] == "DAY" else "per event"
+    return f"{row['max_plays']} play(s) per member {per}"
+
+
+# ---------------------------------------------------------------- hub -------
+
+@app.route("/games")
+@login_required
+def games_hub():
+    db = get_db()
+    user = current_user()
+    meta = (
+        ("SPIN", "🎰", "Spin for points, vouchers and prizes.", "spin_page"),
+        ("BRAIN", "🧠", "Answer questions and earn points for every correct answer.", "brain_page"),
+        ("ENVELOPE", "✉️", "Open your envelope for guaranteed points or a bonus voucher.", "envelope_page"),
+    )
+    cards = []
+    for key, emoji, blurb, endpoint in meta:
+        info = game_gate(db, user, key)
+        cards.append({
+            "emoji": emoji, "title": GAMES[key], "blurb": blurb,
+            "url": url_for(endpoint), "status": info["status"],
+            "status_text": STATUS_TEXT[info["status"]],
+            "left": info["left"], "error": info["error"],
+        })
+    history = db.execute(
+        "SELECT * FROM game_plays WHERE user_id=? ORDER BY id DESC LIMIT 30",
+        (user["id"],)).fetchall()
+    return page(GAMES_BODY, cards=cards, history=history)
+
+
+# --------------------------------------------------------- Spin & Win -------
+
+@app.route("/games/spin")
+@login_required
+def spin_page():
+    db = get_db()
+    user = current_user()
+    info = game_gate(db, user, "SPIN")
+    prizes = db.execute(
+        "SELECT * FROM spin_prizes WHERE enabled=1 ORDER BY weight DESC, id"
+    ).fetchall()
+    avail = {p["id"] for p in prizes
+             if p["weight"] > 0 and (p["stock"] is None or p["won"] < p["stock"])}
+    total = sum(p["weight"] for p in prizes if p["id"] in avail)
+    odds = []
+    for p in prizes:
+        ok = p["id"] in avail
+        odds.append({
+            "label": p["label"], "what": prize_text(p),
+            "chance": (round(p["weight"] * 100 / total, 1)
+                       if ok and total else 0),
+            "left": (None if p["stock"] is None
+                     else max(0, p["stock"] - p["won"])),
+            "sold_out": not ok,
+        })
+    mine = db.execute(
+        "SELECT * FROM game_plays WHERE user_id=? AND game='SPIN' "
+        "ORDER BY id DESC LIMIT 10", (user["id"],)).fetchall()
+    labels = [p["label"] for p in prizes] or ["..."]
+    return page(SPIN_BODY, info=info, gm=info["g"], odds=odds, mine=mine,
+                labels=labels, window=_window_text(info["g"]),
+                limit_text=_limit_text(info["g"]), user=user,
+                status_text=STATUS_TEXT[info["status"]])
+
+
+@app.route("/games/spin/play", methods=["POST"])
+@login_required
+def spin_play():
+    db = get_db()
+    user = current_user()
+    begin_write(db)
+    info = game_gate(db, user, "SPIN")
+    if info["error"]:
+        db.rollback()
+        return jsonify(ok=False, error=info["error"]), 400
+
+    prizes = db.execute(
+        "SELECT * FROM spin_prizes WHERE enabled=1 AND weight>0 "
+        "AND (stock IS NULL OR won<stock)").fetchall()
+    if not prizes:
+        db.rollback()
+        return jsonify(ok=False, error="No prizes are available right now."), 400
+
+    roll = secrets.randbelow(sum(p["weight"] for p in prizes))
+    pick = prizes[-1]
+    for p in prizes:
+        if roll < p["weight"]:
+            pick = p
+            break
+        roll -= p["weight"]
+
+    event_no = info["g"]["event_no"]
+    amount, voucher = 0, ""
+    if pick["kind"] == "POINTS":
+        amount = pick["value"]
+        credit(db, user["id"], amount, "SPIN", f"Spin & Win: {pick['label']}")
+        text = f"You won {money(amount)} in points!"
+    elif pick["kind"] == "VOUCHER":
+        voucher = issue_voucher(db, user["id"], pick["value"])
+        text = (f"You won a Level {pick['value']} voucher! Code: {voucher}. "
+                "Redeem it on the Upgrade page.")
+    elif pick["kind"] == "ITEM":
+        text = f"You won: {pick['label']}! The admin will contact you."
+    else:
+        text = "No prize this time. Better luck next time!"
+
+    if pick["kind"] != "NONE":
+        db.execute("UPDATE spin_prizes SET won=won+1 WHERE id=?", (pick["id"],))
+    log_play(db, user["id"], "SPIN", event_no, pick["label"], pick["kind"],
+             amount, voucher)
+    db.commit()
+
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
+    return jsonify(ok=True, label=pick["label"], kind=pick["kind"],
+                   text=text, balance=money(points), left=info["left"] - 1)
+
+
+# ------------------------------------------------------- Brain Battle -------
+
+@app.route("/games/brain")
+@login_required
+def brain_page():
+    db = get_db()
+    user = current_user()
+    info = game_gate(db, user, "BRAIN")
+    open_round = db.execute(
+        "SELECT id FROM brain_rounds WHERE user_id=? AND status='OPEN' "
+        "ORDER BY id DESC", (user["id"],)).fetchone()
+    pool = db.execute(
+        "SELECT COUNT(*) AS n, COALESCE(MAX(points),0) AS mx "
+        "FROM brain_questions WHERE enabled=1").fetchone()
+    rounds = db.execute(
+        "SELECT * FROM brain_rounds WHERE user_id=? ORDER BY id DESC LIMIT 10",
+        (user["id"],)).fetchall()
+    return page(BRAIN_BODY, info=info, gm=info["g"], open_round=open_round,
+                pool=pool, rounds=rounds, window=_window_text(info["g"]),
+                limit_text=_limit_text(info["g"]),
+                status_text=STATUS_TEXT[info["status"]])
+
+
+@app.route("/games/brain/start", methods=["POST"])
+@login_required
+def brain_start():
+    db = get_db()
+    user = current_user()
+    begin_write(db)
+
+    # Resume a round that was started but not finished (uses no new play).
+    open_round = db.execute(
+        "SELECT id FROM brain_rounds WHERE user_id=? AND status='OPEN' "
+        "ORDER BY id DESC", (user["id"],)).fetchone()
+    if open_round:
+        db.rollback()
+        return redirect(url_for("brain_round", rid=open_round["id"]))
+
+    info = game_gate(db, user, "BRAIN")
+    if info["error"]:
+        db.rollback()
+        flash(info["error"], "error")
+        return redirect(url_for("brain_page"))
+
+    ids = [r["id"] for r in db.execute(
+        "SELECT id FROM brain_questions WHERE enabled=1 "
+        "ORDER BY RANDOM() LIMIT ?", (info["g"]["questions_per_round"],))]
+    if not ids:
+        db.rollback()
+        flash("No questions are available right now.", "error")
+        return redirect(url_for("brain_page"))
+
+    cur = db.execute(
+        "INSERT INTO brain_rounds (user_id, event_no, question_ids, created_at) "
+        "VALUES (?,?,?,?)",
+        (user["id"], info["g"]["event_no"], ",".join(map(str, ids)), now_iso()))
+    db.commit()
+    return redirect(url_for("brain_round", rid=cur.lastrowid))
+
+
+def _round_questions(db, rnd):
+    ids = [int(x) for x in rnd["question_ids"].split(",") if x]
+    if not ids:
+        return []
+    rows = {r["id"]: r for r in db.execute(
+        "SELECT * FROM brain_questions WHERE id IN (%s)"
+        % ",".join("?" * len(ids)), ids)}
+    return [rows[i] for i in ids if i in rows]
+
+
+@app.route("/games/brain/round/<int:rid>", methods=["GET", "POST"])
+@login_required
+def brain_round(rid):
+    db = get_db()
+    user = current_user()
+    rnd = db.execute("SELECT * FROM brain_rounds WHERE id=? AND user_id=?",
+                     (rid, user["id"])).fetchone()
+    if rnd is None:
+        abort(404)
+    questions = _round_questions(db, rnd)
+
+    if request.method == "POST":
+        if rnd["status"] != "OPEN":
+            return redirect(url_for("brain_round", rid=rid))
+        picked, score, right = [], 0, 0
+        for q in questions:
+            a = _int(request.form.get(f"q{q['id']}"), 0, 0, 4)
+            picked.append(f"{q['id']}:{a}")
+            if a == q["correct"]:
+                score += q["points"]
+                right += 1
+        begin_write(db)
+        claimed = db.execute(
+            "UPDATE brain_rounds SET status='DONE', answers=?, score=?, "
+            "correct_n=?, finished_at=? WHERE id=? AND status='OPEN'",
+            (",".join(picked), score, right, now_iso(), rid)).rowcount
+        if claimed == 1:
+            result = f"{right}/{len(questions)} correct"
+            if score > 0:
+                credit(db, user["id"], score, "BRAIN",
+                       f"Brain Battle round #{rid}: {result}")
+            log_play(db, user["id"], "BRAIN", rnd["event_no"], result,
+                     "POINTS" if score else "NONE", score)
+            db.commit()
+            flash(f"You got {result} and earned {money(score)}.", "ok")
+        else:
+            db.rollback()
+        return redirect(url_for("brain_round", rid=rid))
+
+    answers = {}
+    for part in (rnd["answers"] or "").split(","):
+        if ":" in part:
+            k, v = part.split(":", 1)
+            answers[_int(k)] = _int(v)
+    return page(BRAIN_ROUND_BODY, rnd=rnd, questions=questions,
+                answers=answers)
+
+
+# ------------------------------------------------- Mystery Envelope --------
+
+@app.route("/games/envelope")
+@login_required
+def envelope_page():
+    db = get_db()
+    user = current_user()
+    info = game_gate(db, user, "ENVELOPE")
+    gm = info["g"]
+    claimed = db.execute(
+        "SELECT * FROM game_plays WHERE user_id=? AND game='ENVELOPE' "
+        "AND event_no=? ORDER BY id DESC LIMIT 1",
+        (user["id"], gm["event_no"])).fetchone()
+    return page(ENVELOPE_BODY, info=info, gm=gm, claimed=claimed,
+                window=_window_text(gm), user=user,
+                status_text=STATUS_TEXT[info["status"]])
+
+
+@app.route("/games/envelope/open", methods=["POST"])
+@login_required
+def envelope_open():
+    db = get_db()
+    user = current_user()
+    begin_write(db)
+    info = game_gate(db, user, "ENVELOPE")
+    if info["error"]:
+        db.rollback()
+        return jsonify(ok=False, error=info["error"]), 400
+
+    gm = info["g"]
+    reward = gm["min_reward"]
+    voucher, level = "", gm["bonus_level"]
+
+    # Bonus voucher: published chance, only while the voucher stock lasts.
+    if (gm["bonus_chance"] > 0 and gm["bonus_stock"] > 0
+            and secrets.randbelow(100) < gm["bonus_chance"]):
+        took = db.execute(
+            "UPDATE games SET bonus_stock=bonus_stock-1 "
+            "WHERE game='ENVELOPE' AND bonus_stock>0").rowcount
+        if took == 1:
+            voucher = issue_voucher(db, user["id"], level)
+
+    if reward > 0:
+        credit(db, user["id"], reward, "ENVELOPE",
+               "Mystery Envelope: guaranteed reward")
+    result = money(reward) + " points"
+    if voucher:
+        result += f" + Level {level} voucher"
+    log_play(db, user["id"], "ENVELOPE", gm["event_no"], result,
+             "VOUCHER" if voucher else ("POINTS" if reward else "NONE"),
+             reward, voucher)
+    db.commit()
+
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
+    text = f"Your envelope held {money(reward)} in points!"
+    if voucher:
+        text += (f" Bonus: a Level {level} voucher. Code: {voucher}. "
+                 "Redeem it on the Upgrade page.")
+    return jsonify(ok=True, text=text, balance=money(points),
+                   voucher=voucher)
+
+
+# ------------------------------------------------------ Admin controls -----
+
+@app.route("/admin/games")
+@admin_required
+def admin_games():
+    db = get_db()
+    rows = {r["game"]: r for r in db.execute("SELECT * FROM games")}
+    cards = [{"key": k, "title": v, "g": rows[k],
+              "status": STATUS_TEXT[game_status(rows[k])]}
+             for k, v in GAMES.items() if k in rows]
+    prizes = db.execute("SELECT * FROM spin_prizes ORDER BY id").fetchall()
+    questions = db.execute(
+        "SELECT * FROM brain_questions ORDER BY id").fetchall()
+    records = db.execute(
+        "SELECT p.*, u.username FROM game_plays p "
+        "JOIN users u ON u.id = p.user_id ORDER BY p.id DESC LIMIT 100"
+    ).fetchall()
+    return page(ADMIN_GAMES_BODY, cards=cards, prizes=prizes,
+                questions=questions, records=records,
+                PRIZE_KINDS=PRIZE_KINDS)
+
+
+@app.route("/admin/games/<game>/settings", methods=["POST"])
+@admin_required
+def admin_game_settings(game):
+    if game not in GAMES:
+        abort(404)
+    f = request.form
+
+    def when(name):
+        v = f.get(name, "").strip().replace("T", " ")[:16]
+        return v if re.fullmatch(r"\d{4}-\d{2}-\d{2} \d{2}:\d{2}", v) else ""
+
+    starts, ends = when("starts_at"), when("ends_at")
+    if starts and ends and ends <= starts:
+        flash("The closing time must be after the start time.", "error")
+        return redirect(url_for("admin_games"))
+
+    max_plays = _int(f.get("max_plays"), 1, 1, 1000)
+    period = f.get("period") if f.get("period") in ("EVENT", "DAY") else "EVENT"
+    if game == "ENVELOPE":              # one envelope per member per event
+        max_plays, period = 1, "EVENT"
+
+    db = get_db()
+    db.execute(
+        "UPDATE games SET active=?, starts_at=?, ends_at=?, max_plays=?, "
+        "period=?, min_level=? WHERE game=?",
+        (1 if f.get("active") else 0, starts, ends, max_plays, period,
+         _int(f.get("min_level"), 0, 0, max(LEVELS)), game))
+
+    if game == "ENVELOPE":
+        reward = parse_amount(f.get("min_reward"), 0, ADMIN_ADD_MAX_CENTS)
+        if reward is None:
+            db.rollback()
+            flash("Enter the guaranteed reward in Rand (0 or more).", "error")
+            return redirect(url_for("admin_games"))
+        db.execute(
+            "UPDATE games SET min_reward=?, bonus_level=?, bonus_stock=?, "
+            "bonus_chance=? WHERE game='ENVELOPE'",
+            (reward, _int(f.get("bonus_level"), 1, 1, max(LEVELS)),
+             _int(f.get("bonus_stock"), 0, 0, 100000),
+             _int(f.get("bonus_chance"), 0, 0, 100)))
+    if game == "BRAIN":
+        db.execute("UPDATE games SET questions_per_round=? WHERE game='BRAIN'",
+                   (_int(f.get("questions_per_round"), 5, 1, 50),))
+    db.commit()
+    flash(f"{GAMES[game]} settings saved.", "ok")
+    return redirect(url_for("admin_games"))
+
+
+@app.route("/admin/games/<game>/new-event", methods=["POST"])
+@admin_required
+def admin_game_new_event(game):
+    if game not in GAMES:
+        abort(404)
+    db = get_db()
+    db.execute("UPDATE games SET event_no=event_no+1 WHERE game=?", (game,))
+    db.commit()
+    flash(f"New {GAMES[game]} event started. Everyone's play limit is reset. "
+          "The old winner records are kept.", "ok")
+    return redirect(url_for("admin_games"))
+
+
+@app.route("/admin/games/prize", methods=["POST"])
+@admin_required
+def admin_prize_save():
+    f = request.form
+    label = f.get("label", "").strip()[:60]
+    kind = f.get("kind", "NONE")
+    if not label or kind not in PRIZE_KINDS:
+        flash("A prize needs a name and a type.", "error")
+        return redirect(url_for("admin_games"))
+
+    raw = f.get("value", "").strip()
+    if kind == "POINTS":
+        value = parse_amount(raw, 1, ADMIN_ADD_MAX_CENTS)
+        if value is None:
+            flash("Points prizes need an amount in Rand, for example 20.00.",
+                  "error")
+            return redirect(url_for("admin_games"))
+    elif kind == "VOUCHER":
+        value = _int(raw, 0, 0, 99)
+        if value not in LEVELS:
+            flash("Voucher prizes need a level from 1 to 7 in the value box.",
+                  "error")
+            return redirect(url_for("admin_games"))
+    else:
+        value = 0
+
+    weight = _int(f.get("weight"), 0, 0, 1000000)
+    stock_raw = f.get("stock", "").strip()
+    stock = None if stock_raw == "" else _int(stock_raw, 0, 0, 10 ** 7)
+    enabled = 1 if f.get("enabled") else 0
+    pid = _int(f.get("id"), 0)
+
+    db = get_db()
+    if pid:
+        db.execute(
+            "UPDATE spin_prizes SET label=?, kind=?, value=?, weight=?, "
+            "stock=?, enabled=? WHERE id=?",
+            (label, kind, value, weight, stock, enabled, pid))
+        flash("Prize saved.", "ok")
+    else:
+        db.execute(
+            "INSERT INTO spin_prizes (label, kind, value, weight, stock, "
+            "enabled) VALUES (?,?,?,?,?,?)",
+            (label, kind, value, weight, stock, enabled))
+        flash("Prize added.", "ok")
+    db.commit()
+    return redirect(url_for("admin_games"))
+
+
+@app.route("/admin/games/prize/<int:prize_id>/delete", methods=["POST"])
+@admin_required
+def admin_prize_delete(prize_id):
+    db = get_db()
+    db.execute("DELETE FROM spin_prizes WHERE id=?", (prize_id,))
+    db.commit()
+    flash("Prize deleted.", "ok")
+    return redirect(url_for("admin_games"))
+
+
+@app.route("/admin/games/question", methods=["POST"])
+@admin_required
+def admin_question_add():
+    f = request.form
+    texts = [f.get(k, "").strip()[:200] for k in ("question", "a", "b", "c", "d")]
+    correct = _int(f.get("correct"), 0, 0, 4)
+    points = parse_amount(f.get("points"), 0, ADMIN_ADD_MAX_CENTS)
+    if not all(texts) or correct not in (1, 2, 3, 4) or points is None:
+        flash("Fill in the question, 4 answers, the correct answer and the "
+              "points in Rand.", "error")
+        return redirect(url_for("admin_games"))
+    db = get_db()
+    db.execute(
+        "INSERT INTO brain_questions (question, a, b, c, d, correct, points) "
+        "VALUES (?,?,?,?,?,?,?)", (*texts, correct, points))
+    db.commit()
+    flash("Question added.", "ok")
+    return redirect(url_for("admin_games"))
+
+
+@app.route("/admin/games/question/<int:qid>/<action>", methods=["POST"])
+@admin_required
+def admin_question_action(qid, action):
+    if action not in ("toggle", "delete"):
+        abort(404)
+    db = get_db()
+    if action == "delete":
+        db.execute("DELETE FROM brain_questions WHERE id=?", (qid,))
+    else:
+        db.execute("UPDATE brain_questions SET enabled=1-enabled WHERE id=?",
+                   (qid,))
+    db.commit()
+    flash("Question updated.", "ok")
+    return redirect(url_for("admin_games"))
+
+
+# ---------------------------------------------------- Games templates ------
+
+GAMES_BODY = """
+<div class="card note">
+<h1>Vedo games</h1>
+<p class="muted">Play to win points and vouchers. Rewards go straight to your Vedo points wallet and show in your reward history. The rules, odds and limits are set by the admin and are shown on every game page.</p>
+</div>
+<div class="gcards">
+{% for c in cards %}
+<div class="gcard">
+<div class="gemoji">{{ c.emoji }}</div>
+<h2>{{ c.title }}</h2>
+<p class="muted">{{ c.blurb }}</p>
+<p><span class="badge {{ 'ok' if c.status == 'OPEN' else 'wait' }}">{{ c.status_text }}</span>
+{% if c.status == 'OPEN' %}<span class="muted small"> &middot; {{ c.left }} play(s) left</span>{% endif %}</p>
+{% if c.error %}<p class="muted small">{{ c.error }}</p>{% endif %}
+<a class="btnlink" href="{{ c.url }}">Open</a>
+</div>
+{% endfor %}
+</div>
+<div class="card">
+<h2>My reward history</h2>
+{% if history %}
+<table>
+<tr><th>Date</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
+{% for h in history %}
+<tr><td>{{ h['created_at'][:16] }}</td><td>{{ GAMES[h['game']] }}</td><td>{{ h['result'] }}</td>
+<td class="{{ 'pos' if h['amount'] > 0 }}">{{ money(h['amount']) if h['amount'] > 0 else '-' }}</td>
+<td>{% if h['voucher'] %}<code>{{ h['voucher'] }}</code>{% else %}-{% endif %}</td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No game rewards yet. Pick a game above.</p>{% endif %}
+</div>
+"""
+
+SPIN_BODY = """
+<div class="card note">
+<h1>&#127920; Vedo Spin &amp; Win</h1>
+<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
+<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
+<span class="muted small"> {{ window }} &middot; {{ limit_text }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
+<div class="reel" id="reel">{{ 'Ready to spin?' }}</div>
+<div id="spinout"></div>
+<p class="muted">Plays left: <b id="left">{{ info.left }}</b> &middot; Balance: <b id="bal">{{ money(user['points']) }}</b></p>
+<button type="button" class="primary" id="spinbtn" {% if info.error %}disabled{% endif %}>Spin</button>
+{% if info.error %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
+</div>
+
+<div class="card">
+<h2>Prizes and odds</h2>
+<p class="muted small">The result is chosen by the server, not by your phone. A prize that runs out of stock leaves the draw and the odds are recalculated.</p>
+<table>
+<tr><th>Prize</th><th>What you get</th><th>Chance</th><th>Left</th></tr>
+{% for o in odds %}
+<tr><td>{{ o.label }}</td><td>{{ o.what or '-' }}</td>
+<td>{% if o.sold_out %}<span class="badge err">Unavailable</span>{% else %}{{ o.chance }}%{% endif %}</td>
+<td>{{ 'unlimited' if o.left is none else o.left }}</td></tr>
+{% endfor %}
+</table>
+</div>
+
+<div class="card">
+<h2>My spins</h2>
+{% if mine %}
+<table>
+<tr><th>Date</th><th>Result</th><th>Voucher</th></tr>
+{% for m in mine %}<tr><td>{{ m['created_at'][:16] }}</td><td>{{ m['result'] }}</td><td>{% if m['voucher'] %}<code>{{ m['voucher'] }}</code>{% else %}-{% endif %}</td></tr>{% endfor %}
+</table>
+{% else %}<p class="muted">No spins yet.</p>{% endif %}
+</div>
+
+<script>
+(function () {
+  var btn = document.getElementById('spinbtn');
+  var reel = document.getElementById('reel');
+  var out = document.getElementById('spinout');
+  var labels = {{ labels|tojson }};
+  var CSRF = {{ csrf_token()|tojson }};
+  if (!btn) { return; }
+
+  function say(text, kind) {
+    out.innerHTML = '';
+    var d = document.createElement('div');
+    d.className = 'flash ' + kind;
+    d.textContent = text;
+    out.appendChild(d);
+  }
+
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    out.innerHTML = '';
+    var i = 0;
+    var timer = setInterval(function () { reel.textContent = labels[i++ % labels.length]; }, 90);
+    var started = Date.now();
+    var fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fetch('{{ url_for("spin_play") }}', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: 'Network problem. Please try again.' }; })
+      .then(function (res) {
+        var wait = Math.max(0, 2200 - (Date.now() - started));
+        setTimeout(function () {
+          clearInterval(timer);
+          if (!res.ok) {
+            reel.textContent = 'Ready to spin?';
+            say(res.error, 'error');
+            btn.disabled = false;
+            return;
+          }
+          reel.textContent = res.label;
+          say(res.text, 'ok');
+          document.getElementById('bal').textContent = res.balance;
+          document.getElementById('left').textContent = res.left;
+          if (res.left > 0) { btn.disabled = false; }
+          else { setTimeout(function () { window.location.reload(); }, 3500); }
+        }, wait);
+      });
+  });
+})();
+</script>
+"""
+
+BRAIN_BODY = """
+<div class="card note">
+<h1>&#129504; Vedo Brain Battle</h1>
+<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
+<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
+<span class="muted small"> {{ window }} &middot; {{ limit_text }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
+<p>Each round has up to <b>{{ gm['questions_per_round'] }}</b> random questions. Every correct answer pays its points straight into your wallet (up to {{ money(pool['mx']) }} per question). Wrong answers earn nothing and nothing is taken away.</p>
+<p class="muted">Plays left: <b>{{ info.left }}</b> &middot; Questions in the pool: {{ pool['n'] }}</p>
+{% if open_round %}
+<a class="btnlink" href="{{ url_for('brain_round', rid=open_round['id']) }}">Continue your round</a>
+{% else %}
+<form method="post" action="{{ url_for('brain_start') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="primary" {% if info.error %}disabled{% endif %}>Start a round</button>
+</form>
+{% if info.error %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
+{% endif %}
+</div>
+<div class="card">
+<h2>My rounds</h2>
+{% if rounds %}
+<table>
+<tr><th>Date</th><th>Correct</th><th>Earned</th><th>Status</th><th></th></tr>
+{% for r in rounds %}
+<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['correct_n'] if r['status'] == 'DONE' else '-' }}</td>
+<td>{{ money(r['score']) }}</td>
+<td><span class="badge {{ 'ok' if r['status']=='DONE' else 'wait' }}">{{ r['status'] }}</span></td>
+<td><a href="{{ url_for('brain_round', rid=r['id']) }}">{{ 'Review' if r['status']=='DONE' else 'Continue' }}</a></td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No rounds yet.</p>{% endif %}
+</div>
+"""
+
+BRAIN_ROUND_BODY = """
+<div class="card note">
+<h1>Brain Battle round #{{ rnd['id'] }}</h1>
+<p class="muted"><a href="{{ url_for('brain_page') }}">&larr; Back to Brain Battle</a></p>
+{% if rnd['status'] == 'DONE' %}
+<p><strong class="pos">Round finished.</strong> {{ rnd['correct_n'] }} of {{ questions|length }} correct, you earned <b>{{ money(rnd['score']) }}</b>.</p>
+{% else %}
+<p class="muted">Pick one answer for each question, then submit. You can only submit once.</p>
+{% endif %}
+</div>
+<form method="post" action="{{ url_for('brain_round', rid=rnd['id']) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% for q in questions %}
+{% set mine = answers.get(q['id'], 0) %}
+<div class="card">
+<h2>{{ loop.index }}. {{ q['question'] }} <span class="muted small">({{ money(q['points']) }})</span></h2>
+{% for n, text in [(1, q['a']), (2, q['b']), (3, q['c']), (4, q['d'])] %}
+<label class="opt{% if rnd['status'] == 'DONE' %}{{ ' right' if n == q['correct'] }}{{ ' wrong' if n == mine and n != q['correct'] }}{% endif %}">
+<input type="radio" name="q{{ q['id'] }}" value="{{ n }}" {% if rnd['status'] == 'DONE' %}disabled{% if n == mine %} checked{% endif %}{% endif %}>
+<span>{{ text }}</span>
+</label>
+{% endfor %}
+</div>
+{% endfor %}
+{% if rnd['status'] == 'OPEN' %}<button class="primary">Submit answers</button>{% endif %}
+</form>
+"""
+
+ENVELOPE_BODY = """
+<div class="card note">
+<h1>&#9993; Vedo Mystery Envelope</h1>
+<p class="muted"><a href="{{ url_for('games_hub') }}">&larr; All games</a></p>
+<p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span>
+<span class="muted small"> {{ window }}{% if gm['min_level'] %} &middot; Level {{ gm['min_level'] }}+{% endif %}</span></p>
+<div class="envelope" id="env">&#9993;</div>
+<div id="envout">
+{% if claimed %}
+<div class="flash ok">You already opened this envelope: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}. Voucher code: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>
+{% endif %}
+</div>
+<p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
+<button type="button" class="primary" id="envbtn" {% if info.error %}disabled{% endif %}>Open my envelope</button>
+{% if info.error and not claimed %}<p class="muted small" style="margin-top:10px">{{ info.error }}</p>{% endif %}
+</div>
+<div class="card">
+<h2>Rules</h2>
+<ul>
+<li>Every eligible member gets the guaranteed reward of <b>{{ money(gm['min_reward']) }}</b> in points.</li>
+<li>Bonus voucher: a <b>{{ gm['bonus_chance'] }}%</b> chance of a Level {{ gm['bonus_level'] }} voucher, while stock lasts. Vouchers left: <b>{{ gm['bonus_stock'] }}</b>.</li>
+<li>Each envelope can be claimed once per member per event.</li>
+<li>All rewards are recorded in your points wallet and reward history.</li>
+</ul>
+</div>
+<script>
+(function () {
+  var btn = document.getElementById('envbtn');
+  var env = document.getElementById('env');
+  var out = document.getElementById('envout');
+  var CSRF = {{ csrf_token()|tojson }};
+  if (!btn) { return; }
+  btn.addEventListener('click', function () {
+    btn.disabled = true;
+    env.classList.add('shake');
+    var fd = new FormData();
+    fd.append('csrf_token', CSRF);
+    fetch('{{ url_for("envelope_open") }}', { method: 'POST', body: fd, credentials: 'same-origin' })
+      .then(function (r) { return r.json(); })
+      .catch(function () { return { ok: false, error: 'Network problem. Please try again.' }; })
+      .then(function (res) {
+        setTimeout(function () {
+          env.classList.remove('shake');
+          out.innerHTML = '';
+          var d = document.createElement('div');
+          d.className = 'flash ' + (res.ok ? 'ok' : 'error');
+          d.textContent = res.ok ? res.text : res.error;
+          out.appendChild(d);
+          if (res.ok) {
+            env.innerHTML = '&#127881;';
+            document.getElementById('bal').textContent = res.balance;
+          } else { btn.disabled = false; }
+        }, 1200);
+      });
+  });
+})();
+</script>
+"""
+
+ADMIN_GAMES_BODY = """
+<div class="card note">
+<h1>Games admin</h1>
+<p class="muted"><a href="{{ url_for('admin') }}">&larr; Back to admin</a></p>
+<p class="muted">Control the three Phase 1 games. All times are <b>UTC</b> (South Africa is UTC+2, so 10:00 in SA is 08:00 here). Results are always chosen by the server, rules are shown to members, and every play is recorded below. There is no setting to change the result of one member in secret.</p>
+</div>
+
+{% for c in cards %}
+{% set gm = c.g %}
+<div class="card">
+<h2>{{ c.title }} <span class="badge {{ 'ok' if c.status == 'Open' else 'wait' }}">{{ c.status }}</span> <span class="muted small">event #{{ gm['event_no'] }}</span></h2>
+<form method="post" action="{{ url_for('admin_game_settings', game=c.key) }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label class="chk"><input type="checkbox" name="active" value="1" {{ 'checked' if gm['active'] }}> Event active (untick to pause)</label>
+<div class="two">
+<div><label>Starts (UTC)</label><input type="datetime-local" name="starts_at" value="{{ gm['starts_at']|replace(' ', 'T') }}"></div>
+<div><label>Closes (UTC)</label><input type="datetime-local" name="ends_at" value="{{ gm['ends_at']|replace(' ', 'T') }}"></div>
+</div>
+{% if c.key != 'ENVELOPE' %}
+<div class="two">
+<div><label>Plays per member</label><input type="number" name="max_plays" min="1" max="1000" value="{{ gm['max_plays'] }}"></div>
+<div><label>Limit applies</label><select name="period">
+<option value="DAY" {{ 'selected' if gm['period'] == 'DAY' }}>Per day</option>
+<option value="EVENT" {{ 'selected' if gm['period'] == 'EVENT' }}>Per event (total)</option>
+</select></div>
+</div>
+{% endif %}
+<label>Minimum member level (0 = everyone)</label>
+<input type="number" name="min_level" min="0" max="7" value="{{ gm['min_level'] }}">
+{% if c.key == 'ENVELOPE' %}
+<p class="muted small" style="margin-top:10px">Each envelope can be claimed once per member per event.</p>
+<div class="two">
+<div><label>Guaranteed reward (R)</label><input type="number" name="min_reward" step="0.01" min="0" value="{{ '%.2f'|format(gm['min_reward'] / 100) }}"></div>
+<div><label>Bonus chance (%)</label><input type="number" name="bonus_chance" min="0" max="100" value="{{ gm['bonus_chance'] }}"></div>
+<div><label>Bonus voucher level</label><input type="number" name="bonus_level" min="1" max="7" value="{{ gm['bonus_level'] }}"></div>
+<div><label>Bonus vouchers left (stock)</label><input type="number" name="bonus_stock" min="0" value="{{ gm['bonus_stock'] }}"></div>
+</div>
+{% endif %}
+{% if c.key == 'BRAIN' %}
+<label>Questions per round</label>
+<input type="number" name="questions_per_round" min="1" max="50" value="{{ gm['questions_per_round'] }}">
+{% endif %}
+<button class="primary">Save {{ c.title }}</button>
+</form>
+<form method="post" action="{{ url_for('admin_game_new_event', game=c.key) }}" onsubmit="return confirm('Start a new event? Everyone gets their plays back. Old records are kept.');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<button class="ghost" style="margin-top:10px">Start a new event (reset play limits)</button>
+</form>
+</div>
+{% endfor %}
+
+<div class="card">
+<h2>Spin &amp; Win prizes</h2>
+<p class="muted small">Odds = weight compared with the other available prizes. Stock = the most members who can win it (empty = unlimited). For points prizes the value is Rand, for voucher prizes it is the level 1-7. Prizes with weight 0, stock used up or switched off are left out of the draw.</p>
+{% for p in prizes %}
+<form method="post" action="{{ url_for('admin_prize_save') }}" class="prow">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="id" value="{{ p['id'] }}">
+<input class="pwbox" style="width:170px" name="label" value="{{ p['label'] }}" maxlength="60" placeholder="Prize name">
+<select class="pwbox" style="width:130px" name="kind">
+{% for k, v in PRIZE_KINDS.items() %}<option value="{{ k }}" {{ 'selected' if p['kind'] == k }}>{{ v }}</option>{% endfor %}
+</select>
+<input class="pwbox" style="width:90px" name="value" value="{{ '%.2f'|format(p['value'] / 100) if p['kind'] == 'POINTS' else p['value'] }}" placeholder="R / level">
+<input class="pwbox" style="width:80px" name="weight" type="number" min="0" value="{{ p['weight'] }}" title="Odds weight">
+<input class="pwbox" style="width:90px" name="stock" type="number" min="0" value="{{ p['stock'] if p['stock'] is not none else '' }}" placeholder="unlimited" title="Stock (max winners)">
+<label class="chk" style="margin:0"><input type="checkbox" name="enabled" value="1" {{ 'checked' if p['enabled'] }}> on</label>
+<span class="muted small">won {{ p['won'] }}</span>
+<button class="success">Save</button>
+<button class="danger" formaction="{{ url_for('admin_prize_delete', prize_id=p['id']) }}" onclick="return confirm('Delete this prize?');">Delete</button>
+</form>
+{% endfor %}
+<h2 style="margin-top:18px">Add a prize</h2>
+<form method="post" action="{{ url_for('admin_prize_save') }}" class="prow">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input class="pwbox" style="width:170px" name="label" maxlength="60" placeholder="Prize name" required>
+<select class="pwbox" style="width:130px" name="kind">
+{% for k, v in PRIZE_KINDS.items() %}<option value="{{ k }}">{{ v }}</option>{% endfor %}
+</select>
+<input class="pwbox" style="width:90px" name="value" placeholder="R / level">
+<input class="pwbox" style="width:80px" name="weight" type="number" min="0" value="1" title="Odds weight">
+<input class="pwbox" style="width:90px" name="stock" type="number" min="0" placeholder="unlimited" title="Stock (max winners)">
+<label class="chk" style="margin:0"><input type="checkbox" name="enabled" value="1" checked> on</label>
+<button class="success">Add</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Brain Battle questions</h2>
+{% if questions %}
+<table>
+<tr><th>#</th><th>Question</th><th>Answers</th><th>Points</th><th>Status</th><th></th></tr>
+{% for q in questions %}
+<tr><td>{{ q['id'] }}</td><td>{{ q['question'] }}</td>
+<td class="muted small">
+{% for n, text in [(1, q['a']), (2, q['b']), (3, q['c']), (4, q['d'])] %}{% if n == q['correct'] %}<b class="pos">{{ n }}. {{ text }}</b>{% else %}{{ n }}. {{ text }}{% endif %}<br>{% endfor %}
+</td>
+<td>{{ money(q['points']) }}</td>
+<td><span class="badge {{ 'ok' if q['enabled'] else 'wait' }}">{{ 'on' if q['enabled'] else 'off' }}</span></td>
+<td>
+<form class="inline" method="post" action="{{ url_for('admin_question_action', qid=q['id'], action='toggle') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="ghost">{{ 'Switch off' if q['enabled'] else 'Switch on' }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_question_action', qid=q['id'], action='delete') }}" onsubmit="return confirm('Delete this question?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Delete</button></form>
+</td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No questions yet.</p>{% endif %}
+<h2 style="margin-top:18px">Add a question</h2>
+<form method="post" action="{{ url_for('admin_question_add') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Question</label><input name="question" maxlength="200" required>
+<div class="two">
+<div><label>Answer 1</label><input name="a" maxlength="200" required></div>
+<div><label>Answer 2</label><input name="b" maxlength="200" required></div>
+<div><label>Answer 3</label><input name="c" maxlength="200" required></div>
+<div><label>Answer 4</label><input name="d" maxlength="200" required></div>
+</div>
+<div class="two">
+<div><label>Correct answer</label><select name="correct"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
+<div><label>Points for a correct answer (R)</label><input name="points" type="number" step="0.01" min="0" value="2.00" required></div>
+</div>
+<button class="primary">Add question</button>
+</form>
+</div>
+
+<div class="card">
+<h2>Winner records (latest 100)</h2>
+{% if records %}
+<table>
+<tr><th>Date</th><th>Member</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
+{% for r in records %}
+<tr class="{{ 'hl' if r['kind'] == 'ITEM' }}"><td>{{ r['created_at'][:16] }}</td><td>{{ r['username'] }}</td><td>{{ GAMES[r['game']] }}</td><td>{{ r['result'] }}{% if r['kind'] == 'ITEM' %} <span class="badge wait">item to hand over</span>{% endif %}</td>
+<td>{{ money(r['amount']) if r['amount'] > 0 else '-' }}</td>
+<td>{% if r['voucher'] %}<code>{{ r['voucher'] }}</code>{% else %}-{% endif %}</td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No game plays yet.</p>{% endif %}
+</div>
+"""
 
 
 # ============================================================================
@@ -2560,7 +3633,7 @@ tr.hl td{background:rgba(31,214,164,.08);}
 @keyframes revealin{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 20px;}
 .chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:600;}
-.actions{display:grid;grid-template-columns:repeat(6,1fr);gap:8px;background:rgba(3,12,18,.45);border-radius:18px;padding:12px 6px;}
+.actions{display:grid;grid-template-columns:repeat(4,1fr);gap:14px 8px;background:rgba(3,12,18,.45);border-radius:18px;padding:12px 6px;}
 .act{display:flex;flex-direction:column;align-items:center;gap:7px;color:#d9f5ec;text-decoration:none;font-size:.76rem;font-weight:600;}
 .act span{width:44px;height:44px;border-radius:50%;display:grid;place-items:center;background:rgba(31,214,164,.16);color:var(--brand);border:1px solid rgba(31,214,164,.35);}
 .act:hover span{background:var(--brand);color:#031016;}
@@ -2800,6 +3873,7 @@ input[type=file]{padding:10px;}
   .fp,.actions.reveal{animation:none;}
   .cg i.cf{display:none;}
   .ticker{overflow-x:auto;}
+  .envelope.shake{animation:none;}
 }
 
 /* ---------- full-bleed community posts ---------- */
@@ -2834,6 +3908,25 @@ input[type=file]{padding:10px;}
   .posts-section .hs-nav{width:36px;height:36px;}
 }
 
+/* ---------- Phase 1 games ---------- */
+.gcards{display:grid;grid-template-columns:repeat(auto-fit,minmax(250px,1fr));gap:12px;margin-bottom:16px;}
+.gcard{background:linear-gradient(180deg,var(--s1),#0a141d);border:1px solid var(--line);border-radius:var(--r);padding:22px;display:flex;flex-direction:column;gap:2px;}
+.gcard h2{margin:0 0 8px;}
+.gemoji{font-size:2.4rem;line-height:1;margin-bottom:10px;}
+.btnlink{display:inline-block;align-self:flex-start;margin-top:8px;background:linear-gradient(135deg,var(--brand),#18b98f);color:#031016;border-radius:12px;padding:10px 20px;font-weight:700;text-decoration:none;}
+.btnlink:hover{filter:brightness(1.07);}
+.reel{font-size:1.5rem;font-weight:800;text-align:center;padding:26px 12px;margin:16px 0;background:var(--s2);border:1px solid var(--line);border-radius:18px;color:var(--brand);min-height:92px;display:flex;align-items:center;justify-content:center;}
+.envelope{font-size:5rem;text-align:center;margin:14px 0;line-height:1.1;}
+.envelope.shake{animation:envshake .6s ease-in-out infinite;}
+@keyframes envshake{0%,100%{transform:rotate(0);}25%{transform:rotate(-8deg);}75%{transform:rotate(8deg);}}
+.opt{display:flex;align-items:center;gap:10px;margin:0 0 8px;padding:11px 14px;border:1px solid var(--line);border-radius:12px;background:var(--s2);color:var(--ink);font-size:.95rem;font-weight:500;cursor:pointer;}
+.opt input{width:auto;margin:0;}
+.opt.right{border-color:rgba(39,214,155,.6);background:rgba(39,214,155,.14);}
+.opt.wrong{border-color:rgba(255,92,108,.6);background:rgba(255,92,108,.12);}
+label.chk{display:flex;align-items:center;gap:8px;color:var(--ink);}
+label.chk input{width:auto;margin:0;}
+.two{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 14px;}
+.prow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
 </style>
 </head>
 <body>
@@ -2851,10 +3944,10 @@ input[type=file]{padding:10px;}
 {% if me %}
 <div class="tabs">
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
+<a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
-<a class="{{ 'active' if ep in ['events_home','event_detail'] }}" href="{{ url_for('events_home') }}">Events</a>
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_events'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a><a href="{{ url_for('admin_events') }}">Event Control</a>{% endif %}
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -2878,6 +3971,13 @@ input[type=file]{padding:10px;}
 <a class="{{ 'active' if ep=='team' }}" href="{{ url_for('team') }}">My Team</a>
 <a class="{{ 'active' if ep=='pots' }}" href="{{ url_for('pots') }}">Savings pots</a>
 </div></div>
+{% elif me and ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] %}
+<div class="subnav"><div class="seg">
+<a class="{{ 'active' if ep=='games_hub' }}" href="{{ url_for('games_hub') }}">All games</a>
+<a class="{{ 'active' if ep=='spin_page' }}" href="{{ url_for('spin_page') }}">Spin &amp; Win</a>
+<a class="{{ 'active' if ep in ['brain_page','brain_round'] }}" href="{{ url_for('brain_page') }}">Brain Battle</a>
+<a class="{{ 'active' if ep=='envelope_page' }}" href="{{ url_for('envelope_page') }}">Mystery Envelope</a>
+</div></div>
 {% endif %}
 
 <main>
@@ -2891,9 +3991,10 @@ input[type=file]{padding:10px;}
 <div class="tabbar">
 <a class="{{ 'active' if ep=='dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('home') }}Home</a>
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
+<a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
 <a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
 {% endif %}
 </body>
@@ -3012,7 +4113,7 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>BA_A Number (11 digits)</label>
+<label>BA Number (11 digits)</label>
 <input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
@@ -3035,7 +4136,6 @@ REGISTER_BODY = """
 DASH_BODY = """
 {% set total = user['points'] + locked %}
 {% set pct = (user['points'] / total * 100) if total else 0 %}
-{% set sf = STREAK_DAYS if (user['streak'] > 0 and user['streak'] % STREAK_DAYS == 0) else user['streak'] % STREAK_DAYS %}
 {% set next_cost = UPGRADE_COST_CENTS[user['level'] + 1] if user['level'] < 7 else 0 %}
 {% set lvl_pct = ([(user['points'] / next_cost * 100)|int, 100]|min) if next_cost else 100 %}
 
@@ -3054,13 +4154,13 @@ DASH_BODY = """
 </div>
 <div class="chips">
 <span class="chip">Level {{ user['level'] }}</span>
-<span class="chip">{{ user['streak'] }} day streak</span>
 <span class="chip">{{ money(locked) }} in pots</span>
 </div>
 <div class="actions closed" id="heroactions">
 <a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
 <a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
+<a class="act" href="{{ url_for('games_hub') }}"><span>{{ icon('games') }}</span>Games</a>
 <a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Pots</a>
 <a class="act" href="{{ url_for('team') }}"><span>{{ icon('team') }}</span>My Team</a>
 <a class="act" href="{{ url_for('profile') }}"><span>{{ icon('profile') }}</span>Profile</a>
@@ -3256,14 +4356,17 @@ DASH_BODY = """
 
 <div class="card dashboard-checkin">
 <h2>Daily check-in</h2>
-{% if milestone %}<div class="flash ok">&#127881; <strong>Congratulations!</strong> You are on a {{ user['streak'] }}-day streak. Amazing consistency, well done!</div>{% endif %}
-<div class="dots" aria-label="Streak progress">
-{% for i in range(1, STREAK_DAYS + 1) %}<i class="{{ 'on' if i <= sf }}"></i>{% endfor %}
-</div>
 <p class="reward-line">Today's reward: <strong>{{ money(reward) }}</strong></p>
 <form method="get" action="{{ url_for('checkin') }}">
 <button class="primary">{{ 'Checked in today ✓' if done else ('Continue check-in (' ~ task_done ~ '/' ~ task_total ~ ')' if task_done else 'Check in now') }}</button>
 </form>
+</div>
+
+<div class="card">
+<h2>&#9993; Mystery Envelope</h2>
+<p class="muted">Open your envelope for guaranteed points or a bonus voucher. Also try Spin &amp; Win and Brain Battle.</p>
+<a class="btnlink" href="{{ url_for('envelope_page') }}">Open my envelope</a>
+<a class="btnlink" href="{{ url_for('games_hub') }}" style="margin-left:6px">All games</a>
 </div>
 
 <section class="card">
@@ -3298,15 +4401,15 @@ DASH_BODY = """
 <h2>Recent activity</h2>
 {% if recent_tx %}
 {% set txs = recent_tx|reverse|list %}
-{% set mx = txs|map(attribute='A_m')|map('abs')|max %}
+{% set mx = txs|map(attribute='amount')|map('abs')|max %}
 <div class="bars" aria-hidden="true">
-{% for t in txs %}<i class="{{ 'up' if t['A_m'] > 0 else 'dn' }}" style="height:{{ [((t['A_m']|abs) / mx * 100)|round|int, 8]|max }}%"></i>{% endfor %}
+{% for t in txs %}<i class="{{ 'up' if t['amount'] > 0 else 'dn' }}" style="height:{{ [((t['amount']|abs) / mx * 100)|round|int, 8]|max }}%"></i>{% endfor %}
 </div>
 {% for t in recent_tx %}
 <div class="tx">
 <div class="av">{{ t['kind'][:1] }}</div>
 <div class="who"><b>{{ t['kind']|replace('_',' ')|title }}</b><span>{{ t['created_at'][:16] }}{% if t['note'] %} - {{ t['note'] }}{% endif %}</span></div>
-<div class="amt {{ 'pos' if t['A_m'] > 0 else 'neg' }}">{{ '+' if t['A_m'] > 0 }}{{ money(t['A_m']) }}</div>
+<div class="amt {{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</div>
 </div>
 {% endfor %}
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
@@ -3365,7 +4468,6 @@ Tap to complete tasks.</p>
 <div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
 <div class="bar"><b id="progbar" style="width:{{ pct }}%"></b></div>
 <div id="msg" style="margin-top:14px"></div>
-<div class="cg" id="cg" role="dialog" aria-modal="true" aria-label="Congratulations"><div class="cg-box"><div class="big">&#127881;</div><h2>Congratulations!</h2><p id="cgtext"></p><button type="button" class="primary" id="cgok" style="margin-top:0">Awesome!</button></div></div>
 <div class="taskgrid">
 {% for t in tasks %}
 <button type="button" class="task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
@@ -3398,23 +4500,6 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
     return fetch(url, { method: 'POST', body: fd, credentials: 'same-origin' })
       .then(function (r) { return r.json(); })
       .catch(function () { return { ok: false, error: 'Something went wrong. Reload the page and try again.' }; });
-  }
-
-  function celebrate(streak) {
-    var cg = document.getElementById('cg');
-    var colors = ['#1fd6a4', '#2b7fff', '#f2b84b', '#8b7cf6', '#ff5c6c'];
-    document.getElementById('cgtext').textContent = 'You checked in ' + streak + ' days in a row. That is a special achievement!';
-    for (var k = 0; k < 60; k++) {
-      var c = document.createElement('i');
-      c.className = 'cf';
-      c.style.left = (Math.random() * 100) + '%';
-      c.style.background = colors[k % colors.length];
-      c.style.animationDuration = (2.5 + Math.random() * 2.5) + 's';
-      c.style.animationDelay = (Math.random() * 0.8) + 's';
-      cg.appendChild(c);
-    }
-    cg.classList.add('open');
-    document.getElementById('cgok').addEventListener('click', function () { window.location.reload(); });
   }
 
   function lockOthers(on, current) {
@@ -3467,8 +4552,7 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
             var text = '+' + r.reward_text + ' added to your balance.';
             if (r.done) { text += ' All tasks done for today!'; }
             say(text, 'ok');
-            if (r.done && r.milestone) { celebrate(r.streak); }
-            else if (r.done) { setTimeout(function () { window.location.reload(); }, 2500); }
+            if (r.done) { setTimeout(function () { window.location.reload(); }, 2500); }
           });
         }, WAIT_MS + 300);
       });
@@ -3524,7 +4608,7 @@ TOPUP_BODY = """
 <div class="sc-head">
 {% if details and details['flag'] %}<img class="sc-flag" src="{{ url_for('media', filename=details['flag']) }}" alt="Top-up flag">{% endif %}
 <div class="sc-title">
-<h2>{{ details['BA_n'] if details and details['BA_n'] else ' Top-up details' }}</h2>
+<h2>{{ details['Bank_name'] if details and details['Bank_name'] else ' Top-up details' }}</h2>
 <small>Top-up request #{{ active['id'] }}</small>
 </div>
 <div class="sc-timer"><small>Closes in</small><b id="sctimer">--:--</b></div>
@@ -3580,11 +4664,11 @@ TOPUP_BODY = """
 {% endfor %}
 </div>
 <section class="join-step" id="joinStep" hidden>
-<p class="join-level" id="joinTitle">Choose an A_m for this level</p>
-<p class="level-hint" id="joinInfo">Enter your top-up A_m then press Enter.</p>
-<form id="topupA_mForm" novalidate>
-<label for="topupA_m">A_m (R)</label>
-<input id="topupA_m" name="A_m" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter A_m (R10–R50,000)" required>
+<p class="join-level" id="joinTitle">Choose an amount for this level</p>
+<p class="level-hint" id="joinInfo">Enter your top-up amount then press Enter.</p>
+<form id="topupAmountForm" novalidate>
+<label for="topupAmount">Amount (R)</label>
+<input id="topupAmount" name="amount" type="number" inputmode="decimal" min="10" max="50000" step="0.01" placeholder="Enter amount (R10–R50,000)" required>
 <button type="submit" class="primary" id="enterTopup">Enter</button>
 </form>
 <p id="saveStatus" class="level-hint" role="status" aria-live="polite"></p>
@@ -3597,8 +4681,8 @@ TOPUP_BODY = """
   var title=document.getElementById('joinTitle');
   var info=document.getElementById('joinInfo');
   var status=document.getElementById('saveStatus');
-  var form=document.getElementById('topupA_mForm');
-  var A_mInput=document.getElementById('topupA_m');
+  var form=document.getElementById('topupAmountForm');
+  var amountInput=document.getElementById('topupAmount');
   var enterButton=document.getElementById('enterTopup');
   var selectedLevel=null;
   var csrf={{ csrf_token()|tojson }};
@@ -3611,10 +4695,10 @@ TOPUP_BODY = """
       btn.classList.add('selected');
       step.hidden=false;
       title.textContent='Level '+selectedLevel+' selected';
-      info.textContent='Enter your A_m, then press Enter. The Top up details will open for 10 minutes.';
+      info.textContent='Enter your amount, then press Enter. The Top up details will open for 10 minutes.';
       status.textContent='';
-      A_mInput.value='';
-      A_mInput.focus();
+      amountInput.value='';
+      amountInput.focus();
       step.scrollIntoView({behavior:'smooth',block:'nearest'});
     });
   });
@@ -3622,18 +4706,18 @@ TOPUP_BODY = """
   form.addEventListener('submit',function(ev){
     ev.preventDefault();
     if(!selectedLevel){status.textContent='Tap a level first.';return;}
-    var A_m=A_mInput.value.trim();
-    var numeric=Number(A_m);
-    if(!A_m || !Number.isFinite(numeric) || numeric<10 || numeric>50000){
-      status.textContent='Enter an A_m from R10 to R50,000.';
-      A_mInput.focus();
+    var amount=amountInput.value.trim();
+    var numeric=Number(amount);
+    if(!amount || !Number.isFinite(numeric) || numeric<10 || numeric>50000){
+      status.textContent='Enter an amount from R10 to R50,000.';
+      amountInput.focus();
       return;
     }
     enterButton.disabled=true;
     status.textContent='Sending your request…';
     var fd=new FormData();
     fd.append('level',selectedLevel);
-    fd.append('A_m',A_m);
+    fd.append('amount',amount);
     fd.append('csrf_token',csrf);
     fetch('{{ url_for("topup_select_level") }}',{method:'POST',body:fd,headers:{'X-Requested-With':'fetch'}})
       .then(function(r){return r.json().then(function(data){if(!r.ok)throw new Error(data.message||'Could not send request.');return data;});})
@@ -3661,8 +4745,8 @@ WITHDRAW_BODY = """
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>A_m (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
-<input name="A_m" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
+<label>Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
+<input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
 <button class="primary">Request withdrawal</button>
 </form>
 </div>
@@ -3671,9 +4755,9 @@ WITHDRAW_BODY = """
 <h2>Withdrawal history</h2>
 {% if withdrawals %}
 <table>
-<tr><th>Date</th><th>A_m</th><th>Status</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Status</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['A_m']) }}</td>
+<tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['amount']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td></tr>
 {% endfor %}
 </table>
@@ -3735,12 +4819,11 @@ TEAM_BODY = """
 </div>
 {% if members %}
 <table>
-<tr><th>Member</th><th>Level</th><th>Points</th><th>Streak</th><th>Joined</th></tr>
+<tr><th>Member</th><th>Level</th><th>Points</th><th>Joined</th></tr>
 {% for m in members %}
 <tr><td>{{ mask_phone(m['username']) }}</td>
 <td><span class="badge">L{{ m['level'] }}</span></td>
 <td>{{ money(m['points']) }}</td>
-<td>{{ m['streak'] }}</td>
 <td>{{ m['created_at'][:10] }}</td></tr>
 {% endfor %}
 </table>
@@ -3774,7 +4857,7 @@ Upgrade to Level {{ next_level }}</button>
 
 <div class="card">
 <h2>Redeem a level code</h2>
-<p class="muted">Enter a level code from the admin to move to that level.</p>
+<p class="muted">Enter a level code from the admin or one you won in a game to move to that level.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Level code</label>
@@ -3799,13 +4882,13 @@ POTS_BODY = """
 <div class="card note">
 <h1>Savings pots</h1>
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
-annual rate shown below</b>. This is not a multiplier: interest = A_m x annual rate x weeks / 52.
+annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
 Collect after the lock period ends. Closing a pot early returns your money but forfeits the interest.</p>
 <p>Available balance: <strong>{{ money(user['points']) }}</strong></p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>A_m to lock (R) - minimum {{ money(POT_MIN_CENTS) }}</label>
-<input name="A_m" type="number" step="0.01" min="10" placeholder="e.g. 1000.00" required>
+<label>Amount to lock (R) - minimum {{ money(POT_MIN_CENTS) }}</label>
+<input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 1000.00" required>
 <label>Lock period</label>
 <select name="weeks">
 {% for w in POT_WEEKS %}
@@ -3865,13 +4948,12 @@ PROFILE_BODY = """
 </div>
 <dl class="kv">
 <div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
-<div><dt>BA_A Number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>BA Number</dt><dd>{{ member['serial_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
 <div><dt>Referral code</dt><dd><code>{{ member['referral_code'] }}</code></dd></div>
 <div><dt>Referred by</dt><dd>{{ (mask_phone(referrer['username']) if is_self else referrer['username']) if referrer else '-' }}</dd></div>
-<div><dt>Day streak</dt><dd>{{ member['streak'] }}</dd></div>
 <div><dt>Joined</dt><dd>{{ member['created_at'][:16] }}</dd></div>
 </dl>
 {% if not is_self %}<p style="margin-top:16px"><a href="{{ url_for('admin') }}">&larr; Back to admin</a></p>{% endif %}
@@ -3879,10 +4961,16 @@ PROFILE_BODY = """
 """
 
 ADMIN_BODY = """
+<div class="card note">
+<h2>Phase 1 games</h2>
+<p class="muted">Spin &amp; Win, Brain Battle and Mystery Envelope: prizes, odds, stock, limits, schedule and winner records.</p>
+<a class="btnlink" href="{{ url_for('admin_games') }}">Open Games admin</a>
+</div>
+
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, BA_A Number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, BA Number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -3915,16 +5003,16 @@ ADMIN_BODY = """
 <label>Member ID (see the ID column in All members) or cellphone number</label>
 <input name="target" id="dtarget_in" autocomplete="off" placeholder="e.g. 12 or 082 123 4567">
 </div>
-<label>BA_n</label>
-<input name="BA_n" maxlength="100" value="{{ gd['BA_n'] if gd else '' }}">
+<label>Bank name</label>
+<input name="Bank_name" maxlength="100" value="{{ gd['Bank_name'] if gd else '' }}">
 <label>Reference</label>
 <input name="Reference" maxlength="100" value="{{ gd['Reference'] if gd else '' }}">
-<label>A_m</label>
-<input name="A_m" maxlength="100" value="{{ gd['A_m'] if gd else '' }}">
-<label>P_s</label>
-<input name="P_s" maxlength="100" value="{{ gd['P_s'] if gd else '' }}">
-<label>BA_A Number</label>
-<input name="BA_Account_number" maxlength="100" value="{{ gd['BA_Account_number'] if gd else '' }}">
+<label>Amount</label>
+<input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
+<label>PayShap</label>
+<input name="PayShap" maxlength="100" value="{{ gd['PayShap'] if gd else '' }}">
+<label>BA Number</label>
+<input name="BA_number" maxlength="100" value="{{ gd['BA_number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
 <label>Small Top-up flag (PNG, JPG, GIF or WEBP, max 30 MB)</label>
@@ -3950,16 +5038,16 @@ ADMIN_BODY = """
 {% if gd or specific_details %}
 <h2 style="margin-top:22px">Saved Top-up details</h2>
 <table>
-<tr><th>For</th><th>BA_n</th><th>Reference</th><th>A_m</th><th>P_s</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
+<tr><th>For</th><th>Bank name</th><th>Reference</th><th>Amount</th><th>PayShap</th><th>Account no.</th><th>Flag</th><th>Updated</th><th></th></tr>
 {% if gd %}
-<tr><td><b>Everyone</b></td><td>{{ gd['BA_n'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['A_m'] or '-' }}</td><td>{{ gd['P_s'] or '-' }}</td><td>{{ gd['BA_Account_number'] or '-' }}</td>
+<tr><td><b>Everyone</b></td><td>{{ gd['Bank_name'] or '-' }}</td><td>{{ gd['Reference'] or '-' }}</td><td>{{ gd['Amount'] or '-' }}</td><td>{{ gd['PayShap'] or '-' }}</td><td>{{ gd['BA_number'] or '-' }}</td>
 <td>{% if gd['flag'] %}<img src="{{ url_for('media', filename=gd['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ gd['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=0) }}" onsubmit="return confirm('Remove the global Top-up details?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Remove</button></form></td></tr>
 {% endif %}
 {% for s in specific_details %}
-<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['BA_n'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['A_m'] or '-' }}</td><td>{{ s['P_s'] or '-' }}</td><td>{{ s['BA_Account_number'] or '-' }}</td>
+<tr><td>{{ s['username'] }} (ID {{ s['user_id'] }})</td><td>{{ s['Bank_name'] or '-' }}</td><td>{{ s['Reference'] or '-' }}</td><td>{{ s['Amount'] or '-' }}</td><td>{{ s['PayShap'] or '-' }}</td><td>{{ s['BA_number'] or '-' }}</td>
 <td>{% if s['flag'] %}<img src="{{ url_for('media', filename=s['flag']) }}" alt="flag" style="height:22px;border-radius:3px">{% else %}-{% endif %}</td>
 <td>{{ s['updated_at'][:16] }}</td>
 <td><form class="inline" method="post" action="{{ url_for('admin_topup_details_delete', user_id=s['user_id']) }}" onsubmit="return confirm('Remove the details for this member?');">
@@ -4037,9 +5125,9 @@ onsubmit="return confirm('Remove this member instruction?');">
 <p class="muted small">Approving a top-up only marks it approved. It does not change the member's balance. To add money to a member's balance use <b>Add balance</b> in the All members table below.</p>
 {% if topups %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>A_m</th><th>Level</th><th>Reason</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Level</th><th>Reason</th><th>Status</th><th>Action</th></tr>
 {% for t in topups %}
-<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['A_m']) }}</td>
+<tr><td>{{ t['id'] }}</td><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ money(t['amount']) }}</td>
 <td>{% if t['level'] %}<span class="badge">L{{ t['level'] }}</span>{% else %}-{% endif %}</td>
 <td class="muted">{{ t['note'] }}</td>
 <td><span class="badge {{ 'ok' if t['status']=='APPROVED' else 'err' if t['status']=='REJECTED' else 'wait' }}">{{ t['status'] }}</span></td>
@@ -4061,9 +5149,9 @@ onsubmit="return confirm('Remove this member instruction?');">
 <h2>Withdrawal requests</h2>
 {% if withdrawals %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>A_m</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Status</th><th>Action</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['A_m']) }}</td>
+<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['amount']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td>
 <td>
 {% if w['status'] == 'PENDING' %}
@@ -4081,18 +5169,18 @@ onsubmit="return confirm('Remove this member instruction?');">
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Selected top-up level</th><th>Balance</th><th>Streak</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Selected top-up level</th><th>Balance</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
 {% for u in users %}
 <tr><td>{{ u['id'] }}</td><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
-<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}L{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['points']) }}</td><td>{{ u['streak'] }}</td>
+<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}L{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['points']) }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_add_balance', user_id=u['id']) }}"
-onsubmit="return confirm('Add this A_m to account {{ u['username'] }}?');">
+onsubmit="return confirm('Add this amount to account {{ u['username'] }}?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="q" value="{{ q }}">
-<input class="pwbox" style="width:105px" name="A_m" type="number" step="0.01" min="0.01" placeholder="A_m (R)" required>
+<input class="pwbox" style="width:105px" name="amount" type="number" step="0.01" min="0.01" placeholder="Amount (R)" required>
 <input class="pwbox" name="note" maxlength="100" placeholder="Note (optional)">
 <button class="success">Add</button>
 </form>
@@ -4127,10 +5215,10 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 <h2>Transaction ledger (latest 60)</h2>
 {% if ledger %}
 <table>
-<tr><th>Date</th><th>User</th><th>Type</th><th>A_m</th><th>Details</th></tr>
+<tr><th>Date</th><th>User</th><th>Type</th><th>Amount</th><th>Details</th></tr>
 {% for t in ledger %}
 <tr><td>{{ t['created_at'][:16] }}</td><td>{{ t['username'] }}</td><td>{{ t['kind'] }}</td>
-<td class="{{ 'pos' if t['A_m'] > 0 else 'neg' }}">{{ '+' if t['A_m'] > 0 }}{{ money(t['A_m']) }}</td>
+<td class="{{ 'pos' if t['amount'] > 0 else 'neg' }}">{{ '+' if t['amount'] > 0 }}{{ money(t['amount']) }}</td>
 <td class="muted">{{ t['note'] }}</td></tr>
 {% endfor %}
 </table>
@@ -4162,325 +5250,12 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 </div>
 """
 
-
-# VEDO EVENTS: admin-controlled event configuration and server-side outcomes.
-EVENT_DEFAULTS = [
-    ("wheel","Spin the Wheel",100,50,10,10,0,1,2,50,200,1,
-     '[{"name":"Big Prize","points":500,"weight":2,"limit":2},{"name":"Medium Prize","points":100,"weight":8,"limit":8},{"name":"Small Prize","points":25,"weight":30,"limit":30},{"name":"No Prize","points":0,"weight":60,"limit":60}]'),
-    ("quiz","Educational Quiz",0,50,10,10,0,1,2,50,200,1,"[]"),
-    ("referral","Referral Challenge",0,50,10,10,0,1,4,50,200,1,"[]"),
-    ("savings","Savings Challenge",0,50,10,10,0,1,2,50,200,1,"[]"),
-    ("voucher","Voucher Day",0,50,10,10,0,1,7,50,200,1,"[]"),
-]
-QUIZ_QUESTIONS = [
- {"key":"q1","category":"General Knowledge","question":"Which country is known as the Land of the Rising Sun?","answers":[("a","China"),("b","Japan"),("c","South Korea"),("d","Thailand")],"correct":"b","explanation":"Japan is commonly known as the Land of the Rising Sun."},
- {"key":"q2","category":"Science","question":"Which planet is known as the Red Planet?","answers":[("a","Earth"),("b","Mars"),("c","Venus"),("d","Jupiter")],"correct":"b","explanation":"Iron oxide on Mars gives it a reddish appearance."},
- {"key":"q3","category":"Mathematics","question":"What is 8 × 7?","answers":[("a","54"),("b","56"),("c","64"),("d","48")],"correct":"b","explanation":"Eight multiplied by seven equals 56."},
- {"key":"q4","category":"Environment","question":"Which gas do plants absorb during photosynthesis?","answers":[("a","Oxygen"),("b","Nitrogen"),("c","Carbon dioxide"),("d","Hydrogen")],"correct":"c","explanation":"Plants use carbon dioxide during photosynthesis."},
- {"key":"q5","category":"Technology","question":"What does URL stand for?","answers":[("a","Uniform Resource Locator"),("b","Universal Record Link"),("c","User Reference List"),("d","Unified Route Line")],"correct":"a","explanation":"URL stands for Uniform Resource Locator."},
-]
-def ensure_vedo_events():
-    db=sqlite3.connect(DB_PATH,timeout=30)
-    try:
-        for x in EVENT_DEFAULTS:
-            typ,title,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,prizes=x
-            db.execute("""INSERT OR IGNORE INTO vedo_events
-            (event_type,title,enabled,entry_cost,correct_reward,incorrect_deduction,
-             referral_target,referral_entry_points,referral_from_level,referral_to_level,
-             voucher_points_min,voucher_points_max,spins_per_day,prizes_json,updated_at)
-            VALUES (?,?,0,?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (typ,title,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,prizes,now_iso()))
-        db.commit()
-    finally: db.close()
-ensure_vedo_events()
-
-def event_row(db, typ):
-    return db.execute("SELECT * FROM vedo_events WHERE event_type=?",(typ,)).fetchone()
-def event_is_live(ev):
-    if not ev or not ev["enabled"]: return False
-    now=datetime.now(timezone.utc).replace(tzinfo=None)
-    try:
-        start=datetime.fromisoformat(ev["starts_at"]) if ev["starts_at"] else None
-        end=datetime.fromisoformat(ev["ends_at"]) if ev["ends_at"] else None
-    except ValueError: return False
-    return not ((start and start>now) or (end and end<now))
-def audit_event(db, action, details):
-    u=current_user()
-    if u: db.execute("INSERT INTO vedo_audit_log(admin_id,action,details,created_at) VALUES (?,?,?,?)",
-                     (u["id"],action,details[:1000],now_iso()))
-
-@app.route("/events")
-@login_required
-def events_home():
-    db=get_db(); rows=db.execute("SELECT * FROM vedo_events ORDER BY id").fetchall()
-    ent={r["event_id"]:r for r in db.execute("SELECT event_id,progress,status FROM vedo_event_entries WHERE user_id=?",(current_user()["id"],)).fetchall()}
-    events=[]
-    for r in rows:
-        d=dict(r); d["live"]=event_is_live(r); d["entry"]=ent.get(r["id"]); events.append(d)
-    pots=db.execute("SELECT * FROM savings_pots WHERE user_id=? AND status='LOCKED' ORDER BY matures_at",(current_user()["id"],)).fetchall()
-    return page(EVENTS_BODY,events=events,pots=pots)
-
-@app.route("/events/<event_type>",methods=["GET","POST"])
-@login_required
-def event_detail(event_type):
-    if event_type not in {"wheel","quiz","referral","savings","voucher"}: abort(404)
-    db=get_db(); ev=event_row(db,event_type)
-    if ev is None: abort(404)
-    user=current_user()
-    entry=db.execute("SELECT * FROM vedo_event_entries WHERE event_id=? AND user_id=?",(ev["id"],user["id"])).fetchone()
-    if request.method=="POST":
-        if not event_is_live(ev):
-            flash("This event is not currently open.","error")
-            return redirect(url_for("event_detail",event_type=event_type))
-        if event_type=="referral":
-            if entry:
-                flash("You have already joined this challenge.","info")
-            elif int(user["level"] or 0)<int(ev["referral_from_level"]):
-                flash(f"You must be at least Level {ev['referral_from_level']} to join.","error")
-            else:
-                cost=max(0,int(ev["referral_entry_points"]))*100
-                if cost and not debit(db,user["id"],cost,"REFERRAL_ENTRY",f"Joined Referral Challenge #{ev['id']}"):
-                    db.rollback(); flash("Not enough points to join.","error")
-                else:
-                    db.execute("INSERT OR IGNORE INTO vedo_event_entries(event_id,user_id,joined_at,progress,status,metadata) VALUES (?,?,?,0,'ACTIVE','{}')",(ev["id"],user["id"],now_iso()))
-                    db.commit(); flash("You joined the Referral Challenge.","ok")
-        elif event_type=="voucher":
-            if entry: flash("You have already opened an envelope for this event.","error")
-            else:
-                low=max(0,int(ev["voucher_points_min"])); high=max(low,int(ev["voucher_points_max"]))
-                reward=secrets.randbelow(high-low+1)+low
-                db.execute("BEGIN IMMEDIATE")
-                try:
-                    db.execute("INSERT INTO vedo_event_entries(event_id,user_id,joined_at,progress,status,metadata) VALUES (?,?,?,1,'CLAIMED','{}')",(ev["id"],user["id"],now_iso()))
-                    credit(db,user["id"],reward*100,"VOUCHER_DAY",f"Guaranteed points envelope, event #{ev['id']}")
-                    db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"voucher",reward*100,"Guaranteed points envelope",now_iso()))
-                    db.commit(); flash(f"Your envelope contained {reward:,} points. Your balance has been updated.","ok")
-                except sqlite3.IntegrityError:
-                    db.rollback(); flash("This event has already been claimed.","error")
-        elif event_type=="wheel":
-            today_key=today().isoformat()
-            db.execute("BEGIN IMMEDIATE")
-            try:
-                sr=db.execute("SELECT spins FROM vedo_spin_daily WHERE user_id=? AND event_id=? AND spin_day=?",(user["id"],ev["id"],today_key)).fetchone()
-                used=sr["spins"] if sr else 0
-                if used>=max(1,int(ev["spins_per_day"])):
-                    db.rollback(); flash("You have used all spins for today.","error")
-                    return redirect(url_for("event_detail",event_type=event_type))
-                prizes=json.loads(ev["prizes_json"] or "[]"); available=[]
-                for pr in prizes:
-                    used_n=db.execute("SELECT COUNT(*) n FROM vedo_event_results WHERE event_id=? AND result_type=?",(ev["id"],"wheel:"+str(pr.get("name","")))).fetchone()["n"]
-                    if used_n<max(0,int(pr.get("limit",0))): available.append(pr)
-                total=sum(max(0,int(pr.get("weight",1))) for pr in available)
-                if not available or total<=0:
-                    db.rollback(); flash("No configured wheel outcomes remain.","error")
-                    return redirect(url_for("event_detail",event_type=event_type))
-                pick=secrets.randbelow(total); prize=available[-1]
-                for pr in available:
-                    w=max(0,int(pr.get("weight",1)))
-                    if pick<w: prize=pr; break
-                    pick-=w
-                cost=max(0,int(ev["entry_cost"]))*100
-                if cost and not debit(db,user["id"],cost,"WHEEL_SPIN",f"Wheel spin event #{ev['id']}"):
-                    db.rollback(); flash("Not enough points to spin.","error")
-                    return redirect(url_for("event_detail",event_type=event_type))
-                points=max(0,int(prize.get("points",0)))
-                if points: credit(db,user["id"],points*100,"WHEEL_PRIZE",f"{prize['name']} from event #{ev['id']}")
-                db.execute("INSERT INTO vedo_spin_daily(user_id,event_id,spin_day,spins) VALUES (?,?,?,1) ON CONFLICT(user_id,event_id,spin_day) DO UPDATE SET spins=spins+1",(user["id"],ev["id"],today_key))
-                db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"wheel:"+str(prize.get("name","Prize")),points*100,str(prize.get("name","Prize")),now_iso()))
-                db.commit(); flash(f"You received {prize.get('name','Prize')}: {points:,} points.","ok")
-            except Exception:
-                db.rollback(); app.logger.exception("Wheel outcome failed"); flash("Spin could not be processed. Please try again.","error")
-        elif event_type=="quiz":
-            qkey=request.form.get("question_key",""); answer=request.form.get("answer","")
-            q=next((q for q in QUIZ_QUESTIONS if q["key"]==qkey),None)
-            if not q: flash("Question not found.","error")
-            elif db.execute("SELECT 1 FROM vedo_quiz_attempts WHERE event_id=? AND user_id=? AND question_key=?",(ev["id"],user["id"],qkey)).fetchone():
-                flash("You have already answered that question.","error")
-            else:
-                correct=answer==q["correct"]; delta=int(ev["correct_reward"]) if correct else -int(ev["incorrect_deduction"])
-                db.execute("BEGIN IMMEDIATE")
-                try:
-                    if delta<0 and not debit(db,user["id"],-delta,"QUIZ_DEDUCTION",f"Incorrect quiz answer {qkey}"):
-                        db.rollback(); flash("Your points balance is too low for this disclosed deduction.","error")
-                        return redirect(url_for("event_detail",event_type=event_type))
-                    if delta>0: credit(db,user["id"],delta,"QUIZ_REWARD",f"Correct quiz answer {qkey}")
-                    db.execute("INSERT INTO vedo_quiz_attempts(event_id,user_id,question_key,answer_key,correct,points_delta,created_at) VALUES (?,?,?,?,?,?,?)",(ev["id"],user["id"],qkey,answer,int(correct),delta,now_iso()))
-                    db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",(ev["id"],user["id"],"quiz",delta,qkey,now_iso()))
-                    db.commit(); flash(("Correct!" if correct else "Incorrect.")+f" {delta:+d} points.","ok" if correct else "error")
-                except sqlite3.IntegrityError:
-                    db.rollback(); flash("Answer already recorded.","error")
-        else:
-            flash("Your savings pots continue independently. Manage them on the Savings Pots page.","info")
-        return redirect(url_for("event_detail",event_type=event_type))
-    user=current_user()
-    entry=db.execute("SELECT * FROM vedo_event_entries WHERE event_id=? AND user_id=?",(ev["id"],user["id"])).fetchone()
-    balance=db.execute("SELECT points FROM users WHERE id=?",(user["id"],)).fetchone()["points"]
-    sr=db.execute("SELECT spins FROM vedo_spin_daily WHERE user_id=? AND event_id=? AND spin_day=?",(user["id"],ev["id"],today().isoformat())).fetchone() if event_type=="wheel" else None
-    questions=[]
-    if event_type=="quiz":
-        for q in QUIZ_QUESTIONS:
-            ans=db.execute("SELECT correct,points_delta FROM vedo_quiz_attempts WHERE event_id=? AND user_id=? AND question_key=?",(ev["id"],user["id"],q["key"])).fetchone()
-            questions.append({**q,"answered":bool(ans),"result":ans})
-    progress=entry["progress"] if entry else 0
-    if event_type=="referral":
-        progress=db.execute("SELECT COUNT(*) n FROM users WHERE referred_by=? AND level>=?",(user["id"],max(1,int(ev["referral_from_level"])))).fetchone()["n"]
-        if entry:
-            if progress >= int(ev["referral_target"]) and entry["status"] == "ACTIVE":
-                # Admin-configured promotion destination; apply once after target verification.
-                destination = max(1, min(7, int(ev["referral_to_level"])))
-                db.execute("UPDATE users SET level=? WHERE id=? AND level<?",
-                           (destination, user["id"], destination))
-                db.execute("UPDATE vedo_event_entries SET progress=?,status='COMPLETED' WHERE id=?",
-                           (progress, entry["id"]))
-                db.execute("INSERT INTO vedo_event_results(event_id,user_id,result_type,points_delta,detail,created_at) VALUES (?,?,?,?,?,?)",
-                           (ev["id"], user["id"], "referral_promotion", 0,
-                            f"Promotion to Level {destination}", now_iso()))
-                db.commit()
-            else:
-                db.execute("UPDATE vedo_event_entries SET progress=? WHERE id=?",(progress,entry["id"])); db.commit()
-    results=db.execute("SELECT * FROM vedo_event_results WHERE event_id=? AND user_id=? ORDER BY id DESC LIMIT 10",(ev["id"],user["id"])).fetchall()
-    pots=db.execute("SELECT * FROM savings_pots WHERE user_id=? AND status='LOCKED' ORDER BY matures_at",(user["id"],)).fetchall()
-    return page(EVENT_DETAIL_BODY,event=ev,live=event_is_live(ev),entry=entry,balance=balance,
-                used_spins=sr["spins"] if sr else 0,questions=questions,progress=progress,results=results,savings_pots=pots)
-
-@app.route("/admin/events",methods=["GET","POST"])
-@admin_required
-def admin_events():
-    db=get_db()
-    if request.method=="POST":
-        typ=request.form.get("event_type",""); ev=event_row(db,typ)
-        if not ev: abort(400)
-        try:
-            enabled=int(request.form.get("enabled")=="1")
-            starts=request.form.get("starts_at","").strip()[:16].replace("T"," ")
-            ends=request.form.get("ends_at","").strip()[:16].replace("T"," ")
-            if starts and ends and starts>=ends: raise ValueError("End must be after start.")
-            cost=max(0,int(request.form.get("entry_cost","0")))
-            correct=max(0,int(request.form.get("correct_reward","50")))
-            deduct=max(0,int(request.form.get("incorrect_deduction","10")))
-            target=max(1,min(1000,int(request.form.get("referral_target","10"))))
-            entry=max(0,int(request.form.get("referral_entry_points","0")))
-            fromlvl=max(1,min(7,int(request.form.get("referral_from_level","1"))))
-            tolvl=max(1,min(7,int(request.form.get("referral_to_level","2"))))
-            vmin=max(0,int(request.form.get("voucher_points_min","50")))
-            vmax=max(vmin,int(request.form.get("voucher_points_max","200")))
-            spins=max(1,min(100,int(request.form.get("spins_per_day","1"))))
-            prizes=json.loads(request.form.get("prizes_json","[]"))
-            if not isinstance(prizes,list) or len(prizes)>20: raise ValueError("Wheel prizes must be a list of up to 20 outcomes.")
-            for pr in prizes:
-                if not isinstance(pr,dict) or not str(pr.get("name","")).strip(): raise ValueError("Every prize needs a name.")
-                pr["points"]=max(0,min(1000000,int(pr.get("points",0))))
-                pr["weight"]=max(0,min(1000000,int(pr.get("weight",1))))
-                pr["limit"]=max(0,min(1000000,int(pr.get("limit",0))))
-            if typ=="wheel" and not prizes: raise ValueError("Configure at least one wheel outcome.")
-        except (ValueError,TypeError,json.JSONDecodeError) as exc:
-            flash(f"Settings not saved: {exc}","error"); return redirect(url_for("admin_events"))
-        db.execute("""UPDATE vedo_events SET enabled=?,starts_at=?,ends_at=?,entry_cost=?,correct_reward=?,
-        incorrect_deduction=?,referral_target=?,referral_entry_points=?,referral_from_level=?,referral_to_level=?,
-        voucher_points_min=?,voucher_points_max=?,spins_per_day=?,prizes_json=?,updated_at=? WHERE event_type=?""",
-        (enabled,starts,ends,cost,correct,deduct,target,entry,fromlvl,tolvl,vmin,vmax,spins,json.dumps(prizes),now_iso(),typ))
-        audit_event(db,"EVENT_SETTINGS",f"{typ}: enabled={enabled}; starts={starts}; ends={ends}")
-        db.commit(); flash(f"{ev['title']} settings saved.","ok"); return redirect(url_for("admin_events"))
-    rows=db.execute("SELECT * FROM vedo_events ORDER BY id").fetchall()
-    stats={r["event_type"]:{"entries":db.execute("SELECT COUNT(*) n FROM vedo_event_entries WHERE event_id=?",(r["id"],)).fetchone()["n"],
-                           "results":db.execute("SELECT COUNT(*) n FROM vedo_event_results WHERE event_id=?",(r["id"],)).fetchone()["n"]} for r in rows}
-    logs=db.execute("SELECT a.*,u.username FROM vedo_audit_log a JOIN users u ON u.id=a.admin_id ORDER BY a.id DESC LIMIT 20").fetchall()
-    return page(ADMIN_EVENTS_BODY,events=rows,stats=stats,logs=logs)
-
-
-EVENTS_BODY = """
-<div class="card note"><h1>Vedo Events & Challenges</h1><p class="muted">Join weekly events, track progress, and collect eligible rewards. Active savings pots continue independently.</p></div>
-<div class="grid">
-{% for e in events %}<div class="card">
-<div style="display:flex;justify-content:space-between;gap:10px;align-items:center"><h2>{{ e['title'] }}</h2><span class="pill">{{ 'OPEN' if e['live'] else ('SCHEDULED' if e['enabled'] else 'CLOSED') }}</span></div>
-{% if e['event_type']=='wheel' %}<p class="muted">Spin for admin-configured prizes. The server enforces outcome limits.</p>
-{% elif e['event_type']=='quiz' %}<p class="muted">Correct answers earn points; incorrect answers deduct the amount shown before you start.</p>
-{% elif e['event_type']=='referral' %}<p class="muted">Opt in, refer members and track progress toward the admin-selected destination level.</p>
-{% elif e['event_type']=='savings' %}<p class="muted">Your existing savings pots keep progressing even when this event is closed.</p>
-{% else %}<p class="muted">Open one envelope and receive guaranteed points, with bonus vouchers subject to published availability.</p>{% endif %}
-{% if e['entry'] %}<p><b>Your status:</b> {{ e['entry']['status'] }} · Progress {{ e['entry']['progress'] }}</p>{% endif %}
-{% if e['starts_at'] %}<p class="small muted">Starts: {{ e['starts_at'] }} UTC</p>{% endif %}{% if e['ends_at'] %}<p class="small muted">Closes: {{ e['ends_at'] }} UTC</p>{% endif %}
-<a class="button primary" href="{{ url_for('event_detail',event_type=e['event_type']) }}">View event</a></div>{% endfor %}
-</div>
-{% if pots %}<div class="card"><h2>My active savings progress</h2>{% for p in pots %}<p><b>{{ money(p['principal']) }}</b> committed · {{ p['weeks'] }} weeks · Matures {{ p['matures_at'][:10] }} · <span class="pill">ACTIVE</span></p>{% endfor %}<p class="muted small">Savings progress is independent of Referral Challenge participation.</p></div>{% endif %}
-"""
-
-EVENT_DETAIL_BODY = """
-<style>
-.event-games{--game-ink:#172033;--game-muted:#64748b;--game-line:#e2e8f0;color:var(--game-ink)}
-.event-games .game-card{background:#fff;color:var(--game-ink);border:1px solid #e5eaf2;border-radius:22px;padding:clamp(18px,3vw,30px);box-shadow:0 14px 38px rgba(15,23,42,.09);overflow:hidden}
-.event-games .game-card h2{color:#172033;margin-top:0}.event-games .game-muted{color:var(--game-muted)}
-.event-games .game-pill{display:inline-flex;align-items:center;gap:6px;background:#eff6ff;color:#1d4ed8;border-radius:999px;padding:7px 11px;font-size:12px;font-weight:800}
-.event-games .wheel-stage{position:relative;width:min(100%,340px);aspect-ratio:1;margin:22px auto 26px;filter:drop-shadow(0 12px 14px #0f172a25)}
-.event-games .prize-wheel{position:absolute;inset:0;border-radius:50%;border:10px solid #f8d24b;outline:4px solid #a66b18;background:conic-gradient(#fb7185 0 45deg,#8b5cf6 45deg 90deg,#22c55e 90deg 135deg,#fb923c 135deg 180deg,#3b82f6 180deg 225deg,#06b6d4 225deg 270deg,#facc15 270deg 315deg,#f43f5e 315deg 360deg);transition:transform 4s cubic-bezier(.12,.68,.08,1)}
-.event-games .prize-wheel:after{content:'';position:absolute;inset:0;border-radius:50%;background:repeating-conic-gradient(transparent 0 44deg,#ffffffc9 44deg 45deg)}
-.event-games .wheel-prize{position:absolute;z-index:2;left:50%;top:50%;width:70px;margin-left:-35px;margin-top:-15px;text-align:center;font-size:12px;font-weight:900;color:white;text-shadow:0 2px 4px #172033a8}
-.event-games .wheel-prize b{display:block;font-size:24px}.event-games .wheel-prize:nth-child(1){transform:rotate(22.5deg) translateY(-112px) rotate(-22.5deg)}.event-games .wheel-prize:nth-child(2){transform:rotate(67.5deg) translateY(-112px) rotate(-67.5deg)}.event-games .wheel-prize:nth-child(3){transform:rotate(112.5deg) translateY(-112px) rotate(-112.5deg)}.event-games .wheel-prize:nth-child(4){transform:rotate(157.5deg) translateY(-112px) rotate(-157.5deg)}.event-games .wheel-prize:nth-child(5){transform:rotate(202.5deg) translateY(-112px) rotate(-202.5deg)}.event-games .wheel-prize:nth-child(6){transform:rotate(247.5deg) translateY(-112px) rotate(-247.5deg)}.event-games .wheel-prize:nth-child(7){transform:rotate(292.5deg) translateY(-112px) rotate(-292.5deg)}.event-games .wheel-prize:nth-child(8){transform:rotate(337.5deg) translateY(-112px) rotate(-337.5deg)}
-.event-games .wheel-hub{position:absolute;z-index:4;left:50%;top:50%;transform:translate(-50%,-50%);width:23%;aspect-ratio:1;border-radius:50%;background:radial-gradient(circle at 30% 25%,#fff7bf,#fbbf24 65%,#b45309);border:6px solid #fff0a8;box-shadow:0 0 0 4px #9a670d}.event-games .wheel-pointer{position:absolute;z-index:5;left:50%;top:-7px;transform:translateX(-50%);border-left:18px solid transparent;border-right:18px solid transparent;border-top:38px solid #fef08a;filter:drop-shadow(0 3px 3px #33415588)}
-.event-games .game-action{display:flex;justify-content:center}.event-games .game-action .primary{min-width:190px}.event-games .envelope-stage{display:grid;place-items:center;padding:25px 0 16px;perspective:900px}.event-games .mystery-envelope{position:relative;width:min(100%,260px);height:175px;border:0;background:transparent;filter:drop-shadow(0 15px 13px #0f172a25);transform-style:preserve-3d}.event-games .envelope-back{position:absolute;inset:0;border-radius:12px;background:#f8c75b;border:2px solid #d89b27}.event-games .envelope-paper{position:absolute;left:12%;right:12%;top:10%;height:78%;border-radius:8px;background:#fffdf5;border:1px solid #e8dfc9;display:grid;place-items:center;font-size:42px;transition:transform .7s ease;z-index:1}.event-games .envelope-front{position:absolute;inset:0;background:linear-gradient(145deg,#f9d477,#e9a82c);clip-path:polygon(0 0,50% 55%,100% 0,100% 100%,0 100%);border-radius:10px;z-index:2}.event-games .envelope-flap{position:absolute;inset:0;background:#ffdf91;clip-path:polygon(0 0,100% 0,50% 63%);transform-origin:top;transition:transform .6s ease;z-index:3}.event-games .envelope-seal{position:absolute;z-index:4;left:50%;top:50%;transform:translate(-50%,-10%);width:46px;height:46px;border-radius:50%;display:grid;place-items:center;background:#dc3b50;color:#fff;border:3px solid #ffb3bc;font-size:23px}
-.event-games .envelope-form.opening .envelope-flap{transform:rotateX(180deg)}.event-games .envelope-form.opening .envelope-paper{transform:translateY(-55px)}.event-games .envelope-form.opening .mystery-envelope{animation:envShake .45s ease-in-out 2}.event-games .envelope-form .primary{margin-top:8px}
-@keyframes envShake{0%,100%{transform:rotate(0)}25%{transform:rotate(-4deg)}75%{transform:rotate(4deg)}}
-.event-games .paper-quiz{background:#fffefa;color:#202938;border:1px solid #e5dfd1;border-radius:5px;padding:20px;box-shadow:0 8px 20px #0f172a12;background-image:linear-gradient(#ffffff 31px,#e7edf5 32px);background-size:100% 32px}
-.event-games .paper-quiz .question-card{background:rgba(255,255,255,.93);border:1px solid #e4e8ee;border-radius:14px;padding:18px;margin:15px 0;box-shadow:0 3px 9px #0f172a0b}
-.event-games .answer-option{display:flex!important;align-items:center;gap:10px;background:#fff;border:1px solid #d8e0ea;border-radius:11px;padding:12px;margin:9px 0!important;cursor:pointer;transition:border-color .15s,background .15s}.event-games .answer-option:hover{border-color:#2563eb;background:#eff6ff}.event-games .answer-option input{accent-color:#2563eb;width:17px;height:17px}.event-games .paper-quiz .primary{background:#2563eb;color:#fff;box-shadow:0 4px 0 #1d4ed8}.event-games .prize-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:10px;margin-top:18px}.event-games .prize-chip{background:#f8fafc;border:1px solid #e2e8f0;border-radius:13px;padding:12px}.event-games .prize-chip b{display:block}.event-games .prize-chip span{color:#64748b;font-size:12px}
-@media(max-width:520px){.event-games .wheel-stage{width:min(100%,290px)}.event-games .wheel-prize{transform-origin:center}.event-games .wheel-prize:nth-child(n){font-size:10px}.event-games .wheel-prize b{font-size:20px}.event-games .wheel-prize:nth-child(1){transform:rotate(22.5deg) translateY(-94px) rotate(-22.5deg)}.event-games .wheel-prize:nth-child(2){transform:rotate(67.5deg) translateY(-94px) rotate(-67.5deg)}.event-games .wheel-prize:nth-child(3){transform:rotate(112.5deg) translateY(-94px) rotate(-112.5deg)}.event-games .wheel-prize:nth-child(4){transform:rotate(157.5deg) translateY(-94px) rotate(-157.5deg)}.event-games .wheel-prize:nth-child(5){transform:rotate(202.5deg) translateY(-94px) rotate(-202.5deg)}.event-games .wheel-prize:nth-child(6){transform:rotate(247.5deg) translateY(-94px) rotate(-247.5deg)}.event-games .wheel-prize:nth-child(7){transform:rotate(292.5deg) translateY(-94px) rotate(-292.5deg)}.event-games .wheel-prize:nth-child(8){transform:rotate(337.5deg) translateY(-94px) rotate(-337.5deg)}}
-</style>
-<div class="event-games">
-<div class="card note"><a href="{{ url_for('events_home') }}">← All events</a><h1 style="margin-top:12px">{{ event['title'] }}</h1><p class="muted">{{ 'Event is open' if live else 'Event is currently closed to new actions.' }}</p>
-{% if event['starts_at'] or event['ends_at'] %}<p class="small muted">Starts {{ event['starts_at'] or 'immediately' }} UTC · Closes {{ event['ends_at'] or 'not scheduled' }} UTC</p>{% endif %}
-<div class="stats"><div class="stat"><b>{{ money(balance) }}</b><span>Points balance</span></div>
-{% if event['event_type']=='wheel' %}<div class="stat"><b>{{ used_spins }}/{{ event['spins_per_day'] }}</b><span>Spins used today</span></div>{% endif %}
-{% if event['event_type']=='referral' %}<div class="stat"><b>{{ progress }}/{{ event['referral_target'] }}</b><span>Referral progress</span></div>{% endif %}
-{% if event['event_type']=='quiz' %}<div class="stat"><b>+{{ event['correct_reward'] }}</b><span>Correct answer</span></div><div class="stat"><b>-{{ event['incorrect_deduction'] }}</b><span>Incorrect answer</span></div>{% endif %}</div></div>
-{% if event['event_type']=='wheel' %}<div class="card game-card"><div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap"><div><span class="game-pill">🎮 VEDO PLAY</span><h2 style="margin:12px 0 5px">Spin &amp; Win</h2><p class="game-muted">One spin could unlock your next surprise.</p></div><span class="game-pill">{{ used_spins }}/{{ event['spins_per_day'] }} used</span></div>
-<div class="wheel-stage" aria-label="Prize wheel"><div class="wheel-pointer"></div><div class="prize-wheel" id="vedoPrizeWheel">{% for p in (event['prizes_json']|from_json)[:8] %}<div class="wheel-prize"><b>{% if loop.index0==0 %}🎁{% elif loop.index0==1 %}⭐{% elif loop.index0==2 %}🎉{% elif loop.index0==3 %}💎{% elif loop.index0==4 %}🎟️{% elif loop.index0==5 %}☕{% elif loop.index0==6 %}🏆{% else %}✨{% endif %}</b>{{ p['name'] }}</div>{% endfor %}</div><div class="wheel-hub"> </div></div>
-<div style="text-align:center"><p class="game-muted">Cost <b>{{ event['entry_cost'] }} points</b> per spin · Limit {{ event['spins_per_day'] }} per day</p><form method="post" class="game-action" id="vedoSpinForm"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" id="vedoSpinButton" {% if not live or used_spins>=event['spins_per_day'] %}disabled{% endif %}>🎡 Spin the wheel</button></form><p class="game-muted" style="font-size:12px">The server securely selects and records each result. The animation is for presentation only.</p></div>
-<h3>Prizes in this event</h3><div class="prize-grid">{% for p in event['prizes_json']|from_json %}<div class="prize-chip"><b>{{ p['name'] }}</b><span>{{ p['points'] }} points · limit {{ p['limit'] }}</span></div>{% endfor %}</div></div>
-{% elif event['event_type']=='quiz' %}<div class="card game-card"><span class="game-pill">🧠 BRAIN BATTLE</span><div class="paper-quiz" style="margin-top:16px"><h2>Brain Battle</h2><p class="game-muted">Choose your answer like a real quiz. Think carefully before submitting.</p><p><b>Correct answer:</b> +{{ event['correct_reward'] }} points &nbsp; · &nbsp; <b>Incorrect:</b> −{{ event['incorrect_deduction'] }} points</p>
-{% for q in questions %}<div class="question-card"><div style="display:flex;justify-content:space-between;gap:8px;flex-wrap:wrap"><b>Question {{ loop.index }} of {{ questions|length }}</b><span class="game-pill">{{ q['category'] }}</span></div><p style="font-size:17px;font-weight:750;line-height:1.5">{{ q['question'] }}</p>
-{% if q['answered'] %}<p class="{{ 'pos' if q['result']['correct'] else 'neg' }}"><b>{{ '✓ Correct' if q['result']['correct'] else '✕ Incorrect' }}</b> · {{ '%+d'|format(q['result']['points_delta']) }} points</p>
-{% else %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="question_key" value="{{ q['key'] }}">{% for key,label in q['answers'] %}<label class="answer-option"><input type="radio" name="answer" value="{{ key }}" required><span>{{ label }}</span></label>{% endfor %}<button class="primary" {% if not live %}disabled{% endif %}>Check my answer</button></form>{% endif %}</div>{% endfor %}</div></div>
-{% elif event['event_type']=='referral' %}<div class="card"><h2>Referral Challenge</h2><p>Entry commitment: <b>{{ event['referral_entry_points'] }} points</b>. Target: <b>{{ event['referral_target'] }} verified referrals</b>. Eligible starting level: {{ event['referral_from_level'] }}. Destination level: {{ event['referral_to_level'] }}.</p><p class="muted">This version counts direct referrals who reach the configured minimum level. Recharge-based qualification needs to be connected to a verified payment workflow.</p>
-{% if entry %}<div class="progress"><div style="width:{{ [100,progress*100/event['referral_target']]|min }}%"></div></div><p><b>{{ progress }} / {{ event['referral_target'] }}</b> qualifying referrals</p><p>Status: {{ entry['status'] }}</p>
-{% else %}<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><label><input type="checkbox" required> I agree to the point commitment and published rules.</label><button class="primary" {% if not live %}disabled{% endif %}>Join Referral Challenge</button></form>{% endif %}</div>
-{% elif event['event_type']=='voucher' %}<div class="card game-card" style="text-align:center"><span class="game-pill">✉️ MYSTERY REWARD</span><h2 style="margin:14px 0 5px">Choose your mystery envelope</h2><p class="game-muted">Every eligible member receives guaranteed points. Bonus vouchers depend on the event's published stock.</p><div class="envelope-stage"><div class="mystery-envelope" aria-label="Sealed mystery envelope"><div class="envelope-back"></div><div class="envelope-paper">🎁</div><div class="envelope-front"></div><div class="envelope-flap"></div><div class="envelope-seal">?</div></div></div><p><b>{{ event['voucher_points_min'] }}–{{ event['voucher_points_max'] }} points guaranteed</b></p><form method="post" class="envelope-form" id="vedoEnvelopeForm"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" id="vedoEnvelopeButton" {% if not live or entry %}disabled{% endif %}>✨ Open my envelope</button></form>{% if entry %}<p class="game-muted">You have already claimed your envelope for this event.</p>{% else %}<p class="game-muted" style="font-size:12px">The reward is selected and credited securely when you open it.</p>{% endif %}</div>
-{% else %}<div class="card"><h2>Savings continue independently</h2><p>Existing savings pots continue toward maturity even if this event is paused. Visit <a href="{{ url_for('pots') }}">Savings pots</a> to manage them.</p>{% for p in savings_pots %}<p>{{ money(p['principal']) }} committed · {{ p['weeks'] }} weeks · maturity {{ p['matures_at'][:10] }}</p>{% else %}<p class="muted">No active savings pots.</p>{% endfor %}</div>{% endif %}
-{% if results %}<div class="card"><h2>Your recent results</h2><table><tr><th>Date</th><th>Result</th><th>Points delta (cents)</th><th>Details</th></tr>{% for r in results %}<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['result_type'] }}</td><td>{{ r['points_delta'] }}</td><td>{{ r['detail'] }}</td></tr>{% endfor %}</table></div>{% endif %}
-</div>
-<script>
-(function(){
-  var spinForm=document.getElementById('vedoSpinForm'), spinWheel=document.getElementById('vedoPrizeWheel'), spinButton=document.getElementById('vedoSpinButton');
-  if(spinForm && spinWheel && spinButton){spinForm.addEventListener('submit',function(e){if(spinForm.dataset.animating==='1'){return;}e.preventDefault();if(spinButton.disabled)return;spinForm.dataset.animating='1';spinButton.disabled=true;spinButton.textContent='✨ Spinning…';var turns=360*5+Math.floor(Math.random()*360);spinWheel.style.transform='rotate('+turns+'deg)';window.setTimeout(function(){HTMLFormElement.prototype.submit.call(spinForm);},4100);});}
-  var envForm=document.getElementById('vedoEnvelopeForm');
-  if(envForm){envForm.addEventListener('submit',function(e){if(envForm.dataset.animating==='1'){return;}e.preventDefault();var button=document.getElementById('vedoEnvelopeButton');if(button && button.disabled)return;envForm.dataset.animating='1';envForm.classList.add('opening');if(button){button.disabled=true;button.textContent='🎉 Opening…';}window.setTimeout(function(){HTMLFormElement.prototype.submit.call(envForm);},1200);});}
-})();
-</script>
-"""
-
-ADMIN_EVENTS_BODY = """
-<div class="card note"><h1>Event Control Centre</h1><p class="muted">Enable, schedule and configure each event independently. Closing enrolment does not stop existing savings pots or delete results.</p></div>
-{% for e in events %}<div class="card"><h2>{{ e['title'] }}</h2><p class="muted small">Entries {{ stats[e['event_type']]['entries'] }} · Results {{ stats[e['event_type']]['results'] }} · Updated {{ e['updated_at'] }}</p>
-<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="event_type" value="{{ e['event_type'] }}">
-<label><input type="checkbox" name="enabled" value="1" {% if e['enabled'] %}checked{% endif %}> Enable event</label>
-<div class="grid"><div><label>Starts at (UTC)</label><input type="datetime-local" name="starts_at" value="{{ e['starts_at'].replace(' ','T') if e['starts_at'] else '' }}"></div>
-<div><label>Closes at (UTC)</label><input type="datetime-local" name="ends_at" value="{{ e['ends_at'].replace(' ','T') if e['ends_at'] else '' }}"></div>
-<div><label>Wheel cost (points)</label><input type="number" min="0" name="entry_cost" value="{{ e['entry_cost'] }}"></div><div><label>Spins per day</label><input type="number" min="1" max="100" name="spins_per_day" value="{{ e['spins_per_day'] }}"></div>
-<div><label>Correct answer reward</label><input type="number" min="0" name="correct_reward" value="{{ e['correct_reward'] }}"></div><div><label>Incorrect answer deduction</label><input type="number" min="0" name="incorrect_deduction" value="{{ e['incorrect_deduction'] }}"></div>
-<div><label>Referral entry commitment (points)</label><input type="number" min="0" name="referral_entry_points" value="{{ e['referral_entry_points'] }}"></div><div><label>Referral target</label><input type="number" min="1" max="1000" name="referral_target" value="{{ e['referral_target'] }}"></div>
-<div><label>Starting level</label><select name="referral_from_level">{% for l in LEVELS %}<option value="{{ l }}" {% if e['referral_from_level']==l %}selected{% endif %}>Level {{ l }}</option>{% endfor %}</select></div>
-<div><label>Promotion destination</label><select name="referral_to_level">{% for l in LEVELS %}<option value="{{ l }}" {% if e['referral_to_level']==l %}selected{% endif %}>Level {{ l }}</option>{% endfor %}</select></div>
-<div><label>Voucher guaranteed minimum points</label><input type="number" min="0" name="voucher_points_min" value="{{ e['voucher_points_min'] }}"></div><div><label>Voucher guaranteed maximum points</label><input type="number" min="0" name="voucher_points_max" value="{{ e['voucher_points_max'] }}"></div></div>
-{% if e['event_type']=='wheel' %}<label>Wheel prize JSON: name, points, weight, limit</label><textarea name="prizes_json" rows="7" spellcheck="false">{{ e['prizes_json'] }}</textarea>{% else %}<input type="hidden" name="prizes_json" value="{{ e['prizes_json'] }}">{% endif %}
-<button class="primary">Save settings</button></form></div>{% endfor %}
-<div class="card"><h2>Recent admin audit log</h2>{% if logs %}<table><tr><th>When</th><th>Admin</th><th>Action</th><th>Details</th></tr>{% for l in logs %}<tr><td>{{ l['created_at'] }}</td><td>{{ l['username'] }}</td><td>{{ l['action'] }}</td><td>{{ l['details'] }}</td></tr>{% endfor %}</table>{% else %}<p class="muted">No changes recorded yet.</p>{% endif %}</div>
-"""
-
 app.jinja_loader = DictLoader({"base": BASE})
-app.jinja_env.filters["from_json"] = json.loads
-app.jinja_env.filters["from_json"] = json.loads
 
 
-
+# ============================================================================
+# START
+# ============================================================================
 
 if __name__ == "__main__":
     init_db()
