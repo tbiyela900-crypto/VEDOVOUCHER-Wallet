@@ -867,7 +867,7 @@ def register():
         elif (not Bank_Account _number.isascii()
                 or not Bank_Account _number.isdigit()
                 or len(Bank_Account _number) != 11):
-            error = "Bank Bank Account Number must contain exactly 11 digits."
+            error = "Bank Account Number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -2849,7 +2849,7 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Bank Bank Account Number (11 digits)</label>
+<label>Bank Account Number (11 digits)</label>
 <input name="Bank_Account _number" value="{{ form.get('Bank_Account _number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
