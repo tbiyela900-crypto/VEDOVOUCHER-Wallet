@@ -33,6 +33,18 @@ Features
                           pots, a full transaction ledger, can ADD BALANCE to
                           a member and RESET a member's password
 
+Data safety
+  * The database and the uploaded photos are stored on persistent storage:
+      DATA_DIR env var, else /var/data if it exists, else the app folder.
+    (You can still set DB_PATH / UPLOAD_DIR yourself.)
+  * SECRET_KEY: set it as an environment variable. If you do not, a random
+    key is generated once and saved next to the database, so sessions and
+    SMS codes keep working after a restart.
+  * A backup of the database is made every time the app starts (the last 10
+    are kept in the "backups" folder next to the database).
+  * The app never deletes member data by itself. Only sign-ups that never
+    verified their cellphone (older than 1 hour) are cleaned up.
+
 Verification code
   No SMS provider is used. The 6-digit code is shown inside the app on the
   verify page (numbers only).
@@ -48,6 +60,7 @@ import hmac
 import os
 import re
 import secrets
+import shutil
 import sqlite3
 import string
 import time
@@ -69,25 +82,73 @@ from werkzeug.security import check_password_hash, generate_password_hash
 # ============================================================================
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
-DB_PATH = os.environ.get(
-    "DB_PATH",
-    os.path.join(BASE_DIR, "rewards.db")
-)
+
+
+def _pick_data_dir():
+    """Persistent folder for the database, uploads and backups."""
+    env = os.environ.get("DATA_DIR", "").strip()
+    if env:
+        return os.path.abspath(env)
+    if os.path.isdir("/var/data") and os.access("/var/data", os.W_OK):
+        return "/var/data"
+    return BASE_DIR
+
+
+DATA_DIR = _pick_data_dir()
+DB_PATH = os.path.abspath(os.environ.get("DB_PATH")
+                          or os.path.join(DATA_DIR, "rewards.db"))
+UPLOAD_DIR = os.path.abspath(os.environ.get(
+    "UPLOAD_DIR", os.path.join(os.path.dirname(DB_PATH), "uploads")))
+BACKUP_DIR = os.path.join(os.path.dirname(DB_PATH), "backups")
+BACKUPS_KEEP = 10
+
+os.makedirs(os.path.dirname(DB_PATH), exist_ok=True)
+
+# If an older database / photos sit in the app folder and the persistent
+# folder is still empty, copy them over once (nothing is deleted).
+_legacy_db = os.path.join(BASE_DIR, "rewards.db")
+if (not os.path.exists(DB_PATH) and os.path.exists(_legacy_db)
+        and os.path.abspath(_legacy_db) != DB_PATH):
+    shutil.copy2(_legacy_db, DB_PATH)
+_legacy_up = os.path.join(BASE_DIR, "uploads")
+if (not os.path.exists(UPLOAD_DIR) and os.path.isdir(_legacy_up)
+        and os.path.abspath(_legacy_up) != UPLOAD_DIR):
+    shutil.copytree(_legacy_up, UPLOAD_DIR)
+
+
+def _load_secret_key():
+    """SECRET_KEY env var, else a random key saved once next to the database."""
+    env = os.environ.get("SECRET_KEY", "").strip()
+    if env:
+        return env
+    path = os.path.join(os.path.dirname(DB_PATH), ".secret_key")
+    try:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as fh:
+                saved = fh.read().strip()
+            if saved:
+                return saved
+        key = secrets.token_hex(32)
+        with open(path, "w", encoding="utf-8") as fh:
+            fh.write(key)
+        try:
+            os.chmod(path, 0o600)
+        except OSError:
+            pass
+        return key
+    except OSError:
+        return "dev-only-change-me"
+
 
 def backup_database():
-    """Create a consistent SQLite backup on persistent storage."""
-    backup_dir = "/var/data/backups"
-    os.makedirs(backup_dir, exist_ok=True)
+    """Create a consistent SQLite backup and keep only the newest ones."""
+    os.makedirs(BACKUP_DIR, exist_ok=True)
 
     if not os.path.exists(DB_PATH):
-        raise FileNotFoundError(
-            f"Database not found: {DB_PATH}"
-        )
+        raise FileNotFoundError(f"Database not found: {DB_PATH}")
 
     stamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    backup_path = os.path.join(
-        backup_dir, f"rewards_{stamp}.db"
-    )
+    backup_path = os.path.join(BACKUP_DIR, f"rewards_{stamp}.db")
 
     source = sqlite3.connect(DB_PATH, timeout=30)
     destination = sqlite3.connect(backup_path)
@@ -98,7 +159,17 @@ def backup_database():
         destination.close()
         source.close()
 
+    old = sorted(f for f in os.listdir(BACKUP_DIR)
+                 if f.startswith("rewards_") and f.endswith(".db"))
+    for name in old[:-BACKUPS_KEEP]:
+        try:
+            os.remove(os.path.join(BACKUP_DIR, name))
+        except OSError:
+            pass
+
     return backup_path
+
+
 LEVELS = list(range(1, 8))
 
 # Total reward per level (daily check-in = total / 24)
@@ -169,11 +240,9 @@ POT_MIN_CENTS = 1000            # R10
 
 # --- Check-in tasks / admin photos ----------------------------------------
 TASK_WAIT_SECONDS = 5           # each tap loads for 5 seconds
-UPLOAD_DIR = os.path.abspath(os.environ.get(
-    "UPLOAD_DIR", os.path.join(os.path.dirname(DB_PATH), "uploads")))
 
 app = Flask(__name__)
-app.secret_key = os.environ.get("SECRET_KEY", "dev-only-change-me")
+app.secret_key = _load_secret_key()
 app.config["SESSION_COOKIE_SAMESITE"] = "Lax"
 app.config["SESSION_COOKIE_HTTPONLY"] = True
 app.config["PERMANENT_SESSION_LIFETIME"] = timedelta(days=7)
@@ -745,6 +814,12 @@ def init_db():
 
 
 init_db()
+
+# Safety copy of the database every time the app starts.
+try:
+    backup_database()
+except Exception as exc:                       # never stop the app for this
+    print(f"[backup] skipped: {exc}")
 
 # ============================================================================
 # AUTHENTICATION / CSRF
@@ -2134,6 +2209,7 @@ def admin_topup_details():
         db.commit()
     except sqlite3.Error:
         db.rollback()
+        _remove_upload(new_flag)
         app.logger.exception("Failed to save admin top-up details")
         flash("Could not save top-up details because of a database error.", "error")
         return redirect(url_for("admin"))
@@ -2861,7 +2937,7 @@ REGISTER_BODY = """
 <label>Referral code (optional)</label>
 <input name="referral" value="{{ form.get('referral','') }}" placeholder="e.g. REF-ABC234">
 <label>Level code  (optional)</label>
-<input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. L1-ABCD-EFGH" autocomplete="off">
+<input name="level_code" value="{{ form.get('level_code','') }}" placeholder="e.g. S1-ABCD-EFGH" autocomplete="off">
 <button class="primary" style="width:100%">Create account</button>
 </form>
 <p class="muted" style="margin-top:16px">Already a member? <a href="{{ url_for('login') }}">Log in</a></p>
@@ -3541,7 +3617,7 @@ TEAM_BODY = """
 <div class="card">
 <h2>Team levels{% if team_name %} - you are <span class="pos">{{ team_name }}</span>{% endif %}</h2>
 {% if next_tier %}
-<p class="muted">{{ members|length }} of {{ next_tier['size'] }} members. Reach {{ next_tier['size'] }} members to unlock <b>{{ next_tier['name'] }}</b> and its team Bank Account Number.</p>
+<p class="muted">{{ members|length }} of {{ next_tier['size'] }} members. Reach {{ next_tier['size'] }} members to unlock <b>{{ next_tier['name'] }}</b> and its team account number.</p>
 <div class="bar" style="margin-bottom:14px"><b style="width:{{ tier_pct }}%"></b></div>
 {% else %}<p class="muted">Your team reached the top level.</p>{% endif %}
 <div class="tiers">
@@ -3550,7 +3626,7 @@ TEAM_BODY = """
 <b>{{ t['name'] }}</b>
 <span>{{ t['size'] }} members</span>
 {% if t['number'] %}
-<small>Team Bank Account Number</small>
+<small>Team account number</small>
 <code>{{ t['number'] }}</code>
 <button type="button" class="ghost" onclick="navigator.clipboard.writeText('{{ t['number'] }}');this.textContent='Copied';">Copy</button>
 {% else %}
@@ -3613,7 +3689,7 @@ Upgrade to Level {{ next_level }}</button>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Level code</label>
-<input name="voucher" placeholder="e.g. L3-ABCD-EFGH" autocomplete="off" required>
+<input name="voucher" placeholder="e.g. S3-ABCD-EFGH" autocomplete="off" required>
 <button class="primary">Redeem</button>
 </form>
 </div>
