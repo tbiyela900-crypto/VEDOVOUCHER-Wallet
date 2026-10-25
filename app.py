@@ -3572,6 +3572,7 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .hello{margin:0 0 18px;font-weight:600;opacity:.9;}
 .lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
 .balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
+.quick-links-label{align-self:flex-start;flex:none;padding:9px 11px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(3,12,18,.28);color:#d8fff5;font-size:.68rem;font-weight:900;letter-spacing:.12em;white-space:nowrap;}
 .fpwrap{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none;}
 .fp{width:78px;height:78px;padding:0;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#031016;background:linear-gradient(135deg,#1fd6a4,#8ff5dc);border:3px solid rgba(255,255,255,.9);box-shadow:0 8px 24px rgba(0,0,0,.35);animation:fppulse 2s ease-out infinite;font:inherit;}
 .fp .ic{width:44px;height:44px;stroke-width:2.2;}
@@ -3581,6 +3582,10 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .fpcap{font-size:.74rem;font-weight:800;letter-spacing:.3px;color:#eafff8;text-align:center;}
 @keyframes fppulse{0%{box-shadow:0 0 0 0 rgba(31,214,164,.75),0 8px 24px rgba(0,0,0,.35);}70%{box-shadow:0 0 0 20px rgba(31,214,164,0),0 8px 24px rgba(0,0,0,.35);}100%{box-shadow:0 0 0 0 rgba(31,214,164,0),0 8px 24px rgba(0,0,0,.35);}}
 .actions.closed{display:none;}
+.actions#heroactions{display:grid;}
+.actions#heroactions .act{min-width:0;}
+.actions#heroactions .act{padding:5px 2px;border-radius:12px;}
+.actions#heroactions .act:focus-visible{outline:2px solid #8ff5dc;outline-offset:2px;}
 .actions.reveal{animation:revealin .35s ease-out;}
 @keyframes revealin{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 20px;}
@@ -3820,7 +3825,12 @@ input[type=file]{padding:10px;}
   .tabs,.uname{display:none;}
   body{padding-bottom:calc(84px + env(safe-area-inset-bottom,0px));}
   .balance{font-size:2.2rem;}
-  .actions{grid-template-columns:repeat(3,1fr);row-gap:14px;}
+  .actions{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:12px;}
+  .hero-top{align-items:center;}
+  .quick-links-label{font-size:.58rem;padding:8px 7px;letter-spacing:.08em;}
+  .actions#heroactions{grid-template-columns:repeat(3,minmax(0,1fr));gap:9px 5px;padding:10px 5px;}
+  .actions#heroactions .act{font-size:.68rem;overflow-wrap:anywhere;text-align:center;}
+  .actions#heroactions .act span{width:38px;height:38px;}
   .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;justify-content:space-around;
     padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
     background:rgba(8,18,27,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);}
@@ -4484,23 +4494,23 @@ DASH_BODY = """
 <p class="lbl">Available balance</p>
 <div class="balance">{{ money(user['points']) }}</div>
 </div>
-<div class="fpwrap">
-<button type="button" class="fp" id="fp" aria-expanded="false" aria-controls="heroactions" aria-label="Open menu">{{ icon('fingerprint') }}</button>
-<span class="fpcap" id="fpcap">Tap to open menu</span>
-</div>
+<div class="quick-links-label">QUICK ACCESS</div>
 </div>
 <div class="chips">
 <span class="chip">Level {{ user['level'] }}</span>
 <span class="chip">{{ money(locked) }} in pots</span>
 </div>
-<div class="actions closed" id="heroactions">
+<div class="actions" id="heroactions" aria-label="All Vedo menu tabs">
+<a class="act" href="{{ url_for('dashboard') }}"><span>{{ icon('home') }}</span>Home</a>
 <a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
 <a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
 <a class="act" href="{{ url_for('games_hub') }}"><span>{{ icon('games') }}</span>Games</a>
-<a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Pots</a>
+<a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Savings pots</a>
 <a class="act" href="{{ url_for('team') }}"><span>{{ icon('team') }}</span>My Team</a>
+<a class="act" href="{{ url_for('rewards_guide') }}"><span>{{ icon('upgrade') }}</span>Rewards guide</a>
 <a class="act" href="{{ url_for('profile') }}"><span>{{ icon('profile') }}</span>Profile</a>
+{% if user['is_admin'] %}<a class="act" href="{{ url_for('admin') }}"><span>{{ icon('admin') }}</span>Admin</a>{% endif %}
 </div>
 </section>
 
