@@ -4278,6 +4278,90 @@ REWARDS_GUIDE_BODY = """
  .chart-col>span{font-size:clamp(5.5px,1.65vw,8px);letter-spacing:-.04em}
  .chart-col>small{font-size:clamp(5.5px,1.55vw,7.5px);letter-spacing:-.05em}
 }
+
+/* Mobile-only refinements: keep desktop layout unchanged. */
+@media (max-width: 600px) {
+  /* Keep team reward cards fully inside the phone viewport. */
+  .team-reward-list {
+    grid-template-columns: minmax(0, 1fr) !important;
+    gap: 10px;
+  }
+  .team-reward-list > div {
+    display: grid;
+    grid-template-columns: 44px minmax(0, 1fr);
+    align-items: center;
+    gap: 10px;
+    min-width: 0;
+    padding: 10px;
+  }
+  .team-people {
+    width: 44px;
+    height: 44px;
+  }
+  .team-reward-list > div > span:last-child {
+    min-width: 0;
+    width: 100%;
+  }
+  .team-reward-list b {
+    font-size: .76rem;
+    line-height: 1.25;
+    overflow-wrap: normal;
+  }
+  .team-reward-list strong {
+    display: inline-block;
+    width: fit-content;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 5px 14px;
+    white-space: nowrap;
+    font-size: .95rem;
+  }
+  .team-growth-3d {
+    overflow: hidden;
+    gap: 6px;
+  }
+
+  /* Use compact chart labels on narrow screens so numbers do not collide. */
+  .chart-col > strong {
+    font-size: 0 !important;
+    letter-spacing: 0 !important;
+    white-space: nowrap;
+    line-height: 1;
+    min-height: 1em;
+  }
+  .chart-col > strong::after {
+    font-size: 8px;
+    line-height: 1;
+    font-weight: 800;
+    letter-spacing: -.02em;
+    white-space: nowrap;
+  }
+  .chart-col:nth-child(1) > strong::after { content: "R360"; }
+  .chart-col:nth-child(2) > strong::after { content: "R1.2k"; }
+  .chart-col:nth-child(3) > strong::after { content: "R3.6k"; }
+  .chart-col:nth-child(4) > strong::after { content: "R12k"; }
+  .chart-col:nth-child(5) > strong::after { content: "R20k"; }
+  .chart-col:nth-child(6) > strong::after { content: "R30k"; }
+  .chart-col:nth-child(7) > strong::after { content: "R40k"; }
+
+  .chart-col > span {
+    font-size: 7px !important;
+    letter-spacing: -.02em !important;
+  }
+  .chart-col > small {
+    font-size: 7px !important;
+    letter-spacing: -.02em !important;
+    line-height: 1.1;
+  }
+  .chart-ylabels {
+    font-size: 7px;
+  }
+  .chart-area {
+    grid-template-columns: 44px minmax(0, 1fr);
+    gap: 5px;
+    height: 290px;
+  }
+}
 </style>
 """
 
