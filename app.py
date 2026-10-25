@@ -4203,50 +4203,53 @@ REWARDS_GUIDE_BODY = """
 <section class="level-rewards-3d" aria-label="Illustrative reward by level">
   <div class="level-rewards-header"><div><p class="benefits-kicker">VEDO MARKET · EARN AND GROW</p><h2>Reward by <span>level</span></h2><p>Higher levels · Bigger rewards</p></div><div class="level-badge-3d" aria-hidden="true">↗</div></div>
   <div class="level-chart-3d"><div class="chart-title"><span class="chart-icon">▥</span><strong>Reward by level</strong><small>Daily amount shown in the example</small></div>
-    <div class="chart-area"><div class="chart-ylabels"><span>R1,666.67</span><span>R1,333</span><span>R1,000</span><span>R666.67</span><span>R333.33</span><span>R0</span></div><div class="chart-bars">
+    <div class="chart-area"><div class="chart-ylabels"><span>R1,666.67</span><span>R1,333.33</span><span>R1,000.00</span><span>R666.67</span><span>R333.33</span><span>R0</span></div><div class="chart-bars">
       {% set level_daily = [(1,1500),(2,5000),(3,15000),(4,50000),(5,83333),(6,125000),(7,166667)] %}
       {% for lv, amt in level_daily %}<div class="chart-col"><strong>{{ money(amt) }}</strong><div class="bar-3d" style="--bar-height:{{ (amt / 166667 * 100)|round|int }}%"><i></i></div><span>Level {{ lv }}</span><small>{{ money(amt) }}/day</small></div>{% endfor %}
     </div></div>
   </div>
   <div class="level-table-wrap"><h3><span class="table-icon">▤</span> Reward details &amp; totals</h3><div class="level-table-scroll"><table class="level-rewards-table"><thead><tr><th>Level</th><th>First day</th><th>7-day total</th><th>30-day total</th><th>1-year total</th></tr></thead><tbody>
-  {% for lv, amt in level_daily %}<tr><th data-label="Level"><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td data-label="First-day reward">{{ money(amt) }}</td><td data-label="7-day total">{{ money(amt * 7) }}</td><td data-label="30-day total">{{ money(amt * 30) }}</td><td data-label="1-year total (365 days)">{{ money(amt * 365) }}</td></tr>{% endfor %}
+  {% for lv, amt in level_daily %}<tr><th data-label="Level"><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td data-label="First-day reward">{{ 'R{:,.0f}'.format(amt / 100) }}</td><td data-label="7-day total">{{ 'R{:,.0f}'.format(amt * 7 / 100) }}</td><td data-label="30-day total">{{ 'R{:,.0f}'.format(amt * 30 / 100) }}</td><td data-label="1-year total (365 days)">{{ 'R{:,.0f}'.format(amt * 365 / 100) }}</td></tr>{% endfor %}
   </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities. These figures are not a promise of income.</p></div>
   <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
 </section>
 </div>
 <style>
-/* Reward table: readable columns on desktop; clear stacked rows on phones. */
-.rewards-guide-page{width:min(100% - 28px,1120px);margin:0 auto}
+/* Vedo rewards guide: keep the same five-column table on desktop and mobile. */
+.rewards-guide-page{width:min(calc(100% - 24px),1120px);margin:0 auto}
 .rewards-guide-intro{margin-bottom:18px}
-.level-table-scroll{overflow:visible!important;max-width:100%;width:100%}
-.level-rewards-table{width:100%;table-layout:fixed;border-collapse:collapse;font-size:clamp(.76rem,.95vw,.92rem)}
-.level-rewards-table th,.level-rewards-table td{padding:11px 8px;text-align:center;vertical-align:middle;white-space:normal;overflow-wrap:normal;word-break:normal;line-height:1.3}
-.level-rewards-table thead th{line-height:1.25;font-size:clamp(.68rem,.85vw,.82rem)}
-.level-rewards-table thead th:first-child{width:16%}
-.level-rewards-table thead th:not(:first-child){width:21%}
-.level-rewards-table tbody td{font-weight:800;font-variant-numeric:tabular-nums;white-space:nowrap}
-.level-rewards-table tbody th{width:16%}
-.level-chip{white-space:nowrap}
+.level-table-scroll{width:100%;max-width:100%;overflow:visible!important;border:1px solid #c7ddfa;border-radius:16px;box-shadow:0 6px 0 #d9e8fa}
+.level-rewards-table{width:100%;table-layout:fixed;border-collapse:collapse;border-spacing:0;background:#fff;color:#142746;font-size:clamp(.68rem,.9vw,.9rem)}
+.level-rewards-table th,.level-rewards-table td{box-sizing:border-box;padding:9px 5px;text-align:center;vertical-align:middle;border-right:1px solid #d8e6f8;border-bottom:1px solid #d8e6f8;line-height:1.22;overflow-wrap:normal;word-break:normal}
+.level-rewards-table tr>*:last-child{border-right:0}
+.level-rewards-table thead th{background:linear-gradient(#176de4,#073d9f);color:#fff;font-size:clamp(.62rem,.8vw,.8rem);font-weight:800;text-transform:uppercase;white-space:normal}
+.level-rewards-table thead th:first-child,.level-rewards-table tbody th{width:17%}
+.level-rewards-table thead th:not(:first-child){width:20.75%}
+.level-rewards-table tbody th{background:#f4f9ff}
+.level-rewards-table tbody td{font-weight:850;font-variant-numeric:tabular-nums;white-space:nowrap;letter-spacing:-.015em}
+.level-rewards-table tbody tr:last-child>*{border-bottom:0}
+.level-chip{display:inline-block;max-width:100%;padding:5px 8px;border-radius:99px;background:linear-gradient(#49dfff,#0872f3 65%,#142bb8);box-shadow:0 3px 0 #0c44a5;color:#fff;font-size:clamp(.62rem,.78vw,.78rem);white-space:nowrap}
+.level-2{filter:hue-rotate(8deg)}.level-3{filter:hue-rotate(30deg)}.level-4{filter:hue-rotate(48deg)}.level-5{filter:hue-rotate(300deg)}.level-6{filter:hue-rotate(170deg)}.level-7{filter:hue-rotate(245deg)}
 .level-footnote{font-size:.78rem;line-height:1.55}
 @media(max-width:700px){
- .rewards-guide-page{width:min(100% - 22px,560px)}
- .level-table-scroll{overflow:visible!important}
- .level-rewards-table,.level-rewards-table tbody{display:block;width:100%}
- .level-rewards-table thead{position:absolute;width:1px;height:1px;padding:0;margin:-1px;overflow:hidden;clip:rect(0,0,0,0);white-space:nowrap;border:0}
- .level-rewards-table tr{display:grid;grid-template-columns:1fr 1fr;gap:0;margin:0 0 12px;border:1px solid #c7ddfa;border-radius:13px;overflow:hidden;background:#fff;box-shadow:0 3px 0 #d9e8fa}
- .level-rewards-table tbody th{grid-column:1/-1;width:auto;text-align:left;padding:10px 12px;background:linear-gradient(100deg,#eaf4ff,#fff);border-bottom:1px solid #d8e6f8}
- .level-rewards-table td{display:flex;flex-direction:column;justify-content:center;align-items:flex-start;gap:5px;min-width:0;padding:10px 12px;text-align:left;white-space:normal!important;border-bottom:1px solid #e2ecfa;border-right:1px solid #e2ecfa;font-size:.88rem;font-weight:800;overflow-wrap:normal;word-break:normal;font-variant-numeric:tabular-nums}
- .level-rewards-table td:nth-of-type(2n){border-right:0}
- .level-rewards-table td:before{content:attr(data-label);display:block;color:#50678a;font-size:.69rem;font-weight:700;line-height:1.25}
- .level-rewards-table td:last-child{grid-column:1/-1;background:#f2f7ff;border-bottom:0}
- .level-rewards-table td:last-child:after{content:"";display:none}
- .level-chip{font-size:.78rem;padding:5px 11px}
- .level-footnote{font-size:.75rem}
+ .rewards-guide-page{width:calc(100% - 16px)}
+ .level-table-wrap{margin-top:20px}
+ .level-rewards-table{font-size:clamp(9px,2.45vw,12px)}
+ .level-rewards-table th,.level-rewards-table td{padding:8px 2px;line-height:1.2}
+ .level-rewards-table thead th{font-size:clamp(8px,2.15vw,10.5px);padding:8px 2px;letter-spacing:-.02em}
+ .level-rewards-table thead th:first-child,.level-rewards-table tbody th{width:17%}
+ .level-rewards-table thead th:not(:first-child){width:20.75%}
+ .level-rewards-table tbody td{font-size:clamp(8.5px,2.35vw,11px);letter-spacing:-.04em}
+ .level-chip{padding:4px 3px;font-size:clamp(8px,2.1vw,10px);box-shadow:0 2px 0 #0c44a5}
+ .level-footnote{font-size:.72rem}
  .level-chart-3d{padding:10px}
 }
 @media(max-width:360px){
- .level-rewards-table td{padding:9px 8px;font-size:.82rem}
- .level-rewards-table td:before{font-size:.65rem}
+ .rewards-guide-page{width:calc(100% - 10px)}
+ .level-rewards-table th,.level-rewards-table td{padding-left:1px;padding-right:1px}
+ .level-rewards-table thead th{font-size:7.5px}
+ .level-rewards-table tbody td{font-size:8px;letter-spacing:-.05em}
+ .level-chip{font-size:7.5px;padding:4px 2px}
 }
 </style>
 """
