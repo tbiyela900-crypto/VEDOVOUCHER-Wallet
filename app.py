@@ -1497,6 +1497,27 @@ def _task_guard(user, n):
     return None
 
 
+@app.route("/checkin/tasks")
+@login_required
+def checkin_tasks():
+    db = get_db()
+    user = current_user()
+    if int(user["level"]) < 1:
+        flash("Top up and move up to Level 1 to start earning check-in rewards.", "error")
+        return redirect(url_for("checkin"))
+    day = today().isoformat()
+    total = tasks_for_level(user["level"])
+    rows = db.execute(
+        "SELECT task_no, reward FROM checkin_tasks WHERE user_id=? AND day=? "
+        "AND completed_at IS NOT NULL", (user["id"], day)).fetchall()
+    paid = {r["task_no"]: r["reward"] for r in rows}
+    tasks = [{"no": i, "reward": task_reward_cents(user["level"], i),
+              "done": i in paid} for i in range(1, total + 1)]
+    return page(CHECKIN_TASKS_BODY, user=user, tasks=tasks, total=total,
+                completed_n=len(paid), daily=daily_reward_cents(user["level"]),
+                wait=TASK_WAIT_SECONDS)
+
+
 @app.route("/checkin/<int:n>/start", methods=["POST"])
 @login_required
 def checkin_start(n):
@@ -3661,6 +3682,38 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .refcode code{font-size:1.4rem;padding:8px 16px;}
 
 
+/* ---------- White Vedo digital-voucher task page ---------- */
+.voucher-task-head .eyebrow{font-size:.72rem;font-weight:900;letter-spacing:.16em;color:#b88b31;margin:0 0 6px}
+.voucher-task-head h1{margin:.15rem 0 .45rem}
+.voucher-summary{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:10px;margin:18px 0 12px}
+.voucher-summary>div{padding:12px;border:1px solid rgba(180,145,75,.24);border-radius:12px;background:rgba(245,239,224,.45);display:flex;flex-direction:column;gap:5px;min-width:0}
+.voucher-summary small{font-size:.72rem;color:var(--muted)}
+.voucher-summary strong{font-size:1rem;overflow-wrap:anywhere}
+.voucher-msg{min-height:1.25em;margin:10px 0 0;font-weight:700}
+.voucher-msg.success{color:#21845e}.voucher-msg.error{color:#bd3546}.voucher-msg.loading{color:#98701d}
+.voucher-task-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(260px,1fr));gap:18px;margin-top:18px}
+.voucher-task{position:relative;isolation:isolate;overflow:hidden;text-align:left;padding:18px 19px 14px;min-height:190px;border:1px solid #d4dbea;border-radius:19px;color:#143a79;background:linear-gradient(135deg,#fff 0%,#f4f6fa 100%);box-shadow:0 10px 26px rgba(15,35,74,.13);cursor:pointer;font-family:inherit;transition:transform .2s,box-shadow .2s,border-color .2s}
+.voucher-task:before{content:"";position:absolute;z-index:-1;width:145px;height:145px;right:-35px;top:-60px;border-radius:50%;background:radial-gradient(circle,rgba(68,133,228,.16),transparent 70%)}
+.voucher-task:hover{transform:translateY(-3px);border-color:#6f9fe8;box-shadow:0 14px 30px rgba(15,50,110,.18)}
+.voucher-top,.voucher-main,.voucher-bottom{display:flex;justify-content:space-between;align-items:center;gap:10px}
+.voucher-top b{font-size:1rem;letter-spacing:-.04em;color:#1452a5}.voucher-dot{color:#39c9a4}
+.voucher-top small,.voucher-bottom{font-size:.58rem;font-weight:900;letter-spacing:.07em}
+.voucher-main{padding:16px 0 18px;border-bottom:1px solid #dce3ef}
+.voucher-symbol{width:56px;height:56px;border-radius:17px;border:1px solid #b9cbe6;background:linear-gradient(145deg,#edf4ff,#dce8fb);display:grid;place-items:center;font-size:2.2rem;font-weight:900;font-style:italic;color:#2466bf}
+.voucher-prize{display:flex;flex-direction:column;align-items:flex-end;gap:2px}
+.voucher-prize small{font-size:.58rem;font-weight:900;letter-spacing:.08em}
+.voucher-prize strong{font-size:1.85rem;line-height:1.1;color:#124b9b;overflow-wrap:anywhere}
+.voucher-bottom{padding-top:12px;color:#31537f}
+.voucher-bottom b{white-space:nowrap}
+.voucher-progress{position:absolute;z-index:-1;left:0;bottom:0;height:5px;width:0;background:linear-gradient(90deg,#2e78d3,#e4bd62)}
+.voucher-task.loading{border-color:#d5ad4f;box-shadow:0 0 0 2px rgba(213,173,79,.18),0 12px 28px rgba(15,35,74,.15)}
+.voucher-task.done{border-color:#83cbb1;background:linear-gradient(135deg,#fff,#eefaf5);cursor:default}
+.voucher-task.done .voucher-symbol{color:#21845e;background:#e2f7ed;border-color:#a7dec8}
+.voucher-task.done .voucher-prize strong{color:#21845e}
+.voucher-task:disabled{cursor:default}
+.voucher-back{margin-top:22px}
+@media(max-width:560px){.voucher-task-grid{grid-template-columns:1fr;gap:13px}.voucher-task{min-height:174px;padding:16px}.voucher-summary{gap:6px}.voucher-summary>div{padding:9px 7px}.voucher-summary strong{font-size:.88rem}.voucher-prize strong{font-size:1.65rem}}
+
 /* ---------- Vedo Voucher-inspired check-in task cards ---------- */
 .taskgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:12px;margin-top:16px;}
 .task{
@@ -4774,12 +4827,68 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
       }
       note('', 'ok');
       t.classList.remove('pulse');
-      if (panel) {
-        panel.hidden = false;
-        panel.scrollIntoView({ behavior: 'smooth', block: 'start' });
-      }
+      window.location.href = "{{ url_for('checkin_tasks') }}";
     });
   });
+})();
+</script>
+"""
+
+CHECKIN_TASKS_BODY = """
+<div class="card voucher-task-head">
+  <p class="eyebrow">VEDO REWARDS</p>
+  <h1>Level {{ user['level'] }} Tasks</h1>
+  <p class="muted">Tap a voucher to complete each task. The reward is credited after the loading finishes.</p>
+  <div class="voucher-summary">
+    <div><small>Available balance</small><strong id="bal">{{ money(user['points']) }}</strong></div>
+    <div><small>Today's reward</small><strong>{{ money(daily) }}</strong></div>
+    <div><small>Progress</small><strong id="progtxt">{{ completed_n }} / {{ total }} tasks</strong></div>
+  </div>
+  <div class="bar"><b id="progbar" style="width:{{ (completed_n / total * 100)|int if total else 0 }}%"></b></div>
+  <p id="msg" class="voucher-msg" aria-live="polite"></p>
+</div>
+<div class="voucher-task-grid">
+{% for t in tasks %}
+<button type="button" class="voucher-task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
+ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}" {% if t.done %}disabled{% endif %}>
+ <span class="voucher-top"><b>VEDO<span class="voucher-dot">.</span></b><small>DIGITAL VOUCHER</small></span>
+ <span class="voucher-main"><span class="voucher-symbol">V</span><span class="voucher-prize"><small>TASK {{ t.no }}</small><strong>{{ money(t.reward) }}</strong><small>POINTS REWARD</small></span></span>
+ <span class="voucher-bottom"><span>{{ 'REWARD CLAIMED ✓' if t.done else 'TAP VOUCHER TO COMPLETE' }}</span><b>{{ 'COMPLETED' if t.done else 'VDO · ' ~ '%02d'|format(t.no) }}</b></span>
+ <span class="voucher-progress"></span>
+</button>
+{% endfor %}
+</div>
+<p class="muted voucher-back"><a href="{{ url_for('checkin') }}">← Back to levels</a></p>
+<script>
+(function(){
+ const csrf="{{ csrf_token() }}", waitMs={{ wait }}*1000;
+ const cards=[...document.querySelectorAll('.voucher-task')]; let busy=false;
+ const msg=document.getElementById('msg');
+ function say(text,kind){msg.textContent=text||'';msg.className='voucher-msg '+(kind||'');}
+ function post(url){const fd=new FormData();fd.append('csrf_token',csrf);return fetch(url,{method:'POST',body:fd,credentials:'same-origin'}).then(r=>r.json()).catch(()=>({ok:false,error:'Something went wrong. Reload and try again.'}));}
+ cards.forEach(card=>card.addEventListener('click',()=>{
+   if(busy||card.classList.contains('done'))return; busy=true;
+   cards.forEach(c=>{if(c!==card&&!c.classList.contains('done'))c.disabled=true;});
+   say('Preparing your voucher…','loading');
+   post(card.dataset.start).then(res=>{
+     if(!res.ok)throw new Error(res.error||'Could not start task.');
+     card.classList.add('loading');card.querySelector('.voucher-bottom span').textContent='PROCESSING REWARD…';
+     card.querySelector('.voucher-progress').style.transition='width '+waitMs+'ms linear';
+     requestAnimationFrame(()=>card.querySelector('.voucher-progress').style.width='100%');
+     return new Promise(resolve=>setTimeout(resolve,waitMs+300)).then(()=>post(card.dataset.complete));
+   }).then(res=>{
+     if(!res.ok)throw new Error(res.error||'Could not complete task.');
+     card.classList.remove('loading');card.classList.add('done');card.disabled=true;
+     card.querySelector('.voucher-bottom span').textContent='REWARD CLAIMED ✓';
+     card.querySelector('.voucher-bottom b').textContent='COMPLETED';
+     card.querySelector('.voucher-prize strong').textContent='+'+res.reward_text;
+     document.getElementById('bal').textContent=res.balance;
+     document.getElementById('progtxt').textContent=res.completed+' / '+res.total+' tasks';
+     document.getElementById('progbar').style.width=Math.round(res.completed/res.total*100)+'%';
+     say('Reward added to your balance.'+(res.done?' All tasks completed for today!':''),'success');
+   }).catch(err=>{card.classList.remove('loading');card.querySelector('.voucher-bottom span').textContent=card.dataset.label; say(err.message,'error');})
+   .finally(()=>{busy=false;cards.forEach(c=>{if(!c.classList.contains('done'))c.disabled=false;});});
+ }));
 })();
 </script>
 """
