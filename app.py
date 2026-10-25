@@ -2711,7 +2711,7 @@ def admin_topup(topup_id, action):
             "AND used_by IS NULL LIMIT 1",
             (t["user_id"], t["level"])).fetchone()
         if not already_issued:
-            issued_code = new_voucher_code(t["level"], db)
+            issued_code = new_voucher_code(t["level"])
             db.execute(
                 "INSERT INTO vouchers (code, level, issued_to, created_at) "
                 "VALUES (?,?,?,?)",
@@ -5352,7 +5352,7 @@ UPGRADE_BODY = """
 </style>
 <div class="card">
 <h2>Your Vedo digital voucher</h2>
-<p>Welcome, {{ user['username'] }}. Your top-up request has been approved and your Level {{ voucher_card['level'] }} voucher is ready.</p>
+<p>Welcome, {{ user['username'] }}. Your approved top-up has unlocked this Level {{ voucher_card['level'] }} voucher. Redeem it below to activate your level.</p>
 <div class="vedo-digital-voucher">
   <div class="voucher-topline"><span class="voucher-brand">VEDO<span>.</span></span><span>DIGITAL VOUCHER</span></div>
   <div class="voucher-main"><div class="voucher-mark">V</div><div class="voucher-value"><strong>LEVEL {{ voucher_card['level'] }}</strong><span>UPGRADE VOUCHER</span></div></div>
@@ -5366,7 +5366,7 @@ UPGRADE_BODY = """
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Voucher number</label>
-<input name="voucher" placeholder="Paste your Vedo voucher number" value="{{ voucher_card['code'] }}" autocomplete="off" required>
+<input name="voucher" placeholder="Paste or enter the voucher number from your card" autocomplete="off" required>
 <button class="primary">Redeem voucher and upgrade</button>
 </form>
 </div>
@@ -5375,7 +5375,9 @@ UPGRADE_BODY = """
 <div class="card note">
 <h1>Level upgrade</h1>
 <p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['points']) }}</strong></p>
-{% if next_level %}
+{% if voucher_card %}
+<p>Your approved voucher is ready above. Enter the voucher number shown on the card to activate Level {{ voucher_card['level'] }}.</p>
+{% elif next_level %}
 {% set cost = UPGRADE_COST_CENTS[next_level] %}
 {% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
 <p><strong>Points needed to upgrade:</strong> {{ money(cost) }} to reach Level {{ next_level }}.
@@ -5393,17 +5395,6 @@ Upgrade to Level {{ next_level }}</button>
 {% else %}
 <p class="muted">You are already at the highest level.</p>
 {% endif %}
-</div>
-
-<div class="card">
-<h2>Redeem another level voucher</h2>
-<p class="muted">If you have a voucher from a game or another approved event, enter its number here.</p>
-<form method="post" action="{{ url_for('redeem') }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Level code</label>
-<input name="voucher" placeholder="e.g. S3-ABCD-EFGH" autocomplete="off" required>
-<button class="primary">Redeem</button>
-</form>
 </div>
 
 
