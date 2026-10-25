@@ -1999,6 +1999,11 @@ def upgrade():
     db = get_db()
     user = current_user()
     next_level = user["level"] + 1 if user["level"] < max(LEVELS) else None
+    available_vouchers = db.execute(
+        "SELECT * FROM vouchers WHERE issued_to=? AND used_by IS NULL "
+        "AND level>? ORDER BY level DESC, created_at DESC",
+        (user["id"], user["level"])).fetchall()
+    voucher_card = available_vouchers[0] if available_vouchers else None
 
     if request.method == "POST":
         if next_level is None:
@@ -2026,7 +2031,8 @@ def upgrade():
         flash(f"Upgraded to Level {next_level} for {money(cost)}!", "ok")
         return redirect(url_for("upgrade"))
 
-    return page(UPGRADE_BODY, user=user, next_level=next_level)
+    return page(UPGRADE_BODY, user=user, next_level=next_level,
+                voucher_card=voucher_card)
 
 
 # ============================================================================
@@ -2696,12 +2702,24 @@ def admin_topup(topup_id, action):
         flash("This top-up was already processed.", "error")
         return redirect(url_for("admin"))
 
-    # Approving only marks the request. The balance is NOT increased here:
-    # it grows through check-in, or when the admin uses "Add balance".
+    # Approval issues a personal level voucher for the level requested.
+    # It does not enter a voucher on the top-up form and does not add balance.
+    issued_code = None
+    if action == "approve" and t["level"] in LEVELS:
+        already_issued = db.execute(
+            "SELECT 1 FROM vouchers WHERE issued_to=? AND level=? "
+            "AND used_by IS NULL LIMIT 1",
+            (t["user_id"], t["level"])).fetchone()
+        if not already_issued:
+            issued_code = new_voucher_code(t["level"], db)
+            db.execute(
+                "INSERT INTO vouchers (code, level, issued_to, created_at) "
+                "VALUES (?,?,?,?)",
+                (issued_code, t["level"], t["user_id"], now_iso()))
     db.commit()
     msg = f"Top-up #{topup_id} {new_status.lower()}."
     if action == "approve":
-        msg += " No balance was added."
+        msg += " A personal level voucher is available in the member's Upgrade tab. No balance was added."
     flash(msg, "ok")
     return redirect(url_for("admin"))
 
@@ -5325,6 +5343,35 @@ TEAM_BODY = """
 """
 
 UPGRADE_BODY = """
+{% if voucher_card %}
+<style>
+.vedo-digital-voucher{position:relative;overflow:hidden;max-width:560px;margin:18px auto;padding:24px 26px;border-radius:24px;color:#fff;background:linear-gradient(125deg,#347fd8 0%,#0750b8 48%,#123a88 100%);box-shadow:0 18px 40px rgba(0,0,0,.28);border:1px solid rgba(255,255,255,.3)}
+.vedo-digital-voucher:after{content:'✦';position:absolute;right:22px;top:10px;font-size:30px;color:#9bc8ff}
+.voucher-topline{display:flex;justify-content:space-between;gap:12px;align-items:center;font-size:.72rem;font-weight:900;letter-spacing:.08em}
+.voucher-brand{font-size:1.2rem;font-weight:950}.voucher-brand span{color:#43f0bd}.voucher-main{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:22px 0 18px}.voucher-mark{width:66px;height:66px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.5);border-radius:20px;background:rgba(255,255,255,.12);font-size:2.5rem;font-weight:900;font-style:italic}.voucher-value{text-align:right}.voucher-value strong{display:block;font-size:1.8rem;line-height:1.2}.voucher-value span{font-size:.72rem;font-weight:900;letter-spacing:.12em}.voucher-rule{border-top:1px solid rgba(255,255,255,.35);padding-top:12px;display:flex;justify-content:space-between;gap:10px;font-size:.68rem;font-weight:850;letter-spacing:.04em}.voucher-number{overflow-wrap:anywhere;font-size:1rem;letter-spacing:.08em}.voucher-redeem{max-width:560px;margin:0 auto 22px}.voucher-redeem input{font-size:1rem}
+</style>
+<div class="card">
+<h2>Your Vedo digital voucher</h2>
+<p>Welcome, {{ user['username'] }}. Your top-up request has been approved and your Level {{ voucher_card['level'] }} voucher is ready.</p>
+<div class="vedo-digital-voucher">
+  <div class="voucher-topline"><span class="voucher-brand">VEDO<span>.</span></span><span>DIGITAL VOUCHER</span></div>
+  <div class="voucher-main"><div class="voucher-mark">V</div><div class="voucher-value"><strong>LEVEL {{ voucher_card['level'] }}</strong><span>UPGRADE VOUCHER</span></div></div>
+  <div class="voucher-rule"><span>WELCOME, {{ user['username'] }}</span><span>USER #{{ user['id'] }}</span></div>
+  <p class="voucher-number"><strong>{{ voucher_card['code'] }}</strong></p>
+  <div class="voucher-rule"><span>VEDO REWARDS</span><span>VDO · {{ voucher_card['level'] }}</span></div>
+</div>
+<div class="voucher-redeem">
+<h3>Use your voucher</h3>
+<p class="muted">Scroll here to paste or enter the voucher number shown on your card.</p>
+<form method="post" action="{{ url_for('redeem') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<label>Voucher number</label>
+<input name="voucher" placeholder="Paste your Vedo voucher number" value="{{ voucher_card['code'] }}" autocomplete="off" required>
+<button class="primary">Redeem voucher and upgrade</button>
+</form>
+</div>
+</div>
+{% endif %}
 <div class="card note">
 <h1>Level upgrade</h1>
 <p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['points']) }}</strong></p>
@@ -5349,8 +5396,8 @@ Upgrade to Level {{ next_level }}</button>
 </div>
 
 <div class="card">
-<h2>Redeem a level code</h2>
-<p class="muted">Enter a level code obtained or one you won in a game to move to that level.</p>
+<h2>Redeem another level voucher</h2>
+<p class="muted">If you have a voucher from a game or another approved event, enter its number here.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Level code</label>
