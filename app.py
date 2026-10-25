@@ -3354,7 +3354,7 @@ SPIN_BODY = """
 <div class="spin-prize" id="spinout" aria-live="polite">{{ 'Ready when you are!' if not info.error else info.error }}</div>
 <p class="muted">Plays left: <b id="left">{{ info.left }}</b><br>Points balance: <b id="bal">{{ money(user['points']) }}</b></p>
 {% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}
-<p class="muted small">Prize details and availability are managed by Vedo. Your result is selected securely by the server.</p>
+<p class="muted small">Good luck.</p>
 </div></div></div>
 <div class="card"><h2>🏆 My spins</h2>{% if mine %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Result</th><th>Voucher</th></tr>{% for m in mine %}<tr><td>{{ m['created_at'][:16] }}</td><td>{{ m['result'] }}</td><td>{% if m['voucher'] %}<code>{{ m['voucher'] }}</code>{% else %}—{% endif %}</td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your spin history will appear here.</p>{% endif %}</div>
 <script>
