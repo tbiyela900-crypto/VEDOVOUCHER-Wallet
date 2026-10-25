@@ -636,7 +636,13 @@ def random_block(n):
 
 
 def new_voucher_code(level):
-    return f"S{level}-{random_block(4)}-{random_block(4)}"
+    """Generate a unique voucher code: V followed by digits only."""
+    db = get_db()
+    for _ in range(100):
+        code = "V" + "".join(secrets.choice(string.digits) for _ in range(10))
+        if not db.execute("SELECT 1 FROM vouchers WHERE code=?", (code,)).fetchone():
+            return code
+    raise RuntimeError("Could not generate a unique voucher code")
 
 
 def new_referral_code(db):
@@ -2193,6 +2199,11 @@ def admin_user_profile(user_id):
 @admin_required
 def admin():
     db = get_db()
+
+    # Automatically purge redeemed vouchers whenever an admin opens the page.
+    # Unused and member-issued-but-unredeemed vouchers remain available.
+    db.execute("DELETE FROM vouchers WHERE used_by IS NOT NULL")
+    db.commit()
 
     if request.method == "POST":
         try:
@@ -5556,7 +5567,7 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 </div>
 
 <div class="card">
-<h2>Unused codes ({{ unused|length }})</h2>
+<h2>Available voucher codes ({{ unused|length }})</h2>
 {% if unused %}
 <table>
 <tr><th>Level</th><th>Code</th></tr>
