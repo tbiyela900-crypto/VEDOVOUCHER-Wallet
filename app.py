@@ -223,10 +223,10 @@ OTP_MAX_SENDS = 5               # codes per 30 minutes
 OTP_WINDOW_SECONDS = 1800
 
 # --- Level upgrades --------------------------------------------------------
-# Cost to move from level N-1 to level N = 50% of the difference between the
-# two levels' total rewards. One level at a time, paid from balance.
+# The upgrade cost is the full points amount assigned to the destination
+# level. One level at a time, paid from the member's points balance.
 UPGRADE_COST_CENTS = {
-    lvl: (LEVEL_REWARDS_CENTS[lvl] - LEVEL_REWARDS_CENTS[lvl - 1]) // 2
+    lvl: LEVEL_REWARDS_CENTS[lvl]
     for lvl in LEVELS
 }
 
@@ -5685,5 +5685,4 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
-
 
