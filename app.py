@@ -2206,6 +2206,46 @@ def admin_user_profile(user_id):
 # ADMIN
 # ============================================================================
 
+# Only user activity/request tables can be bulk-cleared from the admin UI.
+# Core account, settings, game configuration, questions, prizes and voucher tables
+# are deliberately excluded so the website cannot be broken by a table wipe.
+ADMIN_CLEARABLE_ACTIVITY_TABLES = {
+    "checkins": "Daily check-in history",
+    "checkin_tasks": "Daily check-in task activity",
+    "topups": "Top-up requests",
+    "withdrawals": "Withdrawal requests",
+    "transactions": "Points transaction ledger",
+    "savings_pots": "Savings pot activity",
+    "game_plays": "Game plays and reward history",
+    "brain_rounds": "Brain Battle rounds",
+    "team_tiers": "Team tier history",
+}
+
+
+@app.route("/admin/activities/clear/<table_name>", methods=["POST"])
+@admin_required
+def admin_clear_activity_table(table_name):
+    """Delete rows from one allow-listed activity table, admin only."""
+    if table_name not in ADMIN_CLEARABLE_ACTIVITY_TABLES:
+        abort(400)
+    db = get_db()
+    try:
+        # Preserve a recovery copy before any destructive bulk action.
+        backup_path = backup_database()
+        # Table names cannot be parameterized; the name is safe because it must
+        # exactly match the fixed allow-list above.
+        count = db.execute(f'DELETE FROM "{table_name}"').rowcount
+        db.commit()
+        flash(f"Deleted {count} row(s) from {table_name}. Backup saved before deletion.", "ok")
+        app.logger.warning("Admin cleared activity table %s (%s rows); backup=%s",
+                           table_name, count, backup_path)
+    except Exception:
+        db.rollback()
+        app.logger.exception("Could not clear admin activity table %s", table_name)
+        flash(f"Could not clear {table_name}. No changes were committed.", "error")
+    return redirect(url_for("admin", table_q=request.form.get("table_q", "")))
+
+
 @app.route("/admin", methods=["GET", "POST"])
 @admin_required
 def admin():
@@ -2311,11 +2351,23 @@ def admin():
         "JOIN users u ON u.id = d.user_id WHERE d.user_id<>0 "
         "ORDER BY d.updated_at DESC").fetchall()
 
+    # Admin table finder: search by table name/description and show row counts.
+    table_q = request.args.get("table_q", "").strip()[:60]
+    activity_tables = []
+    for table_name, description in ADMIN_CLEARABLE_ACTIVITY_TABLES.items():
+        if table_q and table_q.casefold() not in table_name.casefold() \
+                and table_q.casefold() not in description.casefold():
+            continue
+        row_count = db.execute(f'SELECT COUNT(*) FROM "{table_name}"').fetchone()[0]
+        activity_tables.append({"name": table_name, "description": description,
+                                "count": row_count})
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
                 unused=unused, used_vouchers_count=used_vouchers_count,
                 all_vouchers_count=all_vouchers_count, q=q, specific=specific,
-                hidden_users=hidden_users,
+                hidden_users=hidden_users, table_q=table_q,
+                activity_tables=activity_tables,
                 gd=global_details, specific_details=specific_details,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
@@ -5360,6 +5412,29 @@ PROFILE_BODY = """
 """
 
 ADMIN_BODY = """
+<div class="card">
+<h2>Search activity tables / delete activity</h2>
+<p class="muted">Search for a table by name or description. You can clear all rows from the selected activity table. Member accounts, balances, game settings, prizes, questions and vouchers are not available for bulk deletion here. A database backup is made before each deletion.</p>
+<form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+<input name="table_q" value="{{ table_q }}" maxlength="60" autocomplete="off" placeholder="Search table name, e.g. withdrawals" style="flex:1;min-width:220px">
+<button class="primary" style="margin-top:0">Search tables</button>
+{% if table_q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
+</form>
+{% if activity_tables %}
+<table>
+<tr><th>Table name</th><th>What it stores</th><th>Rows</th><th>Action</th></tr>
+{% for t in activity_tables %}
+<tr><td><code>{{ t['name'] }}</code></td><td>{{ t['description'] }}</td><td>{{ t['count'] }}</td><td>
+<form method="post" action="{{ url_for('admin_clear_activity_table', table_name=t['name']) }}" onsubmit="return confirm('PERMANENTLY delete all {{ t['count'] }} row(s) from table {{ t['name'] }}? A backup will be created first. This cannot be undone from the website.');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="table_q" value="{{ table_q }}">
+<button class="danger" {% if not t['count'] %}disabled{% endif %}>Delete all rows</button>
+</form></td></tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No activity tables match that search.</p>{% endif %}
+</div>
+
 <div class="card note">
 <h2>Phase 1 games</h2>
 <p class="muted">Spin &amp; Win, Brain Battle and Mystery Envelope: prizes, odds, stock, limits, schedule and winner records.</p>
