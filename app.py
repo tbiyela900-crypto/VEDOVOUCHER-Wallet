@@ -307,6 +307,8 @@ ICONS = {
     "fingerprint": ('<path d="M3.5 10A9 9 0 0120.5 10"/>'
                     '<path d="M6 13a6 6 0 0112 0v1.5"/>'
                     '<path d="M9 20c.6-1.5 1-3 1-5v-3a2 2 0 014 0v3c0 2.5.5 4 1.5 5.5"/>'),
+    "checkin": ('<rect x="3" y="5" width="18" height="16" rx="2"/>'
+                '<path d="M7 3v4M17 3v4M3 10h18M8 15l2.5 2.5L16 12"/>'),
 }
 
 
@@ -1445,11 +1447,9 @@ def dashboard():
         "SELECT COUNT(*) AS n FROM checkin_tasks WHERE user_id=? AND day=? "
         "AND completed_at IS NOT NULL",
         (user["id"], today().isoformat())).fetchone()["n"]
-    posts = db.execute(
-        "SELECT * FROM admin_posts ORDER BY id DESC LIMIT 20").fetchall()
 
     return page(DASH_BODY, task_total=task_total, task_done=task_done,
-                posts=posts, user=user, done=done, next_streak=next_streak,
+                user=user, done=done, next_streak=next_streak,
                 history=history, recent_tx=recent_tx, locked=locked,
                 reward=reward)
 
@@ -1642,6 +1642,9 @@ def _remove_upload(name):
 @app.route("/admin/post", methods=["POST"])
 @admin_required
 def admin_post():
+    flash("Dashboard community updates have been discontinued.", "error")
+    return redirect(url_for("admin"))
+
     caption = request.form.get("caption", "").strip()[:300]
     photo = request.files.get("photo")
 
@@ -1669,6 +1672,9 @@ def admin_post():
 @app.route("/admin/post/<int:post_id>/delete", methods=["POST"])
 @admin_required
 def admin_post_delete(post_id):
+    flash("Dashboard community updates have been discontinued.", "error")
+    return redirect(url_for("admin"))
+
     db = get_db()
     post = db.execute("SELECT * FROM admin_posts WHERE id=?",
                       (post_id,)).fetchone()
@@ -2905,6 +2911,14 @@ def envelope_open():
         return jsonify(ok=False, error=info["error"]), 400
 
     gm = info["g"]
+    already_opened = db.execute(
+        "SELECT id FROM game_plays WHERE user_id=? AND game='ENVELOPE' "
+        "AND event_no=? LIMIT 1",
+        (user["id"], gm["event_no"])).fetchone()
+    if already_opened:
+        db.rollback()
+        return jsonify(ok=False, error="You have already opened your envelope for this event."), 409
+
     reward = gm["min_reward"]
     voucher, level = "", gm["bonus_level"]
 
@@ -4500,16 +4514,11 @@ DASH_BODY = """
 <span class="chip">Level {{ user['level'] }}</span>
 <span class="chip">{{ money(locked) }} in pots</span>
 </div>
-<div class="actions" id="heroactions" aria-label="All Vedo menu tabs">
-<a class="act" href="{{ url_for('dashboard') }}"><span>{{ icon('home') }}</span>Home</a>
-<a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
+<div class="actions" id="heroactions" aria-label="Quick access">
 <a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
-<a class="act" href="{{ url_for('games_hub') }}"><span>{{ icon('games') }}</span>Games</a>
 <a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Savings pots</a>
-<a class="act" href="{{ url_for('team') }}"><span>{{ icon('team') }}</span>My Team</a>
-<a class="act" href="{{ url_for('rewards_guide') }}"><span>{{ icon('upgrade') }}</span>Rewards guide</a>
-<a class="act" href="{{ url_for('profile') }}"><span>{{ icon('profile') }}</span>Profile</a>
+<a class="act" href="{{ url_for('checkin') }}"><span>{{ icon('checkin') }}</span>Daily check-in</a>
 {% if user['is_admin'] %}<a class="act" href="{{ url_for('admin') }}"><span>{{ icon('admin') }}</span>Admin</a>{% endif %}
 </div>
 </section>
@@ -4531,189 +4540,7 @@ DASH_BODY = """
   </div>
 </section>
 
-<section class="posts-section" aria-label="Latest community posts">
-<div class="feedhead">
-<h2>Latest updates</h2>
-{% if posts %}<span class="pill">{{ posts|length }} post{{ 's' if posts|length > 1 }}</span>{% endif %}
-</div>
-{% if posts %}
-<div class="hs" id="hs" tabindex="0" aria-roledescription="carousel" aria-label="Posts from the admin">
-<div class="hs-stage">
-{% for p in posts %}
-<figure class="hs-slide{{ ' active' if loop.first }}">
-<div class="hs-bg" style="background-image:url('{{ url_for('media', filename=p['image']) }}')"></div>
-<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}">
-<div class="hs-shade"></div>
-<span class="hs-count">{{ loop.index }} / {{ posts|length }}</span>
-{% if me['is_admin'] %}
-<form class="hs-del" method="post" action="{{ url_for('admin_post_delete', post_id=p['id']) }}" onsubmit="return confirm('Delete this post?');">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="danger">Delete</button>
-</form>
-{% endif %}
-<figcaption>
-<span class="post-label">VEDO COMMUNITY</span>
-<small>{{ p['created_at'][:10] }}</small>
-{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% else %}<strong>Latest update</strong>{% endif %}
-</figcaption>
-</figure>
-{% endfor %}
-</div>
-{% if posts|length > 1 %}
-<button type="button" class="hs-nav prev" aria-label="Previous post">&#8249;</button>
-<button type="button" class="hs-nav next" aria-label="Next post">&#8250;</button>
-<div class="hs-bars">{% for p in posts %}<i><b></b></i>{% endfor %}</div>
-{% endif %}
-</div>
-<p class="muted small hs-hint">Tap a photo to open it full screen{% if posts|length > 1 %} and swipe through all posts{% endif %}.</p>
 
-<div class="lb" id="lb" tabindex="-1" role="dialog" aria-modal="true" aria-label="Posts from the admin">
-<button type="button" class="lb-x" aria-label="Close">&times;</button>
-<span class="lb-count" id="lbcount"></span>
-<div class="lb-track" id="lbtrack">
-{% for p in posts %}
-<figure class="lb-item">
-<img src="{{ url_for('media', filename=p['image']) }}" alt="{{ p['caption'] }}" loading="lazy">
-<figcaption>
-<span class="post-label">VEDO COMMUNITY</span>
-<small>{{ p['created_at'][:10] }}</small>
-{% if p['caption'] %}<strong>{{ p['caption'] }}</strong>{% else %}<strong>Latest update</strong>{% endif %}
-</figcaption>
-</figure>
-{% endfor %}
-</div>
-{% if posts|length > 1 %}
-<button type="button" class="lb-nav lb-prev" aria-label="Previous post">&#8249;</button>
-<button type="button" class="lb-nav lb-next" aria-label="Next post">&#8250;</button>
-<div class="lb-hint">Swipe left or right</div>
-{% endif %}
-</div>
-
-<script>
-(function () {
-  var hs = document.getElementById('hs');
-  if (!hs) { return; }
-  var slides = hs.querySelectorAll('.hs-slide');
-  var bars = hs.querySelectorAll('.hs-bars i');
-  var many = slides.length > 1;
-  var i = 0;
-
-  var lb = document.getElementById('lb');
-  var track = document.getElementById('lbtrack');
-  var count = document.getElementById('lbcount');
-  var lbIdx = 0;
-
-  function show(n) {
-    if (!many) { return; }
-    slides[i].classList.remove('active');
-    i = (n + slides.length) % slides.length;
-    slides[i].classList.add('active');
-    bars.forEach(function (bar, k) {
-      bar.classList.remove('active');
-      bar.classList.toggle('done', k < i);
-    });
-    void hs.offsetWidth;
-    bars[i].classList.add('active');
-  }
-
-  function lbGo(n, smooth) {
-    lbIdx = Math.max(0, Math.min(slides.length - 1, n));
-    track.scrollTo({ left: lbIdx * track.clientWidth, behavior: smooth ? 'smooth' : 'auto' });
-    count.textContent = (lbIdx + 1) + ' / ' + slides.length;
-  }
-
-  function openLb(n) {
-    lb.classList.add('open');
-    document.body.style.overflow = 'hidden';
-    hs.classList.add('paused');
-    lbGo(n, false);
-    lb.focus();
-  }
-
-  function closeLb() {
-    lb.classList.remove('open');
-    document.body.style.overflow = '';
-    hs.classList.remove('paused');
-    show(lbIdx);
-  }
-
-  /* open the full-screen viewer by tapping the picture */
-  slides.forEach(function (s, k) {
-    s.addEventListener('click', function (e) {
-      if (e.target.closest('.hs-del')) { return; }
-      openLb(k);
-    });
-  });
-
-  /* full-screen viewer: swipe (native scroll-snap), arrows, keys, close */
-  track.addEventListener('scroll', function () {
-    var n = Math.round(track.scrollLeft / track.clientWidth);
-    if (n !== lbIdx) {
-      lbIdx = n;
-      count.textContent = (lbIdx + 1) + ' / ' + slides.length;
-    }
-  });
-  lb.querySelector('.lb-x').addEventListener('click', closeLb);
-  lb.addEventListener('click', function (e) {
-    if (e.target === lb || e.target.classList.contains('lb-item')) { closeLb(); }
-  });
-  var lbPrev = lb.querySelector('.lb-prev');
-  var lbNext = lb.querySelector('.lb-next');
-  if (lbPrev) { lbPrev.addEventListener('click', function () { lbGo(lbIdx - 1, true); }); }
-  if (lbNext) { lbNext.addEventListener('click', function () { lbGo(lbIdx + 1, true); }); }
-  document.addEventListener('keydown', function (e) {
-    if (!lb.classList.contains('open')) { return; }
-    if (e.key === 'Escape') { closeLb(); }
-    if (e.key === 'ArrowLeft') { lbGo(lbIdx - 1, true); }
-    if (e.key === 'ArrowRight') { lbGo(lbIdx + 1, true); }
-  });
-
-  if (!many) { return; }
-
-  /* auto-sliding showcase on the dashboard */
-  hs.addEventListener('animationend', function (e) {
-    if (e.animationName === 'hsfill') { show(i + 1); }
-  });
-  hs.querySelector('.prev').addEventListener('click', function () { show(i - 1); });
-  hs.querySelector('.next').addEventListener('click', function () { show(i + 1); });
-  bars.forEach(function (bar, k) { bar.addEventListener('click', function () { show(k); }); });
-
-  hs.addEventListener('mouseenter', function () { hs.classList.add('paused'); });
-  hs.addEventListener('mouseleave', function () {
-    if (!lb.classList.contains('open')) { hs.classList.remove('paused'); }
-  });
-  hs.addEventListener('keydown', function (e) {
-    if (e.key === 'ArrowLeft') { show(i - 1); }
-    if (e.key === 'ArrowRight') { show(i + 1); }
-  });
-
-  var x0 = null;
-  hs.addEventListener('touchstart', function (e) { x0 = e.touches[0].clientX; hs.classList.add('paused'); }, { passive: true });
-  hs.addEventListener('touchend', function (e) {
-    if (!lb.classList.contains('open')) { hs.classList.remove('paused'); }
-    if (x0 === null) { return; }
-    var dx = e.changedTouches[0].clientX - x0;
-    x0 = null;
-    if (Math.abs(dx) > 40) { show(dx < 0 ? i + 1 : i - 1); }
-  });
-
-  show(0);
-})();
-</script>
-{% else %}
-<div class="hs-empty">Updates will show up here.</div>
-{% endif %}
-{% if me['is_admin'] %}
-<form method="post" action="{{ url_for('admin_post') }}" enctype="multipart/form-data" style="margin-top:16px">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Post a photo (PNG, JPG, GIF or WEBP, max 30 MB)</label>
-<input type="file" name="photo" accept="image/png,image/jpeg,image/gif,image/webp" required>
-<label>Caption</label>
-<input name="caption" maxlength="300" placeholder="Write a caption for this photo">
-<button class="primary">Post photo</button>
-</form>
-{% endif %}
-</section>
 
 
 </div>
@@ -4726,40 +4553,6 @@ DASH_BODY = """
 </form>
 </div>
 
-<div class="card">
-<h2>&#9993; Mystery Envelope</h2>
-<p class="muted">Open your envelope for guaranteed points or a bonus voucher. Also try Spin &amp; Win and Brain Battle.</p>
-<a class="btnlink" href="{{ url_for('envelope_page') }}">Open my envelope</a>
-<a class="btnlink" href="{{ url_for('games_hub') }}" style="margin-left:6px">All games</a>
-</div>
-
-<section class="card">
-<h2>Where your money is</h2>
-<div class="moneywrap">
-<div class="donutwrap">
-<svg class="donut" viewBox="0 0 100 100" role="img" aria-label="Available versus locked balance">
-<circle class="ring" cx="50" cy="50" r="40"/>
-{% if total %}
-<circle class="a1" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format(pct * 2.5133) }} 251.33"/>
-<circle class="a2" cx="50" cy="50" r="40" stroke-dasharray="{{ '%.2f'|format((100 - pct) * 2.5133) }} 251.33" stroke-dashoffset="-{{ '%.2f'|format(pct * 2.5133) }}"/>
-{% endif %}
-</svg>
-<div class="donut-mid"><b>{{ money(total) }}</b><span>Total</span></div>
-</div>
-<div class="moneyside">
-<div class="legend">
-<span><i style="background:var(--brand)"></i>Available {{ money(user['points']) }}</span>
-<span><i style="background:var(--violet)"></i>Locked {{ money(locked) }}</span>
-</div>
-{% if next_cost %}
-<div class="progtxt"><span>Next: Level {{ user['level'] + 1 }}</span><span>{{ lvl_pct }}% of {{ money(next_cost) }}</span></div>
-<div class="bar"><b style="width:{{ lvl_pct }}%"></b></div>
-{% else %}
-<p class="muted small">You are at the highest level.</p>
-{% endif %}
-</div>
-</div>
-</section>
 
 <div class="card">
 <h2>Recent activity</h2>
