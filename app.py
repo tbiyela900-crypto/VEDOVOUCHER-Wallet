@@ -4,13 +4,13 @@ Vedo Ai Investment  -  advanced interface edition
 
 Features
   * Accounts, login/logout, members start at Level 0 and earn 0 until top up
-  * Sign-up uses an 11-digit BA Number + a CELLPHONE NUMBER that must be
+  * Sign-up uses an 11-digit Bank Account  number + a CELLPHONE NUMBER that must be
     verified with an SMS one-time code (OTP) before the first login.
     The verified cellphone number IS the login ID.
   * TOP-UP page looks like the check-in page: the member taps a level tile,
     enters an amount and presses Enter. The tiles close and a WHITE details
     tab opens for 10 minutes showing the Bank Name, Reference, Amount,
-    PayShap and BA Number, a small Top-up flag and a red message. ALL of
+    PayShap and Bank Account  number, a small Top-up flag and a red message. ALL of
     that information is entered by the admin only (Admin page > Top-up
     details, for everyone or for one member). The member can copy every line.
   * Admin approval of a top-up only marks it approved. It does NOT add any
@@ -892,7 +892,7 @@ def init_db():
         "SELECT 1 FROM users WHERE is_admin=1"
     ).fetchone():
 
-        # Admin does not use a real BA Number
+        # Admin does not use a real Bank Account  number
         admin_serial_number = "00000000000"
 
         db.execute(
@@ -1094,11 +1094,11 @@ def register():
             error = ("Enter a valid South African cellphone number, "
                      "for example 082 123 4567 or +27 82 123 4567.")
 
-        # Validate BA Number (exactly 11 digits)
+        # Validate Bank Account  number (exactly 11 digits)
         elif (not serial_number.isascii()
                 or not serial_number.isdigit()
                 or len(serial_number) != 11):
-            error = "BA Number must contain exactly 11 digits."
+            error = "Bank Account  number must contain exactly 11 digits."
 
         # Validate password
         elif len(password) < 8:
@@ -1148,7 +1148,7 @@ def register():
                              "verified. Log in with it and your password to "
                              "get a new SMS code.")
 
-        # Check duplicate BA Number
+        # Check duplicate Bank Account  number
         if not error:
             existing_serial = db.execute(
                 "SELECT 1 FROM users WHERE serial_number=?",
@@ -1156,7 +1156,7 @@ def register():
             ).fetchone()
 
             if existing_serial:
-                error = "That BA Number is already registered."
+                error = "That Bank Account  number is already registered."
 
         # Display validation errors
         if error:
@@ -1220,7 +1220,7 @@ def register():
         except sqlite3.IntegrityError:
             db.rollback()
             flash(
-                "That cellphone number or BA Number is already registered.",
+                "That cellphone number or Bank Account  number is already registered.",
                 "error"
             )
             return redirect(url_for("register"))
@@ -1816,7 +1816,7 @@ def topup():
             ("Reference", val("Reference")),
             ("Amount", val("Amount")),
             ("PayShap", val("PayShap")),
-            ("BA Number", val("BA_number")),
+            ("Bank Account  number", val("BA_number")),
         ]
         req_rows = [
             ("Level", f"Level {active['level']}"),
@@ -4059,7 +4059,7 @@ REGISTER_BODY = """
 <p class="muted">You start at Level 0 top up after logged in.</p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>BA Number (11 digits)</label>
+<label>Bank Account  number (11 digits)</label>
 <input name="serial_number" value="{{ form.get('serial_number','') }}" inputmode="numeric" pattern="[0-9]{11}" minlength="11" maxlength="11" placeholder="11 digits" autocomplete="off" required autofocus>
 <label>South African cellphone number (this will be your login)</label>
 <input type="tel" name="phone" value="{{ form.get('phone','') }}" inputmode="tel" autocomplete="tel" maxlength="20" placeholder="e.g. 082 123 4567" required>
@@ -4894,7 +4894,7 @@ PROFILE_BODY = """
 </div>
 <dl class="kv">
 <div><dt>Login (cellphone number)</dt><dd>{{ member['username'] }}{% if member['is_admin'] %} <span class="badge">admin</span>{% endif %}</dd></div>
-<div><dt>BA Number</dt><dd>{{ member['serial_number'] }}</dd></div>
+<div><dt>Bank Account  number</dt><dd>{{ member['serial_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
 <div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
@@ -4916,7 +4916,7 @@ ADMIN_BODY = """
 <div class="card">
 <h2>Search users</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
-<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, BA Number or referral code" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Bank Account  number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
 {% if q %}<a href="{{ url_for('admin') }}">Clear</a>{% endif %}
 </form>
@@ -4957,7 +4957,7 @@ ADMIN_BODY = """
 <input name="Amount" maxlength="100" value="{{ gd['Amount'] if gd else '' }}">
 <label>PayShap</label>
 <input name="PayShap" maxlength="100" value="{{ gd['PayShap'] if gd else '' }}">
-<label>BA Number</label>
+<label>Bank Account  number</label>
 <input name="BA_number" maxlength="100" value="{{ gd['BA_number'] if gd else '' }}">
 <label>Message (shown in red)</label>
 <textarea name="message" rows="3" maxlength="500" placeholder="Write the message members must read">{{ gd['message'] if gd else '' }}</textarea>
