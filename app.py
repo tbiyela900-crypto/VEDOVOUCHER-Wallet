@@ -3931,6 +3931,8 @@ label.chk input{width:auto;margin:0;}
 
 
 /* ---------- code-rendered, layered 3D Vedo dashboard benefit boards ---------- */
+.vedo-rewards-showcase[hidden]{display:none!important}
+.vedo-rewards-showcase{scroll-margin-top:90px}
 .vedo-benefits,.level-rewards-3d{grid-column:1/-1;position:relative;isolation:isolate;margin:22px 0;padding:clamp(18px,3vw,30px);border:1px solid rgba(80,151,255,.28);border-radius:25px;background:radial-gradient(ellipse at 50% 0%,rgba(43,127,255,.14),transparent 48%),linear-gradient(145deg,#fafdff 0%,#eef6ff 52%,#e4efff 100%);color:#10254e;box-shadow:0 18px 35px rgba(3,22,62,.18),inset 0 1px 0 #fff;overflow:hidden}
 .vedo-benefits:before,.level-rewards-3d:before{content:"";position:absolute;inset:0;z-index:-1;opacity:.25;background-image:radial-gradient(#5ba6ff .7px,transparent .7px);background-size:8px 8px;mask-image:linear-gradient(130deg,black,transparent 75%)}
 .benefits-heading{display:flex;align-items:center;gap:18px;margin-bottom:22px}.vedo-mark-3d{flex:none;width:68px;height:68px;display:grid;place-items:center;border-radius:20px;background:linear-gradient(145deg,#56dcff 0%,#0878ff 52%,#1028b8 100%);box-shadow:0 8px 0 #0d3eaa,0 17px 22px #1d62c94a,inset 0 2px 2px #ffffffb8;color:#fff;font-size:2.7rem;font-weight:900;text-shadow:0 3px 1px #0b4eaa;transform:rotate(-3deg)}
@@ -4187,6 +4189,23 @@ DASH_BODY = """
 </div>
 </section>
 
+<section class="voucher-promo" aria-label="Vedo digital vouchers promotion">
+  <div class="voucher-copy">
+    <span class="voucher-eyebrow">VEDO REWARDS · MEMBER EXCLUSIVE</span>
+    <h2>Digital gift vouchers,<br><span>the Vedo way.</span></h2>
+    <p>Play, participate and discover rewards. Your next Vedo voucher could be waiting.</p>
+    <a class="voucher-cta" href="#vedo-rewards-showcase" id="exploreVedoRewards" aria-controls="vedo-rewards-showcase" aria-expanded="false">Explore rewards <span aria-hidden="true">→</span></a>
+    <div class="voucher-trust"><span class="voucher-check">✓</span> Rewards and eligibility shown in your Vedo account</div>
+  </div>
+  <div class="voucher-art" aria-hidden="true">
+    <div class="gift-card gift-card-back"><div class="gift-brand">VEDO <small>REWARDS</small></div><div class="gift-chip">GIFT VOUCHER</div><div class="gift-value">SPECIAL<br>REWARD</div><div class="gift-foot">A little something, just for you</div></div>
+    <div class="gift-card gift-card-front"><div class="gift-card-top"><span class="gift-brand">VEDO<span class="gift-dot">●</span></span><span class="gift-tag">DIGITAL VOUCHER</span></div><div class="gift-main">
+      <div class="gift-emblem">V</div><div class="gift-value-main">R250<small>VOUCHER</small></div>
+    </div><div class="gift-card-bottom"><span>GIFT SOMETHING GOOD</span><span class="gift-code">VDO · 250</span></div></div>
+    <div class="voucher-spark spark-one">✦</div><div class="voucher-spark spark-two">✧</div>
+  </div>
+</section>
+
 <section class="posts-section" aria-label="Latest community posts">
 <div class="feedhead">
 <h2>Latest updates</h2>
@@ -4435,6 +4454,8 @@ DASH_BODY = """
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
 </div>
 
+<!-- 3D rewards stay hidden until the promotional board is opened. -->
+<div id="vedo-rewards-showcase" class="vedo-rewards-showcase" hidden>
 <!-- 3D, code-rendered Vedo rewards showcase: no infographic images are used. -->
 <section class="vedo-benefits" aria-label="Vedo member benefits">
   <header class="benefits-heading">
@@ -4482,25 +4503,26 @@ DASH_BODY = """
   <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
 </section>
 
-<section class="voucher-promo" aria-label="Vedo digital vouchers promotion">
-  <div class="voucher-copy">
-    <span class="voucher-eyebrow">VEDO REWARDS · MEMBER EXCLUSIVE</span>
-    <h2>Digital gift vouchers,<br><span>the Vedo way.</span></h2>
-    <p>Play, participate and discover rewards. Your next Vedo voucher could be waiting.</p>
-    <a class="voucher-cta" href="{{ url_for('games_hub') }}">Explore rewards <span aria-hidden="true">→</span></a>
-    <div class="voucher-trust"><span class="voucher-check">✓</span> Rewards and eligibility shown in your Vedo account</div>
-  </div>
-  <div class="voucher-art" aria-hidden="true">
-    <div class="gift-card gift-card-back"><div class="gift-brand">VEDO <small>REWARDS</small></div><div class="gift-chip">GIFT VOUCHER</div><div class="gift-value">SPECIAL<br>REWARD</div><div class="gift-foot">A little something, just for you</div></div>
-    <div class="gift-card gift-card-front"><div class="gift-card-top"><span class="gift-brand">VEDO<span class="gift-dot">●</span></span><span class="gift-tag">DIGITAL VOUCHER</span></div><div class="gift-main">
-      <div class="gift-emblem">V</div><div class="gift-value-main">R250<small>VOUCHER</small></div>
-    </div><div class="gift-card-bottom"><span>GIFT SOMETHING GOOD</span><span class="gift-code">VDO · 250</span></div></div>
-    <div class="voucher-spark spark-one">✦</div><div class="voucher-spark spark-two">✧</div>
-  </div>
-</section>
+
+
+</div>
 
 <script>
 (function () {
+  var explore = document.getElementById("exploreVedoRewards");
+  var showcase = document.getElementById("vedo-rewards-showcase");
+  if (explore && showcase) {
+    explore.addEventListener("click", function (event) {
+      event.preventDefault();
+      showcase.hidden = !showcase.hidden;
+      explore.setAttribute("aria-expanded", String(!showcase.hidden));
+      if (!showcase.hidden) {
+        window.setTimeout(function () {
+          showcase.scrollIntoView({ behavior: "smooth", block: "start" });
+        }, 30);
+      }
+    });
+  }
   var btn = document.getElementById('fp');
   var menu = document.getElementById('heroactions');
   var cap = document.getElementById('fpcap');
