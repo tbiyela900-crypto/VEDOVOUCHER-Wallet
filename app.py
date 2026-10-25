@@ -3661,17 +3661,58 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .refcode code{font-size:1.4rem;padding:8px 16px;}
 
 
-/* ---------- check-in tasks & admin posts ---------- */
-.taskgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;margin-top:14px;}
-.task{position:relative;overflow:hidden;text-align:left;background:var(--s2);color:var(--ink);border:1px solid var(--line);border-radius:14px;padding:16px;cursor:pointer;font-family:inherit;font-size:.95rem;}
-.task:hover{border-color:var(--brand);}
-.task .fill{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(31,214,164,.28);}
-.task .tl{position:relative;display:flex;flex-direction:column;gap:4px;}
-.task .tr{color:var(--muted);font-size:.85rem;}
-.task.loading .tr{color:var(--brand);}
-.task.done{background:rgba(39,214,155,.12);border-color:rgba(39,214,155,.4);cursor:default;}
-.task.done .tr{color:var(--up);}
-.task.locked{opacity:.45;cursor:not-allowed;}
+/* ---------- Vedo Voucher-inspired check-in task cards ---------- */
+.taskgrid{display:grid;grid-template-columns:repeat(auto-fill,minmax(165px,1fr));gap:12px;margin-top:16px;}
+.task{
+  position:relative;isolation:isolate;overflow:hidden;text-align:left;
+  min-height:112px;padding:17px 16px 15px;
+  color:#f8f5ff;
+  background:linear-gradient(145deg,#211a2d 0%,#17131f 58%,#282035 100%);
+  border:1px solid rgba(204,169,255,.24);border-radius:17px;
+  cursor:pointer;font-family:inherit;font-size:.95rem;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.045),0 8px 22px rgba(0,0,0,.12);
+  transition:transform .18s ease,border-color .18s ease,box-shadow .18s ease,background .18s ease;
+}
+.task:before{
+  content:"";position:absolute;z-index:-1;right:-25px;top:-38px;width:105px;height:105px;
+  border-radius:50%;background:radial-gradient(circle,rgba(231,190,95,.17),rgba(231,190,95,0) 70%);
+  pointer-events:none;
+}
+.task:after{
+  content:"";position:absolute;right:13px;top:13px;width:23px;height:23px;
+  border:1px solid rgba(239,202,119,.38);border-radius:8px;
+  background:linear-gradient(145deg,rgba(239,202,119,.16),rgba(239,202,119,.035));
+  pointer-events:none;
+}
+.task:hover{transform:translateY(-2px);border-color:rgba(239,202,119,.75);box-shadow:0 12px 28px rgba(0,0,0,.2),0 0 0 1px rgba(239,202,119,.08);}
+.task .fill{position:absolute;z-index:-1;left:0;top:0;bottom:0;width:0;background:linear-gradient(90deg,rgba(115,73,157,.28),rgba(239,202,119,.17));}
+.task .tl{position:relative;display:flex;flex-direction:column;gap:9px;padding-top:13px;}
+.task .tl b{font-size:.97rem;letter-spacing:.01em;}
+.task .tr{
+  display:inline-flex;align-items:center;align-self:flex-start;gap:5px;
+  color:#f0cc7a;font-size:.8rem;font-weight:800;letter-spacing:.025em;
+  background:rgba(239,202,119,.09);border:1px solid rgba(239,202,119,.24);
+  border-radius:999px;padding:5px 9px;
+}
+.task.loading{border-color:#d8b56b;box-shadow:0 0 0 1px rgba(239,202,119,.12),0 0 24px rgba(239,202,119,.11);}
+.task.loading .tr{color:#ffe4a3;background:rgba(239,202,119,.16);}
+.task.done{
+  background:linear-gradient(145deg,#29223a 0%,#1c2927 100%);
+  border-color:rgba(112,220,177,.55);cursor:default;
+  box-shadow:inset 0 1px 0 rgba(255,255,255,.04),0 0 22px rgba(112,220,177,.07);
+}
+.task.done:before{background:radial-gradient(circle,rgba(112,220,177,.2),rgba(112,220,177,0) 70%);}
+.task.done:after{content:"✓";display:grid;place-items:center;color:#9ce8c8;font-weight:900;border-color:rgba(112,220,177,.5);background:rgba(112,220,177,.12);}
+.task.done .tr{color:#9ce8c8;background:rgba(112,220,177,.1);border-color:rgba(112,220,177,.28);}
+.task.locked{opacity:.48;cursor:not-allowed;transform:none;box-shadow:none;}
+@media(max-width:560px){
+  .taskgrid{grid-template-columns:repeat(2,minmax(0,1fr));gap:9px;}
+  .task{min-height:106px;padding:14px 12px 12px;border-radius:15px;}
+  .task .tl{gap:8px;padding-top:15px;}
+  .task .tl b{font-size:.9rem;}
+  .task .tr{font-size:.72rem;padding:5px 7px;}
+}
+@media(prefers-reduced-motion:reduce){.task{transition:none}.task:hover{transform:none}}
 
 button.tile{font-family:inherit;font-size:inherit;color:var(--ink);text-align:left;cursor:pointer;width:100%;}
 button.tile:hover{border-color:var(--brand);}
@@ -4614,7 +4655,7 @@ Tap to complete tasks.</p>
 <button type="button" class="task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
 data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}">
 <span class="fill"></span>
-<span class="tl"><b>Task {{ t.no }}</b><span class="tr">{{ 'Done \u2713' if t.done else '+' ~ money(t.reward) }}</span></span>
+<span class="tl"><b>Task {{ t.no }}</b><span class="tr">{{ 'Rewarded ✓' if t.done else '+' ~ money(t.reward) }}</span></span>
 </button>
 {% endfor %}
 </div>
@@ -4683,7 +4724,7 @@ data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('c
             if (!r.ok) { reset(btn); say(r.error, 'error'); return; }
             btn.classList.remove('loading');
             btn.classList.add('done');
-            btn.querySelector('.tr').textContent = 'Done \u2713';
+            btn.querySelector('.tr').textContent = 'Rewarded ✓';
             busy = false;
             lockOthers(false, btn);
             document.getElementById('progtxt').textContent = r.completed + ' of ' + r.total + ' tasks done';
