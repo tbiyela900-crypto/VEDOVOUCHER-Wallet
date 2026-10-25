@@ -3586,7 +3586,7 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .hello{margin:0 0 18px;font-weight:600;opacity:.9;}
 .lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
 .balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
-.quick-links-label{align-self:flex-start;flex:none;padding:9px 11px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(3,12,18,.28);color:#d8fff5;font-size:.68rem;font-weight:900;letter-spacing:.12em;white-space:nowrap;}
+.quick-links-label{align-self:flex-start;flex:none;padding:6px 9px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(3,12,18,.28);color:#d8fff5;font-size:.68rem;font-weight:900;letter-spacing:.12em;white-space:nowrap;}
 .fpwrap{display:flex;flex-direction:column;align-items:center;gap:6px;flex:none;}
 .fp{width:78px;height:78px;padding:0;border-radius:50%;display:grid;place-items:center;cursor:pointer;color:#031016;background:linear-gradient(135deg,#1fd6a4,#8ff5dc);border:3px solid rgba(255,255,255,.9);box-shadow:0 8px 24px rgba(0,0,0,.35);animation:fppulse 2s ease-out infinite;font:inherit;}
 .fp .ic{width:44px;height:44px;stroke-width:2.2;}
@@ -3598,15 +3598,15 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .actions.closed{display:none;}
 .actions#heroactions{display:grid;}
 .actions#heroactions .act{min-width:0;}
-.actions#heroactions .act{padding:4px 1px;border-radius:10px;}
+.actions#heroactions .act{padding:2px 1px;border-radius:10px;}
 .actions#heroactions .act:focus-visible{outline:2px solid #8ff5dc;outline-offset:2px;}
 .actions.reveal{animation:revealin .35s ease-out;}
 @keyframes revealin{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
 .chips{display:flex;gap:8px;flex-wrap:wrap;margin:16px 0 20px;}
 .chip{background:rgba(255,255,255,.12);border:1px solid rgba(255,255,255,.2);padding:4px 12px;border-radius:999px;font-size:.8rem;font-weight:600;}
-.actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px 5px;background:rgba(3,12,18,.38);border-radius:15px;padding:8px 5px;}
-.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:5px;color:#d9f5ec;text-decoration:none;font-size:.72rem;font-weight:600;min-width:0;}
-.act span{width:40px;height:40px;border-radius:50%;display:grid;place-items:center;background:rgba(31,214,164,.16);color:var(--brand);border:1px solid rgba(31,214,164,.35);}
+.actions{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:4px 5px;background:rgba(3,12,18,.38);border-radius:15px;padding:5px 5px;}
+.act{display:flex;flex-direction:column;align-items:center;justify-content:center;gap:3px;color:#d9f5ec;text-decoration:none;font-size:.72rem;font-weight:600;min-width:0;}
+.act span{width:34px;height:34px;border-radius:50%;display:grid;place-items:center;background:rgba(31,214,164,.16);color:var(--brand);border:1px solid rgba(31,214,164,.35);}
 .act:hover span{background:var(--brand);color:#031016;}
 
 .donutwrap{position:relative;width:170px;height:170px;margin:4px auto 14px;}
@@ -3842,9 +3842,9 @@ input[type=file]{padding:10px;}
   .actions{grid-template-columns:repeat(3,minmax(0,1fr));row-gap:12px;}
   .hero-top{align-items:center;}
   .quick-links-label{font-size:.55rem;padding:6px 7px;letter-spacing:.07em;}
-  .actions#heroactions{grid-template-columns:repeat(4,minmax(0,1fr));gap:5px 2px;padding:7px 3px;border-radius:12px;}
+  .actions#heroactions{grid-template-columns:repeat(4,minmax(0,1fr));gap:3px 2px;padding:4px 3px;border-radius:12px;}
   .actions#heroactions .act{font-size:clamp(.52rem,2.4vw,.64rem);line-height:1.15;white-space:normal;overflow-wrap:normal;word-break:normal;text-align:center;}
-  .actions#heroactions .act span{width:30px;height:30px;}
+  .actions#heroactions .act span{width:25px;height:25px;}
   .tabbar{display:flex;position:fixed;left:0;right:0;bottom:0;z-index:40;justify-content:space-around;
     padding:8px 6px calc(8px + env(safe-area-inset-bottom,0px));
     background:rgba(8,18,27,.94);backdrop-filter:blur(14px);-webkit-backdrop-filter:blur(14px);border-top:1px solid var(--line);}
