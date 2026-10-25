@@ -2315,14 +2315,21 @@ def admin():
         "JOIN users u ON u.id = d.user_id WHERE d.user_id<>0 "
         "ORDER BY d.updated_at DESC").fetchall()
 
-    # Admin table finder: search by table name and optionally by member cellphone/login number.
-    table_q = request.args.get("table_q", "").strip()[:60]
-    table_user_q = request.args.get("table_user_q", "").strip()[:40]
-    activity_tables = []
+    # Unified admin search: q searches members by phone/number/ID and table names.
+    # If q looks like a table name, jump/filter to that table; otherwise search
+    # matching member records across tables. Dedicated table filters override q.
     all_table_names = db.execute(
         "SELECT name FROM sqlite_master WHERE type='table' "
         "AND name NOT LIKE 'sqlite_%' ORDER BY name"
     ).fetchall()
+    known_table_names = [r["name"] for r in all_table_names]
+    table_q = request.args.get("table_q", "").strip()[:60]
+    table_user_q = request.args.get("table_user_q", "").strip()[:40]
+    if q and not table_q and any(q.casefold() in n.casefold() for n in known_table_names):
+        table_q = q
+    if q and not table_user_q and not table_q:
+        table_user_q = q
+    activity_tables = []
     for table_row in all_table_names:
         table_name = table_row["name"]
         if table_q and table_q.casefold() not in table_name.casefold():
@@ -2335,21 +2342,35 @@ def admin():
         if table_user_q:
             matched_count = 0
             pattern = f"%{table_user_q}%"
+            # Member table: search login/cellphone, bank number, and numeric user ID.
             if table_name == "users":
                 matched_count = db.execute(
                     "SELECT COUNT(*) FROM users WHERE username LIKE ? OR phone LIKE ? "
-                    "OR serial_number LIKE ?",
-                    (pattern, pattern, pattern)).fetchone()[0]
+                    "OR serial_number LIKE ? OR CAST(id AS TEXT) LIKE ?",
+                    (pattern, pattern, pattern, pattern)).fetchone()[0]
+            # Activity tables linked by user_id: search the user's phone/login,
+            # bank number, and ID, plus the activity's own user_id.
             elif "user_id" in columns:
                 matched_count = db.execute(
                     f"SELECT COUNT(*) FROM {quoted_name} t "
-                    "JOIN users u ON u.id=t.user_id "
-                    "WHERE u.username LIKE ? OR u.phone LIKE ? OR u.serial_number LIKE ?",
-                    (pattern, pattern, pattern)).fetchone()[0]
+                    "LEFT JOIN users u ON u.id=t.user_id "
+                    "WHERE u.username LIKE ? OR u.phone LIKE ? OR u.serial_number LIKE ? "
+                    "OR CAST(u.id AS TEXT) LIKE ? OR CAST(t.user_id AS TEXT) LIKE ?",
+                    (pattern, pattern, pattern, pattern, pattern)).fetchone()[0]
             elif "username" in columns:
                 matched_count = db.execute(
                     f"SELECT COUNT(*) FROM {quoted_name} WHERE username LIKE ?",
                     (pattern,)).fetchone()[0]
+            else:
+                # For tables without a user link, search text/numeric columns,
+                # including any column named id or user_id.
+                searchable = [c for c in columns if c.lower() in
+                              ("id", "user_id", "username", "phone", "serial_number", "code", "used_by", "issued_to")]
+                if searchable:
+                    clauses = [f'CAST("{c.replace(chr(34), chr(34)*2)}" AS TEXT) LIKE ?' for c in searchable]
+                    matched_count = db.execute(
+                        f"SELECT COUNT(*) FROM {quoted_name} WHERE " + " OR ".join(clauses),
+                        tuple(pattern for _ in searchable)).fetchone()[0]
             if matched_count == 0:
                 continue
         activity_tables.append({
@@ -5409,19 +5430,26 @@ PROFILE_BODY = """
 
 ADMIN_BODY = """
 <div class="card">
-<h2>Search database tables</h2>
-<p class="muted">Search for a database table by name, or find records associated with a member cellphone/login number. This is search-only: no rows can be deleted here.</p>
+<h2>Quick search: member number / ID or table name</h2>
+<p class="muted">Use the main Search box below for a cellphone/login number, user ID, bank number, or table name. Search only; no database rows can be deleted here.</p>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
-<input name="table_q" value="{{ table_q }}" maxlength="60" autocomplete="off" placeholder="Table name, e.g. withdrawals" style="flex:1;min-width:220px">
-<input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Member cellphone/login number (optional)" style="flex:1;min-width:220px">
+<input name="q" value="{{ q }}" maxlength="60" autocomplete="off" placeholder="Cellphone, user ID, bank number, or table name" style="flex:1;min-width:240px">
+<button class="primary" style="margin-top:0">Search</button>
+{% if q %}<a href="{{ url_for('admin') }}">Clear search</a>{% endif %}
+</form>
+<h3>Database tables</h3>
+<p class="muted">Search a table name, or enter a member number / user ID to count matching records. Click a table name to jump straight to it.</p>
+<form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+<input name="table_q" value="{{ table_q }}" maxlength="60" autocomplete="off" placeholder="Filter table names, e.g. withdrawals" style="flex:1;min-width:200px">
+<input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Cellphone, user number, or ID" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search tables</button>
- {% if table_q or table_user_q %}<a href="{{ url_for('admin') }}">Clear search</a>{% endif %}
+{% if table_q or table_user_q %}<a href="{{ url_for('admin') }}">Clear table search</a>{% endif %}
 </form>
 {% if activity_tables %}
 <table>
-<tr><th>Table name</th><th>Total rows</th>{% if table_user_q %}<th>Rows matching member number</th>{% endif %}</tr>
+<tr><th>Table name</th><th>Total rows</th>{% if table_user_q %}<th>Matching records for number / ID</th>{% endif %}<th>Search this table</th></tr>
 {% for t in activity_tables %}
-<tr><td><code>{{ t['name'] }}</code></td><td>{{ t['count'] }}</td>{% if table_user_q %}<td>{{ t['matched_count'] }}</td>{% endif %}</tr>
+<tr id="dbtable-{{ t['name'] }}"><td><a href="#dbtable-{{ t['name'] }}"><code>{{ t['name'] }}</code></a></td><td>{{ t['count'] }}</td>{% if table_user_q %}<td>{{ t['matched_count'] }}</td>{% endif %}<td><form method="get" action="{{ url_for('admin') }}#dbtable-{{ t['name'] }}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="hidden" name="table_q" value="{{ t['name'] }}"><input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Number or user ID" style="min-width:140px;max-width:220px"><button class="primary" style="margin-top:0">Find</button></form></td></tr>
 {% endfor %}
 </table>
 {% else %}<p class="muted">No database tables match that search.</p>{% endif %}
@@ -5434,7 +5462,7 @@ ADMIN_BODY = """
 </div>
 
 <div class="card">
-<h2>Search users</h2>
+<h2>Member results</h2>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center">
 <input name="q" value="{{ q }}" maxlength="30" autocomplete="off" placeholder="Cellphone, Bank Account  number or referral code" style="flex:1;min-width:220px">
 <button class="primary" style="margin-top:0">Search</button>
