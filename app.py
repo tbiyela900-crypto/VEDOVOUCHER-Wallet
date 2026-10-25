@@ -3718,19 +3718,24 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .voucher-task.done .voucher-prize strong{color:#21845e}
 .voucher-task:disabled{cursor:default}
 /* Levels 5-7: three premium blue Vedo vouchers per day. */
-.voucher-task.blue-voucher{color:#fff;border:1px solid #6da5ff;background:linear-gradient(135deg,#2878e5 0%,#1451b5 56%,#103a86 100%);box-shadow:0 12px 28px rgba(20,81,181,.25)}
-.voucher-task.blue-voucher:before{background:radial-gradient(circle,rgba(255,255,255,.25),transparent 70%)}
-.voucher-task.blue-voucher:hover{border-color:#b9d5ff;box-shadow:0 16px 32px rgba(20,81,181,.34)}
-.voucher-task.blue-voucher .voucher-top small,.voucher-task.blue-voucher .voucher-bottom{color:#dceaff}
-.voucher-task.blue-voucher .voucher-dot{color:#80ffc7}
-.voucher-task.blue-voucher .voucher-symbol{color:#fff;background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.42)}
-.voucher-task.blue-voucher .voucher-prize strong{color:#fff}
-.voucher-task.blue-voucher .voucher-progress{background:linear-gradient(90deg,#8ef5d0,#fff)}
-.voucher-task.blue-voucher.loading{border-color:#f5d477;box-shadow:0 0 0 2px rgba(245,212,119,.28),0 12px 28px rgba(20,81,181,.25)}
-.voucher-task.blue-voucher.done{color:#174f43;border-color:#83cbb1;background:linear-gradient(135deg,#fff,#eafaf3);box-shadow:0 10px 24px rgba(15,35,74,.10)}
-.voucher-task.blue-voucher.done .voucher-top small,.voucher-task.blue-voucher.done .voucher-bottom{color:#28735e}
-.voucher-task.blue-voucher.done .voucher-prize strong{color:#21845e}
-.voucher-task.blue-voucher.done .voucher-symbol{color:#21845e;background:#e2f7ed;border-color:#a7dec8}
+.voucher-task.blue-voucher{color:#fff;border:1px solid rgba(160,204,255,.9);border-radius:22px;background:radial-gradient(ellipse at 88% 8%,rgba(142,198,255,.38),transparent 33%),linear-gradient(132deg,#3989f6 0%,#1762ce 42%,#0b347d 100%);box-shadow:0 16px 34px rgba(11,52,125,.34),inset 0 1px 0 rgba(255,255,255,.32);min-height:202px}
+.voucher-task.blue-voucher:before{width:190px;height:190px;right:-55px;top:-75px;background:radial-gradient(circle,rgba(255,255,255,.25),rgba(92,165,255,.08) 42%,transparent 72%)}
+.voucher-task.blue-voucher:after{content:"V";position:absolute;z-index:-1;right:18px;bottom:-42px;font-size:9rem;font-weight:1000;font-style:italic;line-height:1;color:rgba(255,255,255,.055);transform:rotate(-12deg);pointer-events:none}
+.voucher-task.blue-voucher:hover{transform:translateY(-5px) scale(1.012);border-color:#d5e8ff;box-shadow:0 22px 40px rgba(20,81,181,.42),inset 0 1px 0 rgba(255,255,255,.4)}
+.voucher-task.blue-voucher .voucher-top b{color:#fff;font-size:1.08rem;letter-spacing:-.045em}
+.voucher-task.blue-voucher .voucher-top small,.voucher-task.blue-voucher .voucher-bottom{color:#e0edff}
+.voucher-task.blue-voucher .voucher-dot{color:#8bffd9;text-shadow:0 0 12px rgba(139,255,217,.65)}
+.voucher-task.blue-voucher .voucher-symbol{color:#fff;background:linear-gradient(145deg,rgba(255,255,255,.26),rgba(255,255,255,.07));border:1px solid rgba(255,255,255,.5);box-shadow:inset 0 1px 0 rgba(255,255,255,.3),0 7px 18px rgba(4,27,75,.15);border-radius:19px}
+.voucher-task.blue-voucher .voucher-main{border-bottom:1px solid rgba(220,237,255,.32)}
+.voucher-task.blue-voucher .voucher-prize strong{color:#fff;text-shadow:0 2px 12px rgba(3,24,68,.2);font-size:2rem}
+.voucher-task.blue-voucher .voucher-progress{background:linear-gradient(90deg,#8effd7,#fff5bf);box-shadow:0 0 12px rgba(142,255,215,.65)}
+.voucher-task.blue-voucher.loading{border-color:#ffe39a;box-shadow:0 0 0 2px rgba(255,227,154,.3),0 18px 38px rgba(20,81,181,.42),inset 0 1px 0 rgba(255,255,255,.35)}
+.voucher-task.blue-voucher.done{color:#fff;border-color:#70e4c1;background:radial-gradient(ellipse at 88% 8%,rgba(116,255,210,.22),transparent 34%),linear-gradient(132deg,#267fe9 0%,#1258b9 48%,#0b397f 100%);box-shadow:0 14px 32px rgba(11,52,125,.3),inset 0 0 0 1px rgba(116,255,210,.13);cursor:default}
+.voucher-task.blue-voucher.done .voucher-top small,.voucher-task.blue-voucher.done .voucher-bottom{color:#c7ffe9}
+.voucher-task.blue-voucher.done .voucher-prize strong{color:#a7ffdc}
+.voucher-task.blue-voucher.done .voucher-symbol{color:#a7ffdc;background:rgba(105,255,206,.14);border-color:rgba(137,255,218,.65)}
+.voucher-task.blue-voucher.done .voucher-dot{color:#a7ffdc}
+.voucher-task.blue-voucher.done:after{color:rgba(145,255,221,.09)}
 .voucher-back{margin-top:22px}
 @media(max-width:560px){.voucher-task-grid{grid-template-columns:1fr;gap:13px}.voucher-task{min-height:174px;padding:16px}.voucher-summary{gap:6px}.voucher-summary>div{padding:9px 7px}.voucher-summary strong{font-size:.88rem}.voucher-prize strong{font-size:1.65rem}}
 
