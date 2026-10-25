@@ -2211,10 +2211,7 @@ def admin_user_profile(user_id):
 def admin():
     db = get_db()
 
-    # Automatically purge redeemed vouchers whenever an admin opens the page.
-    # Unused and member-issued-but-unredeemed vouchers remain available.
-    db.execute("DELETE FROM vouchers WHERE used_by IS NOT NULL")
-    db.commit()
+    # Keep redeemed vouchers visible to admin until the admin chooses to delete them.
 
     if request.method == "POST":
         try:
@@ -2296,6 +2293,9 @@ def admin():
     unused = db.execute(
         "SELECT * FROM vouchers WHERE used_by IS NULL "
         "ORDER BY level, created_at").fetchall()
+    used_vouchers_count = db.execute(
+        "SELECT COUNT(*) FROM vouchers WHERE used_by IS NOT NULL OR used_at IS NOT NULL").fetchone()[0]
+    all_vouchers_count = db.execute("SELECT COUNT(*) FROM vouchers").fetchone()[0]
 
     # Member-specific top-up instructions (override the global text)
     specific = db.execute(
@@ -2313,7 +2313,8 @@ def admin():
 
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
-                unused=unused, q=q, specific=specific,
+                unused=unused, used_vouchers_count=used_vouchers_count,
+                all_vouchers_count=all_vouchers_count, q=q, specific=specific,
                 hidden_users=hidden_users,
                 gd=global_details, specific_details=specific_details,
                 instructions=get_setting(db, "topup_instructions",
@@ -2345,6 +2346,24 @@ def admin_record_control(record_type, record_id, action):
                (str(member["id"]), hidden, locked, now_iso()))
     db.commit()
     flash("Admin record updated. The member account and their data were not changed.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/vouchers/delete-all/<scope>", methods=["POST"])
+@admin_required
+def admin_vouchers_delete_all(scope):
+    if scope not in ("used", "all"):
+        abort(400)
+    db = get_db()
+    if scope == "used":
+        cur = db.execute(
+            "DELETE FROM vouchers WHERE used_by IS NOT NULL OR used_at IS NOT NULL")
+        message = f"Deleted {cur.rowcount} used voucher(s)."
+    else:
+        cur = db.execute("DELETE FROM vouchers")
+        message = f"Deleted all {cur.rowcount} voucher(s), including used and unused vouchers."
+    db.commit()
+    flash(message, "ok")
     return redirect(url_for("admin"))
 
 
@@ -3335,8 +3354,7 @@ SPIN_BODY = """
 <div class="spin-prize" id="spinout" aria-live="polite">{{ 'Ready when you are!' if not info.error else info.error }}</div>
 <p class="muted">Plays left: <b id="left">{{ info.left }}</b><br>Points balance: <b id="bal">{{ money(user['points']) }}</b></p>
 {% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}
-<h3>Prize odds</h3><p class="muted small">Odds are shown before you play. Sold-out prizes are removed from the draw.</p>
-<div style="max-height:300px;overflow:auto"><table><tr><th>Prize</th><th>Chance</th><th>Left</th></tr>{% for o in odds %}<tr><td>{{ o.label }}<br><span class="muted small">{{ o.what or '-' }}</span></td><td>{% if o.sold_out %}Unavailable{% else %}{{ o.chance }}%{% endif %}</td><td>{{ 'Unlimited' if o.left is none else o.left }}</td></tr>{% endfor %}</table></div>
+<p class="muted small">Prize details and availability are managed by Vedo. Your result is selected securely by the server.</p>
 </div></div></div>
 <div class="card"><h2>🏆 My spins</h2>{% if mine %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Result</th><th>Voucher</th></tr>{% for m in mine %}<tr><td>{{ m['created_at'][:16] }}</td><td>{{ m['result'] }}</td><td>{% if m['voucher'] %}<code>{{ m['voucher'] }}</code>{% else %}—{% endif %}</td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your spin history will appear here.</p>{% endif %}</div>
 <script>
@@ -5228,8 +5246,8 @@ UPGRADE_BODY = """
 {% if next_level %}
 {% set cost = UPGRADE_COST_CENTS[next_level] %}
 {% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
-<p>Next: <strong>Level {{ next_level }}</strong> costs <strong>{{ money(cost) }}</strong>
-(daily check-in becomes {{ daily_reward(next_level) }}).</p>
+<p><strong>Points needed to upgrade:</strong> {{ money(cost) }} to reach Level {{ next_level }}.
+Your daily check-in reward at that level will be {{ daily_reward(next_level) }}.</p>
 <div class="progtxt"><span>Your balance</span><span>{{ pct }}%</span></div>
 <div class="bar"><b style="width:{{ pct }}%"></b></div>
 <form method="post" onsubmit="return confirm('Upgrade to Level {{ next_level }}?');">
@@ -5256,16 +5274,7 @@ Upgrade to Level {{ next_level }}</button>
 </form>
 </div>
 
-<div class="card">
-<h2>Upgrade costs</h2>
-<table>
-<tr><th>Move to</th><th>Cost</th><th>Level reward</th><th>Daily check-in</th></tr>
-{% for l in LEVELS %}
-<tr class="{{ 'hl' if l == user['level'] + 1 }}"><td>Level {{ l }}</td><td>{{ money(UPGRADE_COST_CENTS[l]) }}</td>
-<td>{{ level_reward(l) }}</td><td>{{ daily_reward(l) }}</td></tr>
-{% endfor %}
-</table>
-</div>
+
 """
 
 POTS_BODY = """
@@ -5646,13 +5655,19 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 </div>
 
 <div class="card">
-<h2>Available voucher codes ({{ unused|length }})</h2>
+<h2>Voucher management</h2>
+<p class="muted">{{ used_vouchers_count }} used · {{ unused|length }} unused · {{ all_vouchers_count }} total</p>
+<div class="actions" style="display:flex;gap:10px;flex-wrap:wrap;margin:12px 0">
+<form method="post" action="{{ url_for('admin_vouchers_delete_all', scope='used') }}" onsubmit="return confirm('Permanently delete all {{ used_vouchers_count }} used vouchers? This cannot be undone.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger" {% if not used_vouchers_count %}disabled{% endif %}>Delete all used vouchers</button></form>
+<form method="post" action="{{ url_for('admin_vouchers_delete_all', scope='all') }}" onsubmit="return confirm('Permanently delete ALL {{ all_vouchers_count }} vouchers, both used and unused? This cannot be undone.');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger" {% if not all_vouchers_count %}disabled{% endif %}>Delete ALL vouchers</button></form>
+</div>
+<h3>Unused voucher codes ({{ unused|length }})</h3>
 {% if unused %}
 <table>
 <tr><th>Level</th><th>Code</th><th>Action</th></tr>
 {% for v in unused %}<tr><td>Level {{ v['level'] }}</td><td><code>{{ v['code'] }}</code></td><td><form method="post" action="{{ url_for('admin_voucher_delete', code=v['code']) }}" onsubmit="return confirm('Delete voucher {{ v['code'] }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Delete voucher</button></form></td></tr>{% endfor %}
 </table>
-{% else %}<p class="muted">None left. Generate some above.</p>{% endif %}
+{% else %}<p class="muted">No unused vouchers. Generate some above.</p>{% endif %}
 </div>
 """
 
@@ -5670,4 +5685,5 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
 
