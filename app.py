@@ -2645,7 +2645,7 @@ def games_hub():
     meta = (
         ("SPIN", "🎰", "Spin for points, vouchers and prizes.", "spin_page"),
         ("BRAIN", "🧠", "Answer questions and earn points for every correct answer.", "brain_page"),
-        ("ENVELOPE", "✉️", "Open your envelope for guaranteed points or a bonus voucher.", "envelope_page"),
+        ("ENVELOPE", "✉️", "Open your envelope.", "envelope_page"),
     )
     cards = []
     for key, emoji, blurb, endpoint in meta:
@@ -2912,7 +2912,7 @@ def envelope_open():
 
     if reward > 0:
         credit(db, user["id"], reward, "ENVELOPE",
-               "Mystery Envelope: guaranteed reward")
+               "Mystery Envelope.")
     result = money(reward) + " points"
     if voucher:
         result += f" + Level {level} voucher"
@@ -2923,7 +2923,7 @@ def envelope_open():
 
     points = db.execute("SELECT points FROM users WHERE id=?",
                         (user["id"],)).fetchone()["points"]
-    text = f"Your envelope held {money(reward)} in points!"
+    text = f"Your envelope held {money(reward)}!"
     if voucher:
         text += (f" Bonus: a Level {level} voucher. Code: {voucher}. "
                  "Redeem it on the Upgrade page.")
@@ -3143,7 +3143,7 @@ GAMES_BODY = """
 <div class="card games-hero">
   <div class="games-kicker">Vedo Play Zone</div>
   <h1>Pick your game. Play for rewards.</h1>
-  <p>Spin, test your knowledge, or open a mystery envelope. Your game results and eligible rewards are added to your Vedo points wallet.</p>
+  <p>Spin, test your knowledge, or open a mystery envelope. Your game results and eligible rewards are added to your Vedo balance.</p>
 </div>
 
 <div class="games-grid">
@@ -3286,8 +3286,7 @@ ENVELOPE_BODY = """
 </style>
 <div class="card note"><h1>✉️ Vedo Mystery Envelope</h1><p class="muted"><a href="{{ url_for('games_hub') }}">← All games</a></p><p><span class="badge {{ 'ok' if info.status=='OPEN' else 'wait' }}">{{ status_text }}</span> <span class="muted small">{{ window }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p><p>There’s a surprise waiting inside. Tap the envelope and open your reward letter.</p>
 <div class="env-scene"><div class="env-stage {% if claimed %}opened{% endif %}" id="envstage"><div class="real-envelope" id="env" role="img" aria-label="Mystery reward envelope"><div class="env-back"></div><div class="env-paper" id="envpaper"><div class="paper-small">VEDO REWARD LETTER</div><div class="paper-result" id="paperresult">YOUR SURPRISE<br>IS INSIDE</div></div><div class="env-front"></div><div class="env-flap"></div><div class="env-seal">V</div></div></div><div class="env-confetti" id="envconfetti">✦ ✉ ✦</div><div id="envout" aria-live="polite">{% if claimed %}<div class="flash ok">Already opened: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}<br>Voucher: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>{% else %}<p class="muted">Your sealed envelope is ready.</p>{% endif %}</div><button type="button" class="primary env-open-btn" id="envbtn" {% if info.error %}disabled{% endif %}>{{ 'Envelope opened' if claimed else '🎁 Open my envelope' }}</button><p class="muted">Points balance: <b id="bal">{{ money(user['points']) }}</b></p>{% if info.error and not claimed %}<p class="muted small">{{ info.error }}</p>{% endif %}</div></div>
-<div class="card"><h2>✨ What’s inside?</h2><ul><li>Guaranteed reward: <b>{{ money(gm['min_reward']) }} points</b>.</li><li>Bonus chance: <b>{{ gm['bonus_chance'] }}%</b> to receive a Level {{ gm['bonus_level'] }} voucher while stock lasts.</li><li>One envelope per member per event. Your reward is saved to your wallet and history.</li></ul></div>
-<script>
+</script>
 (function(){const btn=document.getElementById('envbtn'),stage=document.getElementById('envstage'),out=document.getElementById('envout'),paper=document.getElementById('paperresult'),confetti=document.getElementById('envconfetti'),csrf={{ csrf_token()|tojson }};if(!btn||!stage)return;
 {% if claimed %}btn.disabled=true;paper.textContent={{ claimed['result']|tojson }};{% else %}
 let busy=false;btn.addEventListener('click',async()=>{if(busy)return;busy=true;btn.disabled=true;btn.textContent='Opening your surprise…';stage.classList.add('opened');confetti.textContent='✦ ✨ ✦';const fd=new FormData();fd.append('csrf_token',csrf);let res;try{const r=await fetch('{{ url_for("envelope_open") }}',{method:'POST',body:fd,credentials:'same-origin'});res=await r.json();}catch(e){res={ok:false,error:'Connection problem. Please try again.'};}
