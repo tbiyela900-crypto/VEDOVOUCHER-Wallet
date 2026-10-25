@@ -847,6 +847,17 @@ def init_db():
     db = sqlite3.connect(DB_PATH)
     db.row_factory = sqlite3.Row
     db.executescript(SCHEMA)
+    # Admin-only record controls: hide/lock records in the admin interface without
+    # deleting or changing the member account or their activity.
+    db.execute("""CREATE TABLE IF NOT EXISTS admin_record_controls (
+        record_type TEXT NOT NULL,
+        record_id TEXT NOT NULL,
+        hidden INTEGER NOT NULL DEFAULT 0,
+        locked INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY(record_type, record_id)
+    )""")
+    db.commit()
 
     # Safely add columns missing from older databases (never deletes data).
     existing_columns = {
@@ -2241,18 +2252,28 @@ def admin():
     args = (like,) if q else ()
 
     users_sql = (
-        "SELECT u.*, r.username AS referrer FROM users u "
-        "LEFT JOIN users r ON r.id = u.referred_by ")
+        "SELECT u.*, r.username AS referrer, "
+        "COALESCE(arc.locked,0) AS admin_locked "
+        "FROM users u LEFT JOIN users r ON r.id = u.referred_by "
+        "LEFT JOIN admin_record_controls arc ON arc.record_type='user' "
+        "AND arc.record_id=CAST(u.id AS TEXT) ")
+    user_conditions = ["COALESCE(arc.hidden,0)=0"]
     if q:
         digits = re.sub(r"\D", "", q).lstrip("0")
         phone_like = f"%{digits}%" if digits else like
-        users_sql += ("WHERE u.username LIKE ? OR u.serial_number LIKE ? "
-                      "OR u.referral_code LIKE ? OR u.phone LIKE ? ")
+        user_conditions.append("(u.username LIKE ? OR u.serial_number LIKE ? "
+                               "OR u.referral_code LIKE ? OR u.phone LIKE ?)")
         users_args = (like, like, like, phone_like)
     else:
         users_args = ()
-    users_sql += "ORDER BY u.is_admin DESC, u.level DESC, u.points DESC"
+    users_sql += "WHERE " + " AND ".join(user_conditions)
+    users_sql += " ORDER BY u.is_admin DESC, u.level DESC, u.points DESC"
     users = db.execute(users_sql, users_args).fetchall()
+    hidden_users = db.execute(
+        "SELECT u.id,u.username,u.level,u.points,COALESCE(arc.locked,0) AS admin_locked "
+        "FROM users u JOIN admin_record_controls arc ON arc.record_type='user' "
+        "AND arc.record_id=CAST(u.id AS TEXT) WHERE arc.hidden=1 AND u.is_admin=0 "
+        "ORDER BY arc.updated_at DESC").fetchall()
 
     topups = db.execute(
         "SELECT topups.*, users.username FROM topups "
@@ -2293,10 +2314,52 @@ def admin():
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
                 unused=unused, q=q, specific=specific,
+                hidden_users=hidden_users,
                 gd=global_details, specific_details=specific_details,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
+
+
+@app.route("/admin/record/<record_type>/<record_id>/<action>", methods=["POST"])
+@admin_required
+def admin_record_control(record_type, record_id, action):
+    """Lock or hide records only in the admin interface; never alter member data."""
+    if record_type != "user" or action not in ("lock", "unlock", "hide", "restore"):
+        abort(400)
+    db = get_db()
+    member = db.execute("SELECT id,is_admin FROM users WHERE id=?", (record_id,)).fetchone()
+    if member is None or member["is_admin"]:
+        abort(404)
+    row = db.execute("SELECT * FROM admin_record_controls WHERE record_type='user' AND record_id=?",
+                     (str(member["id"]),)).fetchone()
+    hidden = int(row["hidden"]) if row else 0
+    locked = int(row["locked"]) if row else 0
+    if action == "lock": locked = 1
+    elif action == "unlock": locked = 0
+    elif action == "hide": hidden = 1
+    elif action == "restore": hidden = 0
+    db.execute("INSERT INTO admin_record_controls(record_type,record_id,hidden,locked,updated_at) "
+               "VALUES('user',?,?,?,?) ON CONFLICT(record_type,record_id) DO UPDATE SET "
+               "hidden=excluded.hidden,locked=excluded.locked,updated_at=excluded.updated_at",
+               (str(member["id"]), hidden, locked, now_iso()))
+    db.commit()
+    flash("Admin record updated. The member account and their data were not changed.", "ok")
+    return redirect(url_for("admin"))
+
+
+@app.route("/admin/voucher/<path:code>/delete", methods=["POST"])
+@admin_required
+def admin_voucher_delete(code):
+    db = get_db()
+    row = db.execute("SELECT code FROM vouchers WHERE code=?", (code,)).fetchone()
+    if row is None:
+        flash("Voucher was not found.", "error")
+    else:
+        db.execute("DELETE FROM vouchers WHERE code=?", (code,))
+        db.commit()
+        flash("Voucher deleted.", "ok")
+    return redirect(url_for("admin"))
 
 def _find_member(raw):
     """Find a member by numeric ID or by cellphone number."""
@@ -5496,7 +5559,7 @@ onsubmit="return confirm('Remove this member instruction?');">
 <div class="card">
 <h2>All members</h2>
 <table>
-<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Selected top-up level</th><th>Balance</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th></tr>
+<tr><th>ID</th><th>Login ID</th><th>Cellphone</th><th>Level</th><th>Selected top-up level</th><th>Balance</th><th>Referred by</th><th>Joined</th><th>Add balance</th><th>Reset password</th><th>Admin record controls</th></tr>
 {% for u in users %}
 <tr><td>{{ u['id'] }}</td><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
@@ -5519,10 +5582,26 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 <input class="pwbox" name="new_password" type="text" minlength="8" placeholder="New password" autocomplete="off" required>
 <button class="danger">Reset</button>
 </form>
+</td>
+<td>
+{% if u['admin_locked'] %}<span class="badge wait">ADMIN-LOCKED</span>{% endif %}
+<form class="inline" method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=u['id'], action='unlock' if u['admin_locked'] else 'lock') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button>{{ 'Unlock record' if u['admin_locked'] else 'Lock record' }}</button></form>
+<form class="inline" method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=u['id'], action='hide') }}" onsubmit="return confirm('Hide this record from the admin members list? The member account will continue working normally.');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Delete from admin view</button></form>
 </td></tr>
 {% endfor %}
 </table>
 {% if not users %}<p class="muted">No members match your search.</p>{% endif %}
+</div>
+
+<div class="card">
+<h2>Hidden admin records ({{ hidden_users|length }})</h2>
+<p class="muted small">These records are hidden only from the main admin list. User accounts and balances remain unchanged.</p>
+{% if hidden_users %}<table><tr><th>ID</th><th>Member</th><th>Level</th><th>Balance</th><th>Status</th><th>Restore</th></tr>
+{% for hu in hidden_users %}<tr><td>{{ hu['id'] }}</td><td>{{ hu['username'] }}</td><td>L{{ hu['level'] }}</td><td>{{ money(hu['points']) }}</td><td>{{ 'Admin locked' if hu['admin_locked'] else 'Hidden' }}</td><td>
+<form method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=hu['id'], action='restore') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Restore to admin list</button></form></td></tr>{% endfor %}</table>
+{% else %}<p class="muted">No hidden member records.</p>{% endif %}
 </div>
 
 <div class="card">
@@ -5570,8 +5649,8 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 <h2>Available voucher codes ({{ unused|length }})</h2>
 {% if unused %}
 <table>
-<tr><th>Level</th><th>Code</th></tr>
-{% for v in unused %}<tr><td>Level {{ v['level'] }}</td><td><code>{{ v['code'] }}</code></td></tr>{% endfor %}
+<tr><th>Level</th><th>Code</th><th>Action</th></tr>
+{% for v in unused %}<tr><td>Level {{ v['level'] }}</td><td><code>{{ v['code'] }}</code></td><td><form method="post" action="{{ url_for('admin_voucher_delete', code=v['code']) }}" onsubmit="return confirm('Delete voucher {{ v['code'] }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Delete voucher</button></form></td></tr>{% endfor %}
 </table>
 {% else %}<p class="muted">None left. Generate some above.</p>{% endif %}
 </div>
