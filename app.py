@@ -1142,7 +1142,7 @@ def register():
             if referrer is None:
                 error = "That referral code does not exist."
 
-        # Check level code from the admin (optional)
+        # Check level code obtained (optional)
         if not error and level_code:
             voucher = db.execute(
                 "SELECT * FROM vouchers WHERE code=?",
@@ -5265,7 +5265,7 @@ Upgrade to Level {{ next_level }}</button>
 
 <div class="card">
 <h2>Redeem a level code</h2>
-<p class="muted">Enter a level code from the admin or one you won in a game to move to that level.</p>
+<p class="muted">Enter a level code obtained or one you won in a game to move to that level.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Level code</label>
@@ -5596,7 +5596,7 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 {% if u['admin_locked'] %}<span class="badge wait">ADMIN-LOCKED</span>{% endif %}
 <form class="inline" method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=u['id'], action='unlock' if u['admin_locked'] else 'lock') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button>{{ 'Unlock record' if u['admin_locked'] else 'Lock record' }}</button></form>
-<form class="inline" method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=u['id'], action='hide') }}" onsubmit="return confirm('Hide this record from the admin members list? The member account will continue working normally.');">
+<form class="inline" method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=u['id'], action='hide') }}" onsubmit="return confirm('Hide this record obtained members list? The member account will continue working normally.');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Delete from admin view</button></form>
 </td></tr>
 {% endfor %}
