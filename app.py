@@ -635,9 +635,13 @@ def random_block(n):
     return "".join(secrets.choice(alphabet) for _ in range(n))
 
 
-def new_voucher_code(level):
-    """Generate a unique voucher code: V followed by digits only."""
-    db = get_db()
+def new_voucher_code(level, db=None):
+    """Generate a unique voucher code: V followed by digits only.
+
+    Pass the initialisation connection when called during startup, before a
+    Flask application/request context exists. Normal request handlers can omit it.
+    """
+    db = db or get_db()
     for _ in range(100):
         code = "V" + "".join(secrets.choice(string.digits) for _ in range(10))
         if not db.execute("SELECT 1 FROM vouchers WHERE code=?", (code,)).fetchone():
@@ -955,7 +959,7 @@ def init_db():
         print("[setup] Starter voucher codes:")
 
         for level in LEVELS:
-            code = new_voucher_code(level)
+            code = new_voucher_code(level, db)
 
             db.execute(
                 """
@@ -2311,11 +2315,55 @@ def admin():
         "JOIN users u ON u.id = d.user_id WHERE d.user_id<>0 "
         "ORDER BY d.updated_at DESC").fetchall()
 
+    # Admin table finder: search by table name and optionally by member cellphone/login number.
+    table_q = request.args.get("table_q", "").strip()[:60]
+    table_user_q = request.args.get("table_user_q", "").strip()[:40]
+    activity_tables = []
+    all_table_names = db.execute(
+        "SELECT name FROM sqlite_master WHERE type='table' "
+        "AND name NOT LIKE 'sqlite_%' ORDER BY name"
+    ).fetchall()
+    for table_row in all_table_names:
+        table_name = table_row["name"]
+        if table_q and table_q.casefold() not in table_name.casefold():
+            continue
+        quoted_name = '"' + table_name.replace('"', '""') + '"'
+        columns = {r["name"] for r in db.execute(
+            f"PRAGMA table_info({quoted_name})").fetchall()}
+        row_count = db.execute(f"SELECT COUNT(*) FROM {quoted_name}").fetchone()[0]
+        matched_count = row_count
+        if table_user_q:
+            matched_count = 0
+            pattern = f"%{table_user_q}%"
+            if table_name == "users":
+                matched_count = db.execute(
+                    "SELECT COUNT(*) FROM users WHERE username LIKE ? OR phone LIKE ? "
+                    "OR serial_number LIKE ?",
+                    (pattern, pattern, pattern)).fetchone()[0]
+            elif "user_id" in columns:
+                matched_count = db.execute(
+                    f"SELECT COUNT(*) FROM {quoted_name} t "
+                    "JOIN users u ON u.id=t.user_id "
+                    "WHERE u.username LIKE ? OR u.phone LIKE ? OR u.serial_number LIKE ?",
+                    (pattern, pattern, pattern)).fetchone()[0]
+            elif "username" in columns:
+                matched_count = db.execute(
+                    f"SELECT COUNT(*) FROM {quoted_name} WHERE username LIKE ?",
+                    (pattern,)).fetchone()[0]
+            if matched_count == 0:
+                continue
+        activity_tables.append({
+            "name": table_name,
+            "count": row_count,
+            "matched_count": matched_count,
+        })
+
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
                 withdrawals=withdrawals, pot_rows=pot_rows, ledger=ledger,
                 unused=unused, used_vouchers_count=used_vouchers_count,
                 all_vouchers_count=all_vouchers_count, q=q, specific=specific,
-                hidden_users=hidden_users,
+                hidden_users=hidden_users, table_q=table_q, table_user_q=table_user_q,
+                activity_tables=activity_tables,
                 gd=global_details, specific_details=specific_details,
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
@@ -5360,6 +5408,25 @@ PROFILE_BODY = """
 """
 
 ADMIN_BODY = """
+<div class="card">
+<h2>Search database tables</h2>
+<p class="muted">Search for a database table by name, or find records associated with a member cellphone/login number. This is search-only: no rows can be deleted here.</p>
+<form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
+<input name="table_q" value="{{ table_q }}" maxlength="60" autocomplete="off" placeholder="Table name, e.g. withdrawals" style="flex:1;min-width:220px">
+<input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Member cellphone/login number (optional)" style="flex:1;min-width:220px">
+<button class="primary" style="margin-top:0">Search tables</button>
+ {% if table_q or table_user_q %}<a href="{{ url_for('admin') }}">Clear search</a>{% endif %}
+</form>
+{% if activity_tables %}
+<table>
+<tr><th>Table name</th><th>Total rows</th>{% if table_user_q %}<th>Rows matching member number</th>{% endif %}</tr>
+{% for t in activity_tables %}
+<tr><td><code>{{ t['name'] }}</code></td><td>{{ t['count'] }}</td>{% if table_user_q %}<td>{{ t['matched_count'] }}</td>{% endif %}</tr>
+{% endfor %}
+</table>
+{% else %}<p class="muted">No database tables match that search.</p>{% endif %}
+</div>
+
 <div class="card note">
 <h2>Phase 1 games</h2>
 <p class="muted">Spin &amp; Win, Brain Battle and Mystery Envelope: prizes, odds, stock, limits, schedule and winner records.</p>
