@@ -4203,9 +4203,9 @@ REWARDS_GUIDE_BODY = """
 <section class="level-rewards-3d" aria-label="Illustrative reward by level">
   <div class="level-rewards-header"><div><p class="benefits-kicker">VEDO MARKET · EARN AND GROW</p><h2>Reward by <span>level</span></h2><p>Higher levels · Bigger rewards</p></div><div class="level-badge-3d" aria-hidden="true">↗</div></div>
   <div class="level-chart-3d"><div class="chart-title"><span class="chart-icon">▥</span><strong>Reward by level</strong><small>Daily amount shown in the example</small></div>
-    <div class="chart-area"><div class="chart-ylabels"><span>R1,666.67</span><span>R1,333.33</span><span>R1,000.00</span><span>R666.67</span><span>R333.33</span><span>R0</span></div><div class="chart-bars">
+    <div class="chart-area"><div class="chart-ylabels"><span>R40,000</span><span>R35,000</span><span>R30,000</span><span>R25,000</span><span>R20,000</span><span>R15,000</span><span>R10,000</span><span>R5,000</span><span>R0</span></div><div class="chart-bars">
       {% set level_daily = [(1,1500),(2,5000),(3,15000),(4,50000),(5,83333),(6,125000),(7,166667)] %}
-      {% for lv, amt in level_daily %}<div class="chart-col"><strong>{{ money(amt) }}</strong><div class="bar-3d" style="--bar-height:{{ (amt / 166667 * 100)|round|int }}%"><i></i></div><span>Level {{ lv }}</span><small>{{ money(amt) }}/day</small></div>{% endfor %}
+      {% for lv, amt in level_daily %}<div class="chart-col"><strong>{{ money(amt * 24) }}</strong><div class="bar-3d" style="--bar-height:{{ (amt * 24 / 4000000 * 100)|round|int }}%" aria-label="Level {{ lv }}: {{ money(amt * 24) }} over 24 days"><i></i></div><span>Level {{ lv }}</span><small>{{ money(amt) }}<span>/day</span></small></div>{% endfor %}
     </div></div>
   </div>
   <div class="level-table-wrap"><h3><span class="table-icon">▤</span> Reward details &amp; totals</h3><div class="level-table-scroll"><table class="level-rewards-table"><thead><tr><th>Level</th><th>First day</th><th>7-day total</th><th>30-day total</th><th>1-year total</th></tr></thead><tbody>
@@ -4250,6 +4250,33 @@ REWARDS_GUIDE_BODY = """
  .level-rewards-table thead th{font-size:7.5px}
  .level-rewards-table tbody td{font-size:8px;letter-spacing:-.05em}
  .level-chip{font-size:7.5px;padding:4px 2px}
+}
+/* Responsive 2D chart: preserve the seven bars and all labels without horizontal scrolling. */
+.level-chart-3d{min-width:0;overflow:hidden}
+.chart-area{display:grid;grid-template-columns:clamp(43px,6vw,70px) minmax(0,1fr);gap:7px;height:clamp(290px,36vw,410px);min-height:0;align-items:stretch}
+.chart-ylabels{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;min-width:0;padding:2px 0 44px;font-size:clamp(6px,.8vw,10px);line-height:1;white-space:nowrap}
+.chart-bars{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:clamp(2px,.8vw,10px);height:100%;min-width:0;box-sizing:border-box;align-items:stretch;padding:18px 2px 0;border-bottom:2px solid #3e9cff;background:repeating-linear-gradient(to top,transparent 0,transparent calc(12.5% - 1px),#dceaff calc(12.5% - 1px),#dceaff 12.5%)}
+.chart-col{display:flex;min-width:0;height:100%;min-height:0;flex-direction:column;align-items:center;justify-content:flex-end;gap:6px;overflow:visible}
+.chart-col>strong{display:block;width:100%;min-height:1em;text-align:center;font-size:clamp(6px,1vw,12px);line-height:1.1;letter-spacing:-.04em;color:#142d55;white-space:nowrap;font-variant-numeric:tabular-nums}
+.bar-3d{position:relative;display:block;flex:0 0 auto;width:min(78%,58px);height:var(--bar-height);min-height:3px;margin-top:auto;border-radius:7px 7px 0 0;background:linear-gradient(180deg,#67d8ff 0%,#2695f5 48%,#1761dc 100%);box-shadow:none;transform:none}
+.bar-3d:after{display:none}
+.bar-3d i{display:none}
+.chart-col>span{display:block;width:100%;text-align:center;font-size:clamp(6px,.95vw,11px);line-height:1.1;white-space:nowrap;color:#163d82}
+.chart-col>small{display:flex;flex-direction:column;align-items:center;gap:2px;width:100%;min-height:2.1em;text-align:center;font-size:clamp(6px,.9vw,10px);font-weight:800;line-height:1.05;letter-spacing:-.03em;white-space:nowrap;color:#1675e8}
+.chart-col>small span{display:block;font-size:.9em}
+@media(max-width:600px){
+ .level-chart-3d{padding:10px 7px}
+ .chart-title{gap:7px;margin-bottom:12px}
+ .chart-title strong{font-size:1rem}
+ .chart-title small{width:auto;margin-left:0;font-size:.65rem}
+ .chart-area{grid-template-columns:43px minmax(0,1fr);gap:5px;height:300px}
+ .chart-ylabels{font-size:6px;padding-bottom:43px}
+ .chart-bars{gap:2px;padding:15px 1px 0}
+ .chart-col{gap:5px}
+ .chart-col>strong{font-size:clamp(5.5px,1.75vw,8px);letter-spacing:-.06em}
+ .bar-3d{width:72%;border-radius:4px 4px 0 0}
+ .chart-col>span{font-size:clamp(5.5px,1.65vw,8px);letter-spacing:-.04em}
+ .chart-col>small{font-size:clamp(5.5px,1.55vw,7.5px);letter-spacing:-.05em}
 }
 </style>
 """
