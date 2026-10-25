@@ -4874,7 +4874,7 @@ CHECKIN_TASKS_BODY = """
 </div>
 <div class="voucher-task-grid{{ ' blue-voucher-level' if user['level'] in (5, 6, 7) else '' }}">
 {% for t in tasks %}
-<button type="button" class="voucher-task{{ ' done' if t.done }}{{ ' blue-voucher' if user['level'] in (5, 6, 7) and not t.done else '' }}" data-label="+{{ money(t.reward) }}"
+<button type="button" class="voucher-task{{ ' done' if t.done }}{{ ' blue-voucher' if user['level'] in (5, 6, 7) else '' }}" data-label="+{{ money(t.reward) }}"
  data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}" {% if t.done %}disabled{% endif %}>
  <span class="voucher-top"><b>VEDO<span class="voucher-dot">.</span></b><small>DIGITAL VOUCHER</small></span>
  <span class="voucher-main"><span class="voucher-symbol">V</span><span class="voucher-prize"><small>TASK {{ t.no }}</small><strong>{{ money(t.reward) }}</strong><small>POINTS REWARD</small></span></span>
