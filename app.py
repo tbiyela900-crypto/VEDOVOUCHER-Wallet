@@ -342,8 +342,14 @@ def daily_reward(level):
 
 
 def tasks_for_level(level):
-    """Check-in taps per day: 3 at Level 1, plus 2 more for every level up."""
+    """Number of daily voucher tasks for each level.
+
+    Levels 5, 6 and 7 use three blue vouchers, as requested. Levels 1-4
+    retain the existing task counts.
+    """
     level = int(level)
+    if level in (5, 6, 7):
+        return 3
     return 3 + 2 * (level - 1) if level >= 1 else 0
 
 
@@ -3711,6 +3717,20 @@ tr.hl td{background:rgba(31,214,164,.08);}
 .voucher-task.done .voucher-symbol{color:#21845e;background:#e2f7ed;border-color:#a7dec8}
 .voucher-task.done .voucher-prize strong{color:#21845e}
 .voucher-task:disabled{cursor:default}
+/* Levels 5-7: three premium blue Vedo vouchers per day. */
+.voucher-task.blue-voucher{color:#fff;border:1px solid #6da5ff;background:linear-gradient(135deg,#2878e5 0%,#1451b5 56%,#103a86 100%);box-shadow:0 12px 28px rgba(20,81,181,.25)}
+.voucher-task.blue-voucher:before{background:radial-gradient(circle,rgba(255,255,255,.25),transparent 70%)}
+.voucher-task.blue-voucher:hover{border-color:#b9d5ff;box-shadow:0 16px 32px rgba(20,81,181,.34)}
+.voucher-task.blue-voucher .voucher-top small,.voucher-task.blue-voucher .voucher-bottom{color:#dceaff}
+.voucher-task.blue-voucher .voucher-dot{color:#80ffc7}
+.voucher-task.blue-voucher .voucher-symbol{color:#fff;background:rgba(255,255,255,.14);border-color:rgba(255,255,255,.42)}
+.voucher-task.blue-voucher .voucher-prize strong{color:#fff}
+.voucher-task.blue-voucher .voucher-progress{background:linear-gradient(90deg,#8ef5d0,#fff)}
+.voucher-task.blue-voucher.loading{border-color:#f5d477;box-shadow:0 0 0 2px rgba(245,212,119,.28),0 12px 28px rgba(20,81,181,.25)}
+.voucher-task.blue-voucher.done{color:#174f43;border-color:#83cbb1;background:linear-gradient(135deg,#fff,#eafaf3);box-shadow:0 10px 24px rgba(15,35,74,.10)}
+.voucher-task.blue-voucher.done .voucher-top small,.voucher-task.blue-voucher.done .voucher-bottom{color:#28735e}
+.voucher-task.blue-voucher.done .voucher-prize strong{color:#21845e}
+.voucher-task.blue-voucher.done .voucher-symbol{color:#21845e;background:#e2f7ed;border-color:#a7dec8}
 .voucher-back{margin-top:22px}
 @media(max-width:560px){.voucher-task-grid{grid-template-columns:1fr;gap:13px}.voucher-task{min-height:174px;padding:16px}.voucher-summary{gap:6px}.voucher-summary>div{padding:9px 7px}.voucher-summary strong{font-size:.88rem}.voucher-prize strong{font-size:1.65rem}}
 
@@ -4847,9 +4867,9 @@ CHECKIN_TASKS_BODY = """
   <div class="bar"><b id="progbar" style="width:{{ (completed_n / total * 100)|int if total else 0 }}%"></b></div>
   <p id="msg" class="voucher-msg" aria-live="polite"></p>
 </div>
-<div class="voucher-task-grid">
+<div class="voucher-task-grid{{ ' blue-voucher-level' if user['level'] in (5, 6, 7) else '' }}">
 {% for t in tasks %}
-<button type="button" class="voucher-task{{ ' done' if t.done }}" data-label="+{{ money(t.reward) }}"
+<button type="button" class="voucher-task{{ ' done' if t.done }}{{ ' blue-voucher' if user['level'] in (5, 6, 7) and not t.done else '' }}" data-label="+{{ money(t.reward) }}"
  data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}" {% if t.done %}disabled{% endif %}>
  <span class="voucher-top"><b>VEDO<span class="voucher-dot">.</span></b><small>DIGITAL VOUCHER</small></span>
  <span class="voucher-main"><span class="voucher-symbol">V</span><span class="voucher-prize"><small>TASK {{ t.no }}</small><strong>{{ money(t.reward) }}</strong><small>POINTS REWARD</small></span></span>
