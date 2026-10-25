@@ -4362,6 +4362,110 @@ REWARDS_GUIDE_BODY = """
     height: 290px;
   }
 }
+
+
+/* Final phone chart sizing fix: only affects small screens; desktop stays untouched. */
+@media screen and (max-width: 600px) {
+  .rewards-guide-page .level-rewards-3d {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 12px 8px;
+    overflow: hidden;
+  }
+  .rewards-guide-page .level-chart-3d {
+    width: 100%;
+    max-width: 100%;
+    box-sizing: border-box;
+    padding: 10px 6px;
+    overflow: hidden;
+  }
+  .rewards-guide-page .chart-title {
+    gap: 7px;
+    margin-bottom: 10px;
+  }
+  .rewards-guide-page .chart-title small {
+    flex-basis: 100%;
+    width: 100%;
+    margin: 0;
+    font-size: .68rem;
+  }
+  .rewards-guide-page .chart-area {
+    width: 100%;
+    box-sizing: border-box;
+    grid-template-columns: 39px minmax(0, 1fr);
+    gap: 4px;
+    height: 250px;
+    min-height: 0;
+  }
+  .rewards-guide-page .chart-ylabels {
+    padding: 2px 0 40px;
+    font-size: 6.5px;
+    line-height: 1;
+  }
+  .rewards-guide-page .chart-bars {
+    width: 100%;
+    min-width: 0;
+    grid-template-columns: repeat(7, minmax(0, 1fr));
+    gap: 2px;
+    padding: 16px 1px 0;
+    box-sizing: border-box;
+  }
+  .rewards-guide-page .chart-col {
+    min-width: 0;
+    gap: 4px;
+  }
+  /* Hide the long currency strings on phones and show compact labels instead. */
+  .rewards-guide-page .chart-col > strong {
+    position: relative;
+    display: block;
+    width: 100%;
+    height: 9px;
+    min-height: 9px;
+    overflow: visible;
+    font-size: 0 !important;
+    color: transparent !important;
+    line-height: 9px;
+    white-space: nowrap;
+  }
+  .rewards-guide-page .chart-col > strong::after {
+    position: absolute;
+    inset: 0 auto auto 50%;
+    display: block;
+    transform: translateX(-50%);
+    color: #142d55 !important;
+    font-size: 7px !important;
+    font-weight: 800;
+    letter-spacing: -.03em;
+    line-height: 9px;
+    white-space: nowrap;
+  }
+  .rewards-guide-page .chart-col:nth-child(1) > strong::after { content: "R360"; }
+  .rewards-guide-page .chart-col:nth-child(2) > strong::after { content: "R1.2k"; }
+  .rewards-guide-page .chart-col:nth-child(3) > strong::after { content: "R3.6k"; }
+  .rewards-guide-page .chart-col:nth-child(4) > strong::after { content: "R12k"; }
+  .rewards-guide-page .chart-col:nth-child(5) > strong::after { content: "R20k"; }
+  .rewards-guide-page .chart-col:nth-child(6) > strong::after { content: "R30k"; }
+  .rewards-guide-page .chart-col:nth-child(7) > strong::after { content: "R40k"; }
+  .rewards-guide-page .chart-col > span {
+    font-size: 6.5px !important;
+    line-height: 1.1;
+    letter-spacing: -.04em !important;
+    white-space: nowrap;
+  }
+  .rewards-guide-page .chart-col > small {
+    min-height: 2.2em;
+    font-size: 6.5px !important;
+    line-height: 1.1;
+    letter-spacing: -.04em !important;
+    white-space: nowrap;
+  }
+  .rewards-guide-page .bar-3d {
+    width: 70%;
+    max-width: 30px;
+    border-radius: 4px 4px 0 0;
+  }
+}
 </style>
 """
 
