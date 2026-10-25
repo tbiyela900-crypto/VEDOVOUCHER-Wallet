@@ -3884,6 +3884,50 @@ label.chk{display:flex;align-items:center;gap:8px;color:var(--ink);}
 label.chk input{width:auto;margin:0;}
 .two{display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:0 14px;}
 .prow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
+
+
+/* ---------- compact points balance beside navigation tabs ---------- */
+.nav-points{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;padding:6px 10px;border:1px solid rgba(31,214,164,.3);border-radius:11px;background:rgba(31,214,164,.08);color:var(--ink);line-height:1.15;}
+.nav-points-label{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.nav-points strong{font-size:.78rem;color:#75f0c7;font-weight:800;}
+
+/* ---------- premium Vedo voucher promotion board ---------- */
+.voucher-promo{grid-column:1/-1;position:relative;isolation:isolate;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(260px,.95fr);align-items:center;gap:20px;min-height:320px;padding:30px 34px;overflow:hidden;border:1px solid rgba(95,143,255,.24);border-radius:24px;background:radial-gradient(ellipse at 78% 45%,rgba(34,95,205,.28),transparent 48%),linear-gradient(115deg,#0b1427 0%,#101d39 58%,#0b1325 100%);box-shadow:0 18px 45px rgba(0,0,0,.22);}
+.voucher-promo:before{content:"";position:absolute;inset:0;z-index:-1;opacity:.22;background-image:radial-gradient(rgba(255,255,255,.23) .7px,transparent .7px);background-size:7px 7px;mask-image:linear-gradient(90deg,transparent,black);}
+.voucher-copy{position:relative;z-index:2;max-width:540px;}
+.voucher-eyebrow{display:inline-block;margin-bottom:13px;color:#8cebd0;font-size:.7rem;font-weight:800;letter-spacing:.14em;}
+.voucher-copy h2{margin:0 0 13px;color:#fff;font-size:clamp(1.8rem,3.2vw,3rem);line-height:1.06;letter-spacing:-.055em;font-weight:800;}
+.voucher-copy h2 span{color:#4f8cff;}
+.voucher-copy p{max-width:460px;margin:0 0 20px;color:#b2bfd3;font-size:.91rem;line-height:1.7;}
+.voucher-cta{display:inline-flex;align-items:center;gap:18px;padding:11px 17px;border:1px solid rgba(255,255,255,.2);border-radius:10px;background:linear-gradient(135deg,#367bff,#2051d5);box-shadow:0 8px 22px rgba(29,83,216,.3);color:white;text-decoration:none;font-weight:800;font-size:.85rem;}
+.voucher-cta:hover{filter:brightness(1.1);transform:translateY(-1px);}
+.voucher-trust{display:flex;align-items:center;gap:7px;margin-top:18px;color:#aab9cb;font-size:.69rem;font-weight:600;}
+.voucher-check{display:inline-grid;place-items:center;width:18px;height:18px;border:1px solid #31d69d;border-radius:50%;color:#31e4a7;font-size:.75rem;}
+.voucher-art{position:relative;min-height:245px;display:flex;align-items:center;justify-content:center;perspective:900px;}
+.gift-card{position:absolute;width:min(78%,300px);height:190px;border-radius:17px;overflow:hidden;box-shadow:0 22px 42px rgba(0,0,0,.42);}
+.gift-card-back{transform:translate(-35px,4px) rotate(-9deg);padding:19px 20px;background:linear-gradient(145deg,#f7f9fc,#d8e0ec 68%,#c1d0e2);color:#16284a;}
+.gift-card-back:after{content:"";position:absolute;inset:0;background:linear-gradient(120deg,transparent 20%,rgba(255,255,255,.7) 38%,transparent 52%);pointer-events:none;}
+.gift-brand{font-weight:900;letter-spacing:.03em;font-size:1rem;color:#173b9c;}
+.gift-brand small{display:block;font-size:.48rem;letter-spacing:.18em;}
+.gift-chip{position:absolute;right:16px;top:18px;padding:5px 8px;border-radius:6px;background:#e7edf8;color:#274a95;font-size:.48rem;font-weight:900;letter-spacing:.06em;}
+.gift-card-back .gift-value{margin-top:19px;font-size:1.55rem;line-height:1;font-weight:900;letter-spacing:.04em;color:#1768c9;}
+.gift-foot{position:absolute;bottom:15px;left:20px;font-size:.56rem;color:#536781;}
+.gift-card-front{z-index:1;transform:translate(20px,-3px) rotate(3deg);padding:17px 19px;color:#fff;background:linear-gradient(145deg,#1767c7 0%,#0b4ab0 53%,#092b75 100%);border:1px solid rgba(255,255,255,.42);}
+.gift-card-front:before{content:"";position:absolute;inset:0;background:linear-gradient(118deg,rgba(255,255,255,.18),transparent 34%,transparent 70%,rgba(255,255,255,.09));pointer-events:none;}
+.gift-card-top,.gift-card-bottom{position:relative;display:flex;align-items:center;justify-content:space-between;gap:8px;}
+.gift-card-front .gift-brand{color:#fff;font-size:1.05rem;}
+.gift-dot{margin-left:4px;color:#51e1bd;font-size:.55rem;}
+.gift-tag{font-size:.46rem;letter-spacing:.1em;font-weight:800;color:#d8e8ff;}
+.gift-main{display:flex;align-items:center;justify-content:space-between;margin-top:15px;}
+.gift-emblem{display:grid;place-items:center;width:68px;height:68px;border:1px solid rgba(255,255,255,.4);border-radius:19px;background:linear-gradient(145deg,rgba(255,255,255,.2),rgba(255,255,255,.04));font-size:2.6rem;font-weight:900;font-style:italic;box-shadow:inset 0 1px rgba(255,255,255,.25);}
+.gift-value-main{font-size:2rem;line-height:.95;font-weight:900;letter-spacing:-.06em;text-align:right;}
+.gift-value-main small{display:block;margin-top:7px;font-size:.55rem;letter-spacing:.18em;font-weight:800;}
+.gift-card-bottom{position:absolute;left:19px;right:19px;bottom:15px;padding-top:9px;border-top:1px solid rgba(255,255,255,.28);font-size:.45rem;letter-spacing:.08em;font-weight:800;color:#d9e9ff;}
+.gift-code{color:#fff;}
+.voucher-spark{position:absolute;color:#9dbdff;text-shadow:0 0 16px #4e85ff;font-size:2rem;}
+.spark-one{right:5%;top:8%;}.spark-two{left:7%;bottom:7%;font-size:1.5rem;}
+@media(max-width:850px){nav{flex-wrap:wrap}.nav-points{order:3;margin-left:auto}.voucher-promo{padding:25px;grid-template-columns:1fr minmax(230px,.8fr);gap:8px}.gift-card{width:85%;height:175px}.gift-main{margin-top:12px}.gift-emblem{width:56px;height:56px;font-size:2.1rem}.gift-value-main{font-size:1.7rem}}
+@media(max-width:620px){.voucher-promo{grid-template-columns:1fr;padding:24px 21px;gap:0}.voucher-copy h2{font-size:2rem}.voucher-art{min-height:220px;margin-top:8px}.gift-card{width:min(78%,290px);height:175px}.voucher-trust{align-items:flex-start}.nav-points{padding:5px 8px}.nav-points-label{font-size:.6rem}.nav-points strong{font-size:.72rem}}
 </style>
 </head>
 <body>
@@ -3906,6 +3950,7 @@ label.chk input{width:auto;margin:0;}
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
+<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Points</span><strong>{{ money(me['points']) }}</strong></span>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button>Log out<span class="uname"> ({{ me['username'] }})</span></button>
@@ -4097,6 +4142,22 @@ DASH_BODY = """
 {% set lvl_pct = ([(user['points'] / next_cost * 100)|int, 100]|min) if next_cost else 100 %}
 
 <div class="dash">
+<section class="voucher-promo" aria-label="Vedo digital vouchers promotion">
+  <div class="voucher-copy">
+    <span class="voucher-eyebrow">VEDO REWARDS · MEMBER EXCLUSIVE</span>
+    <h2>Digital gift vouchers,<br><span>the Vedo way.</span></h2>
+    <p>Play, participate and discover rewards. Your next Vedo voucher could be waiting.</p>
+    <a class="voucher-cta" href="{{ url_for('games_hub') }}">Explore rewards <span aria-hidden="true">→</span></a>
+    <div class="voucher-trust"><span class="voucher-check">✓</span> Rewards and eligibility shown in your Vedo account</div>
+  </div>
+  <div class="voucher-art" aria-hidden="true">
+    <div class="gift-card gift-card-back"><div class="gift-brand">VEDO <small>REWARDS</small></div><div class="gift-chip">GIFT VOUCHER</div><div class="gift-value">SPECIAL<br>REWARD</div><div class="gift-foot">A little something, just for you</div></div>
+    <div class="gift-card gift-card-front"><div class="gift-card-top"><span class="gift-brand">VEDO<span class="gift-dot">●</span></span><span class="gift-tag">DIGITAL VOUCHER</span></div><div class="gift-main">
+      <div class="gift-emblem">V</div><div class="gift-value-main">R250<small>VOUCHER</small></div>
+    </div><div class="gift-card-bottom"><span>GIFT SOMETHING GOOD</span><span class="gift-code">VDO · 250</span></div></div>
+    <div class="voucher-spark spark-one">✦</div><div class="voucher-spark spark-two">✧</div>
+  </div>
+</section>
 <section class="hero">
 <div class="hero-top">
 <div>
