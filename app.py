@@ -2339,44 +2339,60 @@ def admin():
             f"PRAGMA table_info({quoted_name})").fetchall()}
         row_count = db.execute(f"SELECT COUNT(*) FROM {quoted_name}").fetchone()[0]
         matched_count = row_count
+        matched_rows = []
+        display_columns = [r["name"] for r in db.execute(
+            f"PRAGMA table_info({quoted_name})").fetchall()]
         if table_user_q:
-            matched_count = 0
             pattern = f"%{table_user_q}%"
-            # Member table: search login/cellphone, bank number, and numeric user ID.
+            # Search the actual table rows, not only a count, so the admin sees
+            # only the records belonging to the selected member/ID.
             if table_name == "users":
+                where_sql = ("username LIKE ? OR phone LIKE ? OR serial_number LIKE ? "
+                             "OR CAST(id AS TEXT) LIKE ?")
+                params = (pattern, pattern, pattern, pattern)
                 matched_count = db.execute(
-                    "SELECT COUNT(*) FROM users WHERE username LIKE ? OR phone LIKE ? "
-                    "OR serial_number LIKE ? OR CAST(id AS TEXT) LIKE ?",
-                    (pattern, pattern, pattern, pattern)).fetchone()[0]
-            # Activity tables linked by user_id: search the user's phone/login,
-            # bank number, and ID, plus the activity's own user_id.
+                    "SELECT COUNT(*) FROM users WHERE " + where_sql, params).fetchone()[0]
+                matched_rows = db.execute(
+                    "SELECT * FROM users WHERE " + where_sql + " ORDER BY id DESC LIMIT 50",
+                    params).fetchall()
             elif "user_id" in columns:
+                where_sql = ("u.username LIKE ? OR u.phone LIKE ? OR u.serial_number LIKE ? "
+                             "OR CAST(u.id AS TEXT) LIKE ? OR CAST(t.user_id AS TEXT) LIKE ?")
+                params = (pattern, pattern, pattern, pattern, pattern)
                 matched_count = db.execute(
-                    f"SELECT COUNT(*) FROM {quoted_name} t "
-                    "LEFT JOIN users u ON u.id=t.user_id "
-                    "WHERE u.username LIKE ? OR u.phone LIKE ? OR u.serial_number LIKE ? "
-                    "OR CAST(u.id AS TEXT) LIKE ? OR CAST(t.user_id AS TEXT) LIKE ?",
-                    (pattern, pattern, pattern, pattern, pattern)).fetchone()[0]
+                    f"SELECT COUNT(*) FROM {quoted_name} t LEFT JOIN users u ON u.id=t.user_id WHERE " + where_sql,
+                    params).fetchone()[0]
+                matched_rows = db.execute(
+                    f"SELECT t.* FROM {quoted_name} t LEFT JOIN users u ON u.id=t.user_id WHERE " + where_sql +
+                    " ORDER BY t.rowid DESC LIMIT 50", params).fetchall()
             elif "username" in columns:
+                where_sql = "username LIKE ?"
+                params = (pattern,)
                 matched_count = db.execute(
-                    f"SELECT COUNT(*) FROM {quoted_name} WHERE username LIKE ?",
-                    (pattern,)).fetchone()[0]
+                    f"SELECT COUNT(*) FROM {quoted_name} WHERE " + where_sql, params).fetchone()[0]
+                matched_rows = db.execute(
+                    f"SELECT * FROM {quoted_name} WHERE " + where_sql + " LIMIT 50", params).fetchall()
             else:
-                # For tables without a user link, search text/numeric columns,
-                # including any column named id or user_id.
                 searchable = [c for c in columns if c.lower() in
                               ("id", "user_id", "username", "phone", "serial_number", "code", "used_by", "issued_to")]
                 if searchable:
                     clauses = [f'CAST("{c.replace(chr(34), chr(34)*2)}" AS TEXT) LIKE ?' for c in searchable]
+                    where_sql = " OR ".join(clauses)
+                    params = tuple(pattern for _ in searchable)
                     matched_count = db.execute(
-                        f"SELECT COUNT(*) FROM {quoted_name} WHERE " + " OR ".join(clauses),
-                        tuple(pattern for _ in searchable)).fetchone()[0]
+                        f"SELECT COUNT(*) FROM {quoted_name} WHERE " + where_sql, params).fetchone()[0]
+                    matched_rows = db.execute(
+                        f"SELECT * FROM {quoted_name} WHERE " + where_sql + " LIMIT 50", params).fetchall()
+                else:
+                    matched_count = 0
             if matched_count == 0:
                 continue
         activity_tables.append({
             "name": table_name,
             "count": row_count,
             "matched_count": matched_count,
+            "columns": display_columns,
+            "rows": [dict(r) for r in matched_rows],
         })
 
     return page(ADMIN_BODY, summary=summary, users=users, topups=topups,
@@ -5438,7 +5454,7 @@ ADMIN_BODY = """
 {% if q %}<a href="{{ url_for('admin') }}">Clear search</a>{% endif %}
 </form>
 <h3>Database tables</h3>
-<p class="muted">Search a table name, or enter a member number / user ID to count matching records. Click a table name to jump straight to it.</p>
+<p class="muted">Search a table name, then enter a username, cellphone number, bank account number, or user ID in that table row. Only matching records are shown for that table.</p>
 <form method="get" action="{{ url_for('admin') }}" style="display:flex;gap:8px;flex-wrap:wrap;align-items:center;margin-bottom:12px">
 <input name="table_q" value="{{ table_q }}" maxlength="60" autocomplete="off" placeholder="Filter table names, e.g. withdrawals" style="flex:1;min-width:200px">
 <input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Cellphone, user number, or ID" style="flex:1;min-width:220px">
@@ -5447,9 +5463,10 @@ ADMIN_BODY = """
 </form>
 {% if activity_tables %}
 <table>
-<tr><th>Table name</th><th>Total rows</th>{% if table_user_q %}<th>Matching records for number / ID</th>{% endif %}<th>Search this table</th></tr>
+<tr><th>Table name</th><th>Total rows</th>{% if table_user_q %}<th>Matching records</th>{% endif %}<th>Search this table</th></tr>
 {% for t in activity_tables %}
-<tr id="dbtable-{{ t['name'] }}"><td><a href="#dbtable-{{ t['name'] }}"><code>{{ t['name'] }}</code></a></td><td>{{ t['count'] }}</td>{% if table_user_q %}<td>{{ t['matched_count'] }}</td>{% endif %}<td><form method="get" action="{{ url_for('admin') }}#dbtable-{{ t['name'] }}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="hidden" name="table_q" value="{{ t['name'] }}"><input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Number or user ID" style="min-width:140px;max-width:220px"><button class="primary" style="margin-top:0">Find</button></form></td></tr>
+<tr id="dbtable-{{ t['name'] }}"><td><a href="#dbtable-{{ t['name'] }}"><code>{{ t['name'] }}</code></a></td><td>{{ t['count'] }}</td>{% if table_user_q %}<td>{{ t['matched_count'] }}</td>{% endif %}<td><form method="get" action="{{ url_for('admin') }}#dbtable-{{ t['name'] }}" style="display:flex;gap:6px;align-items:center;flex-wrap:wrap"><input type="hidden" name="table_q" value="{{ t['name'] }}"><input name="table_user_q" value="{{ table_user_q }}" maxlength="40" autocomplete="off" placeholder="Username, phone, user ID" style="min-width:180px;max-width:260px"><button class="primary" style="margin-top:0">Find</button></form></td></tr>
+{% if table_user_q and t['rows'] %}<tr><td colspan="4"><div style="overflow-x:auto"><strong>{{ t['name'] }} — matching records (up to 50 shown)</strong><table><tr>{% for col in t['columns'] %}<th>{{ col }}</th>{% endfor %}</tr>{% for record in t['rows'] %}<tr>{% for col in t['columns'] %}<td style="max-width:260px;overflow-wrap:anywhere">{{ record.get(col, '') if record.get(col, '') is not none else '' }}</td>{% endfor %}</tr>{% endfor %}</table></div></td></tr>{% endif %}
 {% endfor %}
 </table>
 {% else %}<p class="muted">No database tables match that search.</p>{% endif %}
