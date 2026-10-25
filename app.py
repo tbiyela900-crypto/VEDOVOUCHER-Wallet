@@ -2582,7 +2582,7 @@ def game_gate(db, user, game):
     left = max(0, row["max_plays"] - used)
     error = None
     if status == "PAUSED":
-        error = "This game is paused by the admin."
+        error = "This game is closed."
     elif status == "UPCOMING":
         error = f"This game starts on {row['starts_at']} UTC."
     elif status == "CLOSED":
