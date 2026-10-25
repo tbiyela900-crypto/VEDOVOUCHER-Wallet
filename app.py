@@ -4445,7 +4445,7 @@ REWARDS_GUIDE_BODY = """
   </div>
   <div class="level-table-wrap"><h3><span class="table-icon">▤</span> Reward details &amp; totals</h3><div class="level-table-scroll"><table class="level-rewards-table"><thead><tr><th>Level</th><th>First day</th><th>7-day total</th><th>30-day total</th><th>1-year total</th></tr></thead><tbody>
   {% for lv, amt in level_daily %}<tr><th data-label="Level"><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td data-label="First-day reward">{{ 'R{:,.0f}'.format(amt / 100) }}</td><td data-label="7-day total">{{ 'R{:,.0f}'.format(amt * 7 / 100) }}</td><td data-label="30-day total">{{ 'R{:,.0f}'.format(amt * 30 / 100) }}</td><td data-label="1-year total (365 days)">{{ 'R{:,.0f}'.format(amt * 365 / 100) }}</td></tr>{% endfor %}
-  </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities. These figures are not a promise of income.</p></div>
+  </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities.</p></div>
   <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
 </section>
 </div>
