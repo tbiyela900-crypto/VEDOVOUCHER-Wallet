@@ -1414,6 +1414,13 @@ def checkin_state(user):
     return False, 1
 
 
+@app.route("/rewards-guide")
+@login_required
+def rewards_guide():
+    """Dedicated, readable Vedo rewards page opened from the dashboard promo."""
+    return page(REWARDS_GUIDE_BODY)
+
+
 @app.route("/dashboard")
 @login_required
 def dashboard():
@@ -3944,7 +3951,7 @@ label.chk input{width:auto;margin:0;}
 .benefits-disclaimer{margin:18px 0 0;color:#4d6280;font-size:.72rem;line-height:1.5}
 .level-rewards-header{display:flex;align-items:center;justify-content:space-between;gap:20px;margin-bottom:20px}.level-badge-3d{display:grid;place-items:center;flex:none;width:72px;height:72px;border-radius:50%;background:linear-gradient(145deg,#49ddff,#0877ff 58%,#1428b8);box-shadow:0 6px 0 #0c43a8,0 12px 20px #075acb3b,inset 0 2px 2px #ffffffaa;color:#fff;font-size:2.6rem;font-weight:900}.level-chart-3d{padding:18px;border:1px solid #c6dcfa;border-radius:20px;background:linear-gradient(145deg,#fff,#f3f8ff);box-shadow:0 7px 0 #d8e7fa,0 13px 22px #1c57901c}.chart-title{display:flex;align-items:center;gap:10px;flex-wrap:wrap;margin-bottom:18px;color:#153d83}.chart-title strong{font-size:1.1rem}.chart-title small{color:#64748b;font-size:.75rem}.chart-icon,.table-icon{display:grid;place-items:center;flex:none;width:40px;height:40px;border-radius:50%;background:linear-gradient(145deg,#49dfff,#0868e8 60%,#162fb6);box-shadow:0 4px 0 #0d43a7;color:#fff;font-size:1.6rem}.chart-area{display:grid;grid-template-columns:65px 1fr;gap:10px;min-height:250px}.chart-ylabels{display:flex;flex-direction:column;justify-content:space-between;align-items:flex-end;padding:0 0 37px;color:#213c64;font-size:.65rem;font-weight:800}.chart-bars{display:grid;grid-template-columns:repeat(7,minmax(0,1fr));gap:clamp(5px,1.4vw,15px);align-items:end;min-width:0;border-bottom:2px solid #5aa9ff;background:repeating-linear-gradient(to top,transparent 0,transparent calc(20% - 1px),#dceaff calc(20% - 1px),#dceaff 20%);padding:12px 4px 0}.chart-col{display:flex;min-width:0;height:100%;min-height:225px;flex-direction:column;align-items:center;justify-content:flex-end;gap:7px}.chart-col>strong{font-size:clamp(.55rem,1vw,.8rem);color:#142d55;white-space:nowrap}.bar-3d{position:relative;width:min(100%,58px);height:max(4px,var(--bar-height));min-height:4px;border-radius:9px 9px 2px 2px;background:linear-gradient(90deg,#5cddff 0%,#1689ff 43%,#0750d7 100%);box-shadow:5px 5px 0 #0b48ba33,0 8px 12px #176fe52a,inset 2px 0 2px #ffffff80;transform:perspective(150px) rotateY(-4deg);margin-top:auto}.bar-3d:after{content:"";position:absolute;top:0;right:-6px;width:6px;height:100%;border-radius:0 4px 2px 0;background:linear-gradient(#1774d8,#0739a7);transform:skewY(35deg);transform-origin:left top}.bar-3d i{position:absolute;top:0;left:0;right:0;height:6px;border-radius:8px 8px 0 0;background:#80e9ff}.chart-col>span{font-size:clamp(.54rem,.9vw,.72rem);font-weight:900;color:#163d82;white-space:nowrap}.chart-col>small{font-size:clamp(.5rem,.85vw,.68rem);font-weight:800;color:#1675e8;white-space:nowrap}.level-table-wrap{margin-top:28px}.level-table-wrap h3{display:flex;align-items:center;gap:10px;margin:0 0 13px;color:#123a7d;font-size:clamp(1.05rem,2vw,1.5rem);text-transform:uppercase}.level-table-scroll{overflow-x:auto;border:1px solid #c7ddfa;border-radius:16px;box-shadow:0 6px 0 #d9e8fa}.level-rewards-table{width:100%;border-collapse:separate;border-spacing:0;background:#fff;color:#142746;font-size:.85rem}.level-rewards-table th,.level-rewards-table td{padding:10px 12px;text-align:center;border-right:1px solid #d8e6f8;border-bottom:1px solid #d8e6f8;white-space:nowrap}.level-rewards-table thead th{background:linear-gradient(#176de4,#073d9f);color:#fff;font-size:.72rem;text-transform:uppercase}.level-rewards-table tbody th{background:#f4f9ff}.level-rewards-table tbody tr:last-child td,.level-rewards-table tbody tr:last-child th{border-bottom:0}.level-rewards-table td{font-weight:800}.level-chip{display:inline-block;padding:5px 10px;border-radius:99px;background:linear-gradient(#49dfff,#0872f3 65%,#142bb8);box-shadow:0 3px 0 #0c44a5;color:#fff;font-size:.75rem}.level-2{filter:hue-rotate(8deg)}.level-3{filter:hue-rotate(30deg)}.level-4{filter:hue-rotate(48deg)}.level-5{filter:hue-rotate(300deg)}.level-6{filter:hue-rotate(170deg)}.level-7{filter:hue-rotate(245deg)}.level-footnote{margin:14px 2px 0;color:#50617b;font-size:.74rem;line-height:1.55}.level-benefit-footer{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px;margin-top:20px;padding:15px;border:1px solid #d0e2fb;border-radius:18px;background:linear-gradient(120deg,#fff,#f0f7ff);box-shadow:0 5px 0 #d9e8fa}.level-benefit-footer>div{display:grid;grid-template-columns:42px 1fr;column-gap:10px;align-items:center;padding:6px;border-right:1px solid #dce9f9}.level-benefit-footer>div:last-child{border-right:0}.level-benefit-footer span{grid-row:span 2;display:grid;place-items:center;width:42px;height:42px;border-radius:13px;background:linear-gradient(145deg,#48dfff,#0871f5 65%,#142cb7);box-shadow:0 4px 0 #0c43a6;color:#fff;font-size:1.4rem}.level-benefit-footer b{color:#1268db;font-size:.76rem}.level-benefit-footer small{color:#29415f;font-size:.68rem;line-height:1.3}
 @media(max-width:900px){.benefits-grid{grid-template-columns:1fr 1fr}.team-panel{grid-column:1/-1}.team-reward-list{grid-template-columns:repeat(2,minmax(0,1fr))}.team-growth-3d{grid-column:1/-1}.chart-area{grid-template-columns:48px 1fr}.chart-ylabels{font-size:.56rem}.level-rewards-table{font-size:.76rem}.level-rewards-table th,.level-rewards-table td{padding:9px 8px}}
-@media(max-width:600px){.benefits-heading{align-items:flex-start;gap:12px}.vedo-mark-3d{width:52px;height:52px;border-radius:15px;font-size:2rem}.benefits-grid{grid-template-columns:1fr}.team-panel{grid-column:auto}.benefit-3d{padding:18px}.calendar-3d{max-width:340px;margin-left:auto;margin-right:auto}.team-reward-list{grid-template-columns:1fr 1fr}.level-rewards-header{align-items:flex-start}.level-badge-3d{width:52px;height:52px;font-size:1.9rem}.level-chart-3d{padding:12px}.chart-area{grid-template-columns:36px 1fr;gap:5px;min-height:205px}.chart-bars{gap:4px;padding-left:1px;padding-right:5px}.chart-col{min-height:190px;gap:5px}.chart-col>strong{font-size:.49rem;letter-spacing:-.03em}.chart-col>span{font-size:.5rem}.chart-col>small{font-size:.45rem;letter-spacing:-.04em}.bar-3d{width:min(90%,32px)}.chart-ylabels{font-size:.49rem}.chart-title small{width:100%;margin-left:50px}.level-table-wrap{margin-top:22px}.level-rewards-table{min-width:570px}.level-benefit-footer{grid-template-columns:1fr}.level-benefit-footer>div{border-right:0;border-bottom:1px solid #dce9f9;padding:8px}.level-benefit-footer>div:last-child{border-bottom:0}.benefits-disclaimer{font-size:.68rem}}
+@media(max-width:600px){.benefits-heading{align-items:flex-start;gap:12px}.vedo-mark-3d{width:52px;height:52px;border-radius:15px;font-size:2rem}.benefits-grid{grid-template-columns:1fr}.team-panel{grid-column:auto}.benefit-3d{padding:18px}.calendar-3d{max-width:340px;margin-left:auto;margin-right:auto}.team-reward-list{grid-template-columns:1fr 1fr}.level-rewards-header{align-items:flex-start}.level-badge-3d{width:52px;height:52px;font-size:1.9rem}.level-chart-3d{padding:12px}.chart-area{grid-template-columns:36px 1fr;gap:5px;min-height:205px}.chart-bars{gap:4px;padding-left:1px;padding-right:5px}.chart-col{min-height:190px;gap:5px}.chart-col>strong{font-size:.49rem;letter-spacing:-.03em}.chart-col>span{font-size:.5rem}.chart-col>small{font-size:.45rem;letter-spacing:-.04em}.bar-3d{width:min(90%,32px)}.chart-ylabels{font-size:.49rem}.chart-title small{width:100%;margin-left:50px}.level-table-wrap{margin-top:22px}.level-rewards-table{min-width:0;width:100%;table-layout:fixed}.level-rewards-table th,.level-rewards-table td{white-space:normal!important;overflow-wrap:anywhere}.level-benefit-footer{grid-template-columns:1fr}.level-benefit-footer>div{border-right:0;border-bottom:1px solid #dce9f9;padding:8px}.level-benefit-footer>div:last-child{border-bottom:0}.benefits-disclaimer{font-size:.68rem}}
 @media(prefers-reduced-motion:reduce){.benefit-3d,.bar-3d,.vedo-mark-3d{transform:none}}
 
 </style>
@@ -4154,6 +4161,80 @@ REGISTER_BODY = """
 </div>
 """
 
+REWARDS_GUIDE_BODY = """
+<div class="dash rewards-guide-page">
+  <div class="card rewards-guide-intro">
+    <p class="benefits-kicker">VEDO MARKET · MEMBER BENEFITS</p>
+    <h1>Rewards guide</h1>
+    <p>Explore check-in streaks, referrals, team rewards and example level totals. Review each campaign's rules and eligibility before participating.</p>
+  </div>
+  <section class="vedo-benefits" aria-label="Vedo member benefits">
+  <header class="benefits-heading">
+    <div class="vedo-mark-3d">V</div>
+    <div><p class="benefits-kicker">VEDO MARKET · APP BENEFITS</p><h2>More activity. <span>More rewards.</span></h2><p>Build your streak, invite friends and grow your team.</p></div>
+  </header>
+  <div class="benefits-grid">
+    <article class="benefit-3d streak-panel">
+      <div class="benefit-title"><span class="number-3d">1</span><h3>7 day streak</h3></div>
+      <p class="benefit-kicker">LOG IN · CHECK IN · EARN</p>
+      <p>Keep your daily check-in streak for 7 consecutive days and qualify for the reward configured for your account.</p>
+      <div class="calendar-3d" aria-hidden="true"><div class="calendar-rings"><i></i><i></i><i></i><i></i></div><div class="calendar-face"><span>YOUR STREAK</span><strong>7</strong><b>DAYS</b><div class="calendar-checks"><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i></div></div><div class="gift-3d">✦</div></div>
+      <div class="benefit-ribbon"><span class="benefit-icon">✦</span><strong>7 DAY STREAK <em>= REWARD</em></strong></div>
+    </article>
+    <article class="benefit-3d referral-panel">
+      <div class="benefit-title"><span class="number-3d">2</span><h3>Referral rewards</h3></div>
+      <div class="referral-amount">R200<small>EXAMPLE REWARD*</small></div>
+      <p>Invite friends to join Vedo. Referral eligibility and any level multiplier are determined by the published campaign rules.</p>
+      <div class="people-3d" aria-hidden="true"><div class="person p1"></div><div class="person p2"></div><div class="person p3"></div><div class="person p4"></div><div class="person p5"></div><div class="plus-3d">+</div></div>
+      <div class="referral-plaque"><strong>R200</strong><span>PER REFERRAL</span></div>
+      <div class="multiplier-box"><b>LEVEL MULTIPLIER</b><div class="multiplier-grid"><span>Level 1<strong>×1</strong></span><span>Level 2<strong>×2</strong></span><span>Level 3<strong>×3</strong></span><span>Level 4+<strong>×4</strong></span></div></div>
+    </article>
+    <article class="benefit-3d team-panel">
+      <div class="benefit-title"><span class="number-3d">3</span><h3>Team rewards</h3></div>
+      <p class="benefit-kicker">THE MORE YOU GROW, THE MORE YOU CAN EARN</p>
+      <p>Reach the campaign's qualifying team size to unlock the corresponding advertised reward.</p>
+      <div class="team-reward-list"><div><span class="team-people">♟♟</span><span><b>5 team members</b><strong>+ R500</strong></span></div><div><span class="team-people">♟♟</span><span><b>10 team members</b><strong>+ R1,000</strong></span></div><div><span class="team-people">♟♟</span><span><b>15 team members</b><strong>+ R1,500</strong></span></div><div><span class="team-people">♟♟</span><span><b>20 team members</b><strong>+ R2,000</strong></span></div></div>
+      <div class="team-growth-3d" aria-hidden="true"><span>♟ ♟ ♟</span><b>↗</b><i>R</i><i>R</i><i>R</i></div>
+    </article>
+  </div>
+  <p class="benefits-disclaimer">*Illustrative campaign examples. Referral, streak and team rewards are subject to the active Vedo campaign rules and verified eligibility. Check the event details in your account.</p>
+</section>
+
+<section class="level-rewards-3d" aria-label="Illustrative reward by level">
+  <div class="level-rewards-header"><div><p class="benefits-kicker">VEDO MARKET · EARN AND GROW</p><h2>Reward by <span>level</span></h2><p>Higher levels · Bigger rewards</p></div><div class="level-badge-3d" aria-hidden="true">↗</div></div>
+  <div class="level-chart-3d"><div class="chart-title"><span class="chart-icon">▥</span><strong>Reward by level</strong><small>Daily amount shown in the example</small></div>
+    <div class="chart-area"><div class="chart-ylabels"><span>R1,666.67</span><span>R1,333</span><span>R1,000</span><span>R666.67</span><span>R333.33</span><span>R0</span></div><div class="chart-bars">
+      {% set level_daily = [(1,1500),(2,5000),(3,15000),(4,50000),(5,83333),(6,125000),(7,166667)] %}
+      {% for lv, amt in level_daily %}<div class="chart-col"><strong>{{ money(amt) }}</strong><div class="bar-3d" style="--bar-height:{{ (amt / 166667 * 100)|round|int }}%"><i></i></div><span>Level {{ lv }}</span><small>{{ money(amt) }}/day</small></div>{% endfor %}
+    </div></div>
+  </div>
+  <div class="level-table-wrap"><h3><span class="table-icon">▤</span> Reward details &amp; totals</h3><div class="level-table-scroll"><table class="level-rewards-table"><thead><tr><th>Level</th><th>First day</th><th>7-day total</th><th>30-day total</th><th>1-year total</th></tr></thead><tbody>
+  {% for lv, amt in level_daily %}<tr><th><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td>{{ money(amt) }}</td><td>{{ money(amt * 7) }}</td><td>{{ money(amt * 30) }}</td><td>{{ money(amt * 365) }}</td></tr>{% endfor %}
+  </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities. These figures are not a promise of income.</p></div>
+  <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
+</section>
+</div>
+<style>
+/* Keep all reward information visible without horizontal scrolling. */
+.rewards-guide-page{max-width:1120px;margin:0 auto}
+.rewards-guide-intro{margin-bottom:18px}
+.level-table-scroll{overflow:visible!important;max-width:100%}
+.level-rewards-table{width:100%;table-layout:fixed;font-size:.78rem}
+.level-rewards-table th,.level-rewards-table td{white-space:normal!important;overflow-wrap:anywhere;word-break:normal;padding:9px 6px}
+.level-rewards-table thead th{line-height:1.25}
+.level-rewards-table tbody th{width:16%}
+.level-chip{white-space:nowrap}
+@media(max-width:700px){
+ .level-rewards-table{font-size:.64rem}
+ .level-rewards-table th,.level-rewards-table td{padding:7px 3px;line-height:1.25}
+ .level-rewards-table thead th{font-size:.58rem;letter-spacing:-.02em}
+ .level-chip{font-size:.59rem;padding:4px 5px}
+ .level-footnote{font-size:.68rem}
+ .level-chart-3d{padding:10px}
+}
+</style>
+"""
+
 DASH_BODY = """
 {% set total = user['points'] + locked %}
 {% set pct = (user['points'] / total * 100) if total else 0 %}
@@ -4194,7 +4275,7 @@ DASH_BODY = """
     <span class="voucher-eyebrow">VEDO REWARDS · MEMBER EXCLUSIVE</span>
     <h2>Digital gift vouchers,<br><span>the Vedo way.</span></h2>
     <p>Play, participate and discover rewards. Your next Vedo voucher could be waiting.</p>
-    <a class="voucher-cta" href="#vedo-rewards-showcase" id="exploreVedoRewards" aria-controls="vedo-rewards-showcase" aria-expanded="false">Explore rewards <span aria-hidden="true">→</span></a>
+    <a class="voucher-cta" href="{{ url_for('rewards_guide') }}" target="_blank" rel="noopener noreferrer">Explore rewards <span aria-hidden="true">↗</span></a>
     <div class="voucher-trust"><span class="voucher-check">✓</span> Rewards and eligibility shown in your Vedo account</div>
   </div>
   <div class="voucher-art" aria-hidden="true">
@@ -4454,90 +4535,7 @@ DASH_BODY = """
 {% else %}<p class="muted">No activity yet. Check in to earn your first reward.</p>{% endif %}
 </div>
 
-<!-- 3D rewards stay hidden until the promotional board is opened. -->
-<div id="vedo-rewards-showcase" class="vedo-rewards-showcase" hidden>
-<!-- 3D, code-rendered Vedo rewards showcase: no infographic images are used. -->
-<section class="vedo-benefits" aria-label="Vedo member benefits">
-  <header class="benefits-heading">
-    <div class="vedo-mark-3d">V</div>
-    <div><p class="benefits-kicker">VEDO MARKET · APP BENEFITS</p><h2>More activity. <span>More rewards.</span></h2><p>Build your streak, invite friends and grow your team.</p></div>
-  </header>
-  <div class="benefits-grid">
-    <article class="benefit-3d streak-panel">
-      <div class="benefit-title"><span class="number-3d">1</span><h3>7 day streak</h3></div>
-      <p class="benefit-kicker">LOG IN · CHECK IN · EARN</p>
-      <p>Keep your daily check-in streak for 7 consecutive days and qualify for the reward configured for your account.</p>
-      <div class="calendar-3d" aria-hidden="true"><div class="calendar-rings"><i></i><i></i><i></i><i></i></div><div class="calendar-face"><span>YOUR STREAK</span><strong>7</strong><b>DAYS</b><div class="calendar-checks"><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i><i>✓</i></div></div><div class="gift-3d">✦</div></div>
-      <div class="benefit-ribbon"><span class="benefit-icon">✦</span><strong>7 DAY STREAK <em>= REWARD</em></strong></div>
-    </article>
-    <article class="benefit-3d referral-panel">
-      <div class="benefit-title"><span class="number-3d">2</span><h3>Referral rewards</h3></div>
-      <div class="referral-amount">R200<small>PER QUALIFIED REFERRAL*</small></div>
-      <p>Invite friends to join Vedo. Referral eligibility and any level multiplier are determined by the published campaign rules.</p>
-      <div class="people-3d" aria-hidden="true"><div class="person p1"></div><div class="person p2"></div><div class="person p3"></div><div class="person p4"></div><div class="person p5"></div><div class="plus-3d">+</div></div>
-      <div class="referral-plaque"><strong>R200</strong><span>PER REFERRAL</span></div>
-      <div class="multiplier-box"><b>LEVEL MULTIPLIER</b><div class="multiplier-grid"><span>Level 1<strong>×1</strong></span><span>Level 2<strong>×2</strong></span><span>Level 3<strong>×3</strong></span><span>Level 4+<strong>×4</strong></span></div></div>
-    </article>
-    <article class="benefit-3d team-panel">
-      <div class="benefit-title"><span class="number-3d">3</span><h3>Team rewards</h3></div>
-      <p class="benefit-kicker">THE MORE YOU GROW, THE MORE YOU CAN EARN</p>
-      <p>Reach the campaign's qualifying team size to unlock the corresponding advertised reward.</p>
-      <div class="team-reward-list"><div><span class="team-people">♟♟</span><span><b>5 team members</b><strong>+ R500</strong></span></div><div><span class="team-people">♟♟</span><span><b>10 team members</b><strong>+ R1,000</strong></span></div><div><span class="team-people">♟♟</span><span><b>15 team members</b><strong>+ R1,500</strong></span></div><div><span class="team-people">♟♟</span><span><b>20 team members</b><strong>+ R2,000</strong></span></div></div>
-      <div class="team-growth-3d" aria-hidden="true"><span>♟ ♟ ♟</span><b>↗</b><i>R</i><i>R</i><i>R</i></div>
-    </article>
-  </div>
-  <p class="benefits-disclaimer">*Illustrative campaign examples. Referral, streak and team rewards are subject to the active Vedo campaign rules and verified eligibility. Check the event details in your account.</p>
-</section>
 
-<section class="level-rewards-3d" aria-label="Illustrative reward by level">
-  <div class="level-rewards-header"><div><p class="benefits-kicker">VEDO MARKET · EARN AND GROW</p><h2>Reward by <span>level</span></h2><p>Higher levels · Bigger rewards</p></div><div class="level-badge-3d" aria-hidden="true">↗</div></div>
-  <div class="level-chart-3d"><div class="chart-title"><span class="chart-icon">▥</span><strong>Reward by level</strong><small>Daily amount shown in the example</small></div>
-    <div class="chart-area"><div class="chart-ylabels"><span>R1,667</span><span>R1,250</span><span>R833</span><span>R500</span><span>R150</span><span>R0</span></div><div class="chart-bars">
-      {% set level_daily = [(1,1500),(2,5000),(3,15000),(4,50000),(5,83333),(6,125000),(7,166667)] %}
-      {% for lv, amt in level_daily %}<div class="chart-col"><strong>{{ money(amt) }}</strong><div class="bar-3d" style="--bar-height:{{ (amt / 166667 * 100)|round|int }}%"><i></i></div><span>Level {{ lv }}</span><small>{{ money(amt) }}/day</small></div>{% endfor %}
-    </div></div>
-  </div>
-  <div class="level-table-wrap"><h3><span class="table-icon">▤</span> Reward details &amp; totals</h3><div class="level-table-scroll"><table class="level-rewards-table"><thead><tr><th>Level</th><th>First day</th><th>7-day total</th><th>30-day total</th><th>1-year total</th></tr></thead><tbody>
-  {% for lv, amt in level_daily %}<tr><th><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td>{{ money(amt) }}</td><td>{{ money(amt * 7) }}</td><td>{{ money(amt * 30) }}</td><td>{{ money(amt * 365) }}</td></tr>{% endfor %}
-  </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities. These figures are not a promise of income.</p></div>
-  <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
-</section>
-
-
-
-</div>
-
-<script>
-(function () {
-  var explore = document.getElementById("exploreVedoRewards");
-  var showcase = document.getElementById("vedo-rewards-showcase");
-  if (explore && showcase) {
-    explore.addEventListener("click", function (event) {
-      event.preventDefault();
-      showcase.hidden = !showcase.hidden;
-      explore.setAttribute("aria-expanded", String(!showcase.hidden));
-      if (!showcase.hidden) {
-        window.setTimeout(function () {
-          showcase.scrollIntoView({ behavior: "smooth", block: "start" });
-        }, 30);
-      }
-    });
-  }
-  var btn = document.getElementById('fp');
-  var menu = document.getElementById('heroactions');
-  var cap = document.getElementById('fpcap');
-  if (!btn || !menu) { return; }
-  btn.addEventListener('click', function () {
-    var opening = menu.classList.contains('closed');
-    menu.classList.toggle('closed', !opening);
-    menu.classList.toggle('reveal', opening);
-    btn.classList.toggle('open', opening);
-    btn.setAttribute('aria-expanded', opening ? 'true' : 'false');
-    btn.setAttribute('aria-label', opening ? 'Close menu' : 'Open menu');
-    cap.textContent = opening ? 'Tap to close' : 'Tap to open menu';
-  });
-})();
-</script>
 """
 
 CHECKIN_BODY = """
