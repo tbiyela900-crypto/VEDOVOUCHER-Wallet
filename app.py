@@ -5330,7 +5330,7 @@ WITHDRAW_BODY = """
 
 <div class="card note">
 <h1>Request a withdrawal</h1>
-<p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed by the admin; rejected requests are refunded.</p>
+<p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed ; rejected requests are refunded.</p>
 <p class="muted">Processing time: up to 24 hours.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
