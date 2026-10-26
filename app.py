@@ -436,6 +436,14 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS withdrawal_details (
+    user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
+    bank_name TEXT NOT NULL DEFAULT '',
+    account_number TEXT NOT NULL DEFAULT '',
+    account_holder TEXT NOT NULL DEFAULT '',
+    updated_at TEXT NOT NULL
+);
+
 CREATE TABLE IF NOT EXISTS topups (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
@@ -1901,38 +1909,59 @@ def topup():
 def withdraw():
     db = get_db()
     user = current_user()
-
     if request.method == "POST":
-        cents = parse_amount(request.form.get("amount"), WITHDRAW_MIN_CENTS)
-        if cents is None:
-            flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).",
-                  "error")
+        action = request.form.get("action", "request_withdrawal")
+        if action == "save_withdrawal_details":
+            bank_name = request.form.get("bank_name", "").strip()[:100]
+            account_holder = request.form.get("account_holder", "").strip()[:120]
+            account_number = re.sub(r"\\s+", "", request.form.get("account_number", ""))[:40]
+            confirm_account = re.sub(r"\\s+", "", request.form.get("confirm_account_number", ""))[:40]
+            if not bank_name or not account_holder or not account_number:
+                flash("Complete the bank name, account holder and account number.", "error")
+                return redirect(url_for("withdraw"))
+            if account_number != confirm_account:
+                flash("The account numbers do not match. Please check and save again.", "error")
+                return redirect(url_for("withdraw"))
+            db.execute(
+                "INSERT INTO withdrawal_details (user_id, bank_name, account_number, account_holder, updated_at) "
+                "VALUES (?,?,?,?,?) ON CONFLICT(user_id) DO UPDATE SET "
+                "bank_name=excluded.bank_name, account_number=excluded.account_number, "
+                "account_holder=excluded.account_holder, updated_at=excluded.updated_at",
+                (user["id"], bank_name, account_number, account_holder, now_iso()))
+            db.commit()
+            flash("Withdrawal bank details saved.", "ok")
             return redirect(url_for("withdraw"))
 
-        if not debit(db, user["id"], cents, "WITHDRAW",
-                     "Withdrawal request (pending)"):
+        details = db.execute("SELECT * FROM withdrawal_details WHERE user_id=?",
+                             (user["id"],)).fetchone()
+        if not details:
+            flash("Please save your withdrawal bank details before requesting a withdrawal.", "error")
+            return redirect(url_for("withdraw"))
+        cents = parse_amount(request.form.get("amount"), WITHDRAW_MIN_CENTS)
+        if cents is None:
+            flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).", "error")
+            return redirect(url_for("withdraw"))
+        if not debit(db, user["id"], cents, "WITHDRAW", "Withdrawal request (pending)"):
             db.rollback()
             flash("Insufficient play balance.", "error")
             return redirect(url_for("withdraw"))
-
         db.execute(
-            "INSERT INTO withdrawals (user_id, amount, bank_name, "
-            "account_number, account_holder, status, created_at) "
-            "VALUES (?, ?, 'DEMO', 'N/A', ?, 'PENDING', ?)",
-            (user["id"], cents, user["username"], now_iso()))
+            "INSERT INTO withdrawals (user_id, amount, bank_name, account_number, account_holder, status, created_at) "
+            "VALUES (?,?,?,?,?, 'PENDING', ?)",
+            (user["id"], cents, details["bank_name"], details["account_number"],
+             details["account_holder"], now_iso()))
         db.commit()
-        flash(f"Withdrawal request for {money(cents)} created. "
-              "It will be reviewed", "ok")
+        flash(f"Withdrawal request for {money(cents)} created. It will be reviewed.", "ok")
         return redirect(url_for("withdraw"))
-
     withdrawals = db.execute(
         "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
         (user["id"],)).fetchall()
+    details = db.execute("SELECT * FROM withdrawal_details WHERE user_id=?",
+                         (user["id"],)).fetchone()
     return page(WITHDRAW_BODY, user=user, withdrawals=withdrawals,
-                WITHDRAW_MIN_CENTS=WITHDRAW_MIN_CENTS)
+                withdrawal_details=details, WITHDRAW_MIN_CENTS=WITHDRAW_MIN_CENTS)
 
 
-# ============================================================================
 # TEAM VIEW
 # ============================================================================
 
@@ -4819,17 +4848,15 @@ DASH_BODY = """
 <div class="hero-top">
 <div>
 <p class="hello">Hi, {{ user['username'] }}</p>
-<p class="lbl">Available balance</p>
-<div class="balance">{{ money(user['points']) }}</div>
 </div>
 <div class="quick-links-label">QUICK ACCESS</div>
 </div>
 <div class="chips">
 <span class="chip">Level {{ user['level'] }}</span>
-<span class="chip">{{ money(locked) }} in pots</span>
 </div>
 <div class="actions" id="heroactions" aria-label="Quick access">
 <a class="act" href="{{ url_for('topup') }}"><span>{{ icon('topup') }}</span>Top up</a>
+<a class="act" href="{{ url_for('withdraw') }}"><span>{{ icon('withdraw') }}</span>Withdraw</a>
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
 <a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Savings pots</a>
 <a class="act" href="{{ url_for('checkin') }}"><span>{{ icon('checkin') }}</span>Daily check-in</a>
@@ -5242,22 +5269,34 @@ TOPUP_BODY = """
 
 WITHDRAW_BODY = """
 <div class="card note">
-<h1>Withdraw (money)</h1>
-<p class="muted">Enter withdrawal request. Rejected requests are refunded.</p>
-<p class="muted">Withdrawals R150.</p>
-<p class="muted">Withdrawals R500.</p>
-<p class="muted">Withdrawals R1500.</p>
-<p class="muted">Withdrawals R4500.</p>
-<p class="muted">Withdrawals R12000.</p>
-<p class="muted">Withdrawals R25000.</p>
-<p class="muted">Withdrawals R30000.</p>
-<p class="muted">Withdrawals R50000.</p>
-<p class="muted">Withdraws takes 24 hours.</p>
+<h1>Withdrawal bank details</h1>
+<p class="muted">Save the account where you want approved withdrawals paid. You can update these details any time. Saved details are used for new withdrawal requests.</p>
+<form method="post">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+<input type="hidden" name="action" value="save_withdrawal_details">
+<label for="bank_name">Bank name</label>
+<input id="bank_name" name="bank_name" maxlength="100" value="{{ withdrawal_details['bank_name'] if withdrawal_details else '' }}" placeholder="e.g. Capitec" required>
+<label for="account_holder">Account holder full name</label>
+<input id="account_holder" name="account_holder" maxlength="120" value="{{ withdrawal_details['account_holder'] if withdrawal_details else '' }}" placeholder="Name on bank account" required>
+<label for="account_number">Bank account number</label>
+<input id="account_number" name="account_number" autocomplete="off" maxlength="40" value="{{ withdrawal_details['account_number'] if withdrawal_details else '' }}" placeholder="Enter account number" required>
+<label for="confirm_account_number">Confirm bank account number</label>
+<input id="confirm_account_number" name="confirm_account_number" autocomplete="off" maxlength="40" value="{{ withdrawal_details['account_number'] if withdrawal_details else '' }}" placeholder="Re-enter account number" required>
+<button class="primary" type="submit">Save withdrawal details</button>
+</form>
+{% if withdrawal_details %}<p class="muted">Last saved: {{ withdrawal_details['updated_at'][:16] }}</p>{% endif %}
+</div>
+
+<div class="card note">
+<h1>Request a withdrawal</h1>
+<p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed by the admin; rejected requests are refunded.</p>
+<p class="muted">Processing time: up to 24 hours.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<label>Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
-<input name="amount" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
+<input type="hidden" name="action" value="request_withdrawal">
+<label for="withdraw_amount">Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
+<input id="withdraw_amount" name="amount" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
 <button class="primary">Request withdrawal</button>
 </form>
 </div>
@@ -5266,9 +5305,10 @@ WITHDRAW_BODY = """
 <h2>Withdrawal history</h2>
 {% if withdrawals %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Status</th></tr>
+<tr><th>Date</th><th>Amount</th><th>Bank</th><th>Account holder</th><th>Status</th></tr>
 {% for w in withdrawals %}
 <tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['amount']) }}</td>
+<td>{{ w['bank_name'] }}</td><td>{{ w['account_holder'] }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td></tr>
 {% endfor %}
 </table>
@@ -5351,7 +5391,7 @@ UPGRADE_BODY = """
 .voucher-brand{font-size:1.2rem;font-weight:950}.voucher-brand span{color:#43f0bd}.voucher-main{display:flex;align-items:center;justify-content:space-between;gap:14px;margin:22px 0 18px}.voucher-mark{width:66px;height:66px;display:grid;place-items:center;border:1px solid rgba(255,255,255,.5);border-radius:20px;background:rgba(255,255,255,.12);font-size:2.5rem;font-weight:900;font-style:italic}.voucher-value{text-align:right}.voucher-value strong{display:block;font-size:1.8rem;line-height:1.2}.voucher-value span{font-size:.72rem;font-weight:900;letter-spacing:.12em}.voucher-rule{border-top:1px solid rgba(255,255,255,.35);padding-top:12px;display:flex;justify-content:space-between;gap:10px;font-size:.68rem;font-weight:850;letter-spacing:.04em}.voucher-number{overflow-wrap:anywhere;font-size:1rem;letter-spacing:.08em}.voucher-redeem{max-width:560px;margin:0 auto 22px}.voucher-redeem input{font-size:1rem}
 </style>
 <div class="card">
-<h2>Your Vedo digital voucher</h2>
+<h2>Approved top-up voucher — redeem to activate your level</h2>
 <p>Welcome, {{ user['username'] }}. Your approved top-up has unlocked this Level {{ voucher_card['level'] }} voucher. Redeem it below to activate your level.</p>
 <div class="vedo-digital-voucher">
   <div class="voucher-topline"><span class="voucher-brand">VEDO<span>.</span></span><span>DIGITAL VOUCHER</span></div>
@@ -5361,7 +5401,7 @@ UPGRADE_BODY = """
   <div class="voucher-rule"><span>VEDO REWARDS</span><span>VDO · {{ voucher_card['level'] }}</span></div>
 </div>
 <div class="voucher-redeem">
-<h3>Use your voucher</h3>
+<h3>Voucher redemption</h3>
 <p class="muted">Scroll here to paste or enter the voucher number shown on your card.</p>
 <form method="post" action="{{ url_for('redeem') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
