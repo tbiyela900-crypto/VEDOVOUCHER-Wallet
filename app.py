@@ -4384,7 +4384,7 @@ label.chk input{width:auto;margin:0;}
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
-<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Points</span><strong>{{ money(me['points']) }}</strong></span>
+<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Balance</span><strong>{{ money(me['points']) }}</strong></span>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button>Log out<span class="uname"> ({{ me['username'] }})</span></button>
