@@ -2753,6 +2753,47 @@ def admin_topup(topup_id, action):
     return redirect(url_for("admin"))
 
 
+@app.route("/admin/withdrawal/<int:withdrawal_id>")
+@admin_required
+def admin_withdrawal_details(withdrawal_id):
+    db = get_db()
+    record = db.execute(
+        "SELECT w.*, u.username, u.phone, u.serial_number, u.level "
+        "FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.id=?",
+        (withdrawal_id,)).fetchone()
+    if record is None:
+        abort(404)
+    return page("""
+<div class="card">
+<h1>Withdrawal information</h1>
+<p class="muted">Review the member and bank details before processing this request.</p>
+<dl class="kv">
+<div><dt>Withdrawal request ID</dt><dd>#{{ record['id'] }}</dd></div>
+<div><dt>Member username / cellphone</dt><dd>{{ record['username'] }}</dd></div>
+<div><dt>User ID</dt><dd>{{ record['user_id'] }}</dd></div>
+<div><dt>Registered cellphone</dt><dd>{{ record['phone'] or record['username'] }}</dd></div>
+<div><dt>Member level</dt><dd>Level {{ record['level'] }}</dd></div>
+<div><dt>Withdrawal amount</dt><dd><strong>{{ money(record['amount']) }}</strong></dd></div>
+<div><dt>Bank name</dt><dd>{{ record['bank_name'] or '-' }}</dd></div>
+<div><dt>Account holder</dt><dd>{{ record['account_holder'] or '-' }}</dd></div>
+<div><dt>Account number</dt><dd>{{ record['account_number'] or '-' }}</dd></div>
+<div><dt>Requested at</dt><dd>{{ record['created_at'] }}</dd></div>
+<div><dt>Status</dt><dd>{{ record['status'] }}</dd></div>
+<div><dt>Registered bank account number</dt><dd>{{ record['serial_number'] or '-' }}</dd></div>
+</dl>
+{% if record['status'] == 'PENDING' %}
+<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">
+<form method="post" action="{{ url_for('admin_withdrawal', withdrawal_id=record['id'], action='complete') }}">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Approve withdrawal</button></form>
+<form method="post" action="{{ url_for('admin_withdrawal', withdrawal_id=record['id'], action='reject') }}" onsubmit="return confirm('Reject this withdrawal request?');">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject withdrawal</button></form>
+</div>
+{% endif %}
+<p style="margin-top:18px"><a href="{{ url_for('admin') }}">← Back to admin</a></p>
+</div>
+""", record=record)
+
+
 @app.route("/admin/withdrawal/<int:withdrawal_id>/<action>", methods=["POST"])
 @admin_required
 def admin_withdrawal(withdrawal_id, action):
@@ -3829,12 +3870,12 @@ tr.hl td{background:rgba(31,214,164,.08);}
 /* ---------- dashboard ---------- */
 .dash{display:grid;grid-template-columns:1fr 1.15fr;gap:16px;margin-bottom:16px;}
 .dash .card{margin-bottom:0;}
-.hero{border-radius:26px;padding:24px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
+.hero{border-radius:22px;padding:14px 18px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
   background:
     radial-gradient(500px 220px at 100% 0%,rgba(31,214,164,.35),transparent 65%),
     linear-gradient(135deg,#0f766e 0%,#0b3d49 55%,#08242f 100%);}
 .hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
-.hello{margin:0 0 18px;font-weight:600;opacity:.9;}
+.hello{margin:0 0 6px;font-weight:600;opacity:.9;}
 .lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
 .balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
 .quick-links-label{align-self:flex-start;flex:none;padding:6px 9px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(3,12,18,.28);color:#d8fff5;font-size:.68rem;font-weight:900;letter-spacing:.12em;white-space:nowrap;}
@@ -5740,7 +5781,7 @@ onsubmit="return confirm('Remove this member instruction?');">
 <table>
 <tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Status</th><th>Action</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['amount']) }}</td>
+<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td><a href="{{ url_for('admin_withdrawal_details', withdrawal_id=w['id']) }}" title="View withdrawal and bank details">{{ w['username'] }} (ID {{ w['user_id'] }})</a></td><td>{{ money(w['amount']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td>
 <td>
 {% if w['status'] == 'PENDING' %}
