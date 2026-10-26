@@ -24,21 +24,21 @@ Features
                                the odds (weights), the stock (= how many
                                members can win each prize), spin limits and
                                the event schedule. Odds are shown to members.
-      - Vedo Brain Battle    : answer questions, earn Balance per correct
-                               answer. Admin manages questions, Balance,
+      - Vedo Brain Battle    : answer questions, earn points per correct
+                               answer. Admin manages questions, points,
                                round size, limits and schedule.
       - Vedo Mystery Envelope: every eligible member gets the guaranteed
                                minimum reward set by the admin, plus a
                                published chance of a bonus voucher while the
                                voucher stock lasts. One claim per member
                                per event.
-    Every result is decided on the server, written to the Balance wallet
+    Every result is decided on the server, written to the points wallet
     (transaction ledger) and to the reward history / winner records.
     Daily Streak is NOT part of Phase 1 (hidden; can be added later).
   * Referral codes and team
   * Simulated WITHDRAWALS: user requests a cash-out of money,
                           admin approves/rejects (rejected = refunded).
-  * TEAM VIEW           : each team member's level and Balance (balance)
+  * TEAM VIEW           : each team member's level and points (balance)
   * LEVEL UPGRADES      : spend balance to move up one level, costs are public
   * SAVINGS POTS        : lock part of the balance for 1-9 weeks and earn a
                           clearly labelled, realistic annual interest rate
@@ -223,8 +223,8 @@ OTP_MAX_SENDS = 5               # codes per 30 minutes
 OTP_WINDOW_SECONDS = 1800
 
 # --- Level upgrades --------------------------------------------------------
-# The upgrade cost is the full Balance amount assigned to the destination
-# level. One level at a time, paid from the member's Balance balance.
+# The upgrade cost is the full points amount assigned to the destination
+# level. One level at a time, paid from the member's points balance.
 UPGRADE_COST_CENTS = {
     lvl: LEVEL_REWARDS_CENTS[lvl]
     for lvl in LEVELS
@@ -264,7 +264,7 @@ GAMES = {
     "ENVELOPE": "Vedo Mystery Envelope",
 }
 PRIZE_KINDS = {
-    "Balance": "Balance",
+    "POINTS": "Points",
     "VOUCHER": "Level voucher",
     "ITEM": "Item / prize",
     "NONE": "No prize",
@@ -429,7 +429,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
-    bank_name TEXT NOT NULL DEFAULT 'System',
+    bank_name TEXT NOT NULL DEFAULT 'DEMO',
     account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -563,7 +563,7 @@ CREATE TABLE IF NOT EXISTS games (
 CREATE TABLE IF NOT EXISTS spin_prizes (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     label TEXT NOT NULL,
-    kind TEXT NOT NULL DEFAULT 'Balance',
+    kind TEXT NOT NULL DEFAULT 'POINTS',
     value INTEGER NOT NULL DEFAULT 0,              -- cents, or voucher level
     weight INTEGER NOT NULL DEFAULT 1,
     stock INTEGER,
@@ -576,7 +576,7 @@ CREATE TABLE IF NOT EXISTS brain_questions (
     question TEXT NOT NULL,
     a TEXT NOT NULL, b TEXT NOT NULL, c TEXT NOT NULL, d TEXT NOT NULL,
     correct INTEGER NOT NULL,                      -- 1..4
-    Balance INTEGER NOT NULL DEFAULT 0,             -- cents per correct answer
+    points INTEGER NOT NULL DEFAULT 0,             -- cents per correct answer
     enabled INTEGER NOT NULL DEFAULT 1
 );
 
@@ -774,7 +774,7 @@ def add_tx(db, user_id, kind, amount_cents, note=""):
 
 
 def credit(db, user_id, cents, kind, note=""):
-    db.execute("UPDATE users SET Balance = Balance + ? WHERE id=?",
+    db.execute("UPDATE users SET points = points + ? WHERE id=?",
                (cents, user_id))
     add_tx(db, user_id, kind, cents, note)
 
@@ -782,7 +782,7 @@ def credit(db, user_id, cents, kind, note=""):
 def debit(db, user_id, cents, kind, note=""):
     """Atomic debit. Returns False (and changes nothing) if funds are short."""
     done = db.execute(
-        "UPDATE users SET Balance = Balance - ? WHERE id=? AND Balance >= ?",
+        "UPDATE users SET points = points - ? WHERE id=? AND points >= ?",
         (cents, user_id, cents)).rowcount
     if done != 1:
         return False
@@ -830,9 +830,9 @@ def seed_games(db):
     if not db.execute("SELECT 1 FROM spin_prizes").fetchone():
         for label, kind, value, weight, stock in (
                 ("Better luck next time", "NONE", 0, 50, None),
-                ("R5 Balance", "Balance", 500, 30, None),
-                ("R20 Balance", "Balance", 2000, 15, 50),
-                ("R100 Balance", "Balance", 10000, 4, 10),
+                ("R5 points", "POINTS", 500, 30, None),
+                ("R20 points", "POINTS", 2000, 15, 50),
+                ("R100 points", "POINTS", 10000, 4, 10),
                 ("Level 1 voucher", "VOUCHER", 1, 1, 2)):
             db.execute(
                 "INSERT INTO spin_prizes (label, kind, value, weight, stock) "
@@ -852,7 +852,7 @@ def seed_games(db):
                  "Automatic Trade Market", 1)):
             db.execute(
                 "INSERT INTO brain_questions (question, a, b, c, d, correct, "
-                "Balance) VALUES (?,?,?,?,?,?,200)", (q, a, b, c, d, correct))
+                "points) VALUES (?,?,?,?,?,?,200)", (q, a, b, c, d, correct))
 
 
 def init_db():
@@ -880,7 +880,7 @@ def init_db():
     required_columns = {
         "last_checkin": "TEXT",
         "streak": "INTEGER NOT NULL DEFAULT 0",
-        "Balance": "INTEGER NOT NULL DEFAULT 0",
+        "points": "INTEGER NOT NULL DEFAULT 0",
         "serial_number": "TEXT",
         "phone": "TEXT",
         "phone_verified": "INTEGER NOT NULL DEFAULT 1",
@@ -1652,10 +1652,10 @@ def checkin_complete(n):
             # Daily Streak is not part of Phase 1: no streak celebration.
     db.commit()
 
-    Balance = db.execute("SELECT Balance FROM users WHERE id=?",
-                        (user["id"],)).fetchone()["Balance"]
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
     return jsonify(ok=True, reward_text=money(reward),
-                   balance=money(Balance), completed=completed, total=total,
+                   balance=money(points), completed=completed, total=total,
                    earned_text=money(earned), done=finished,
                    milestone=milestone, streak=streak)
 
@@ -1972,16 +1972,16 @@ def team():
     user = current_user()
 
     members = db.execute(
-        "SELECT username, level, Balance, streak, created_at FROM users "
+        "SELECT username, level, points, streak, created_at FROM users "
         "WHERE referred_by=? AND phone_verified=1 "
-        "ORDER BY level DESC, Balance DESC",
+        "ORDER BY level DESC, points DESC",
         (user["id"],)).fetchall()
 
     earned = db.execute(
         "SELECT COALESCE(SUM(amount),0) AS s FROM transactions "
         "WHERE user_id=? AND kind='REFERRAL'", (user["id"],)).fetchone()["s"]
 
-    team_Balance = sum(m["Balance"] for m in members)
+    team_points = sum(m["points"] for m in members)
 
     referrer = None
     if user["referred_by"]:
@@ -2014,7 +2014,7 @@ def team():
                 if next_tier else 100)
 
     return page(TEAM_BODY, user=user, members=members, earned=earned,
-                team_Balance=team_Balance, referrer=referrer, tiers=tiers,
+                team_points=team_points, referrer=referrer, tiers=tiers,
                 team_name=team_name, next_tier=next_tier, tier_pct=tier_pct)
 
 
@@ -2269,7 +2269,7 @@ def admin():
     one = lambda sql: db.execute(sql).fetchone()[0]
     summary = {
         "users": one("SELECT COUNT(*) FROM users WHERE is_admin=0"),
-        "balances": one("SELECT COALESCE(SUM(Balance),0) FROM users "
+        "balances": one("SELECT COALESCE(SUM(points),0) FROM users "
                         "WHERE is_admin=0"),
         "locked": one("SELECT COALESCE(SUM(principal),0) FROM savings_pots "
                       "WHERE status='LOCKED'"),
@@ -2303,10 +2303,10 @@ def admin():
     else:
         users_args = ()
     users_sql += "WHERE " + " AND ".join(user_conditions)
-    users_sql += " ORDER BY u.is_admin DESC, u.level DESC, u.Balance DESC"
+    users_sql += " ORDER BY u.is_admin DESC, u.level DESC, u.points DESC"
     users = db.execute(users_sql, users_args).fetchall()
     hidden_users = db.execute(
-        "SELECT u.id,u.username,u.level,u.Balance,COALESCE(arc.locked,0) AS admin_locked "
+        "SELECT u.id,u.username,u.level,u.points,COALESCE(arc.locked,0) AS admin_locked "
         "FROM users u JOIN admin_record_controls arc ON arc.record_type='user' "
         "AND arc.record_id=CAST(u.id AS TEXT) WHERE arc.hidden=1 AND u.is_admin=0 "
         "ORDER BY arc.updated_at DESC").fetchall()
@@ -2815,7 +2815,7 @@ def admin_withdrawal(withdrawal_id, action):
         flash("This withdrawal was already processed.", "error")
         return redirect(url_for("admin"))
 
-    # Completing only changes the System status. NO real money moves.
+    # Completing only changes the demo status. NO real money moves.
     if action == "reject":
         credit(db, w["user_id"], w["amount"], "WITHDRAW_REFUND",
                f"Withdrawal #{withdrawal_id} rejected - refunded")
@@ -2832,7 +2832,7 @@ def admin_withdrawal(withdrawal_id, action):
 #     shows the answer, it can never choose or change it.
 #   * Limits, stock and rewards are checked inside one write transaction
 #     (BEGIN IMMEDIATE), so a double-click or two phones cannot beat them.
-#   * Every reward goes through credit() into the Balance wallet / ledger and
+#   * Every reward goes through credit() into the points wallet / ledger and
 #     into game_plays (reward history + admin winner records).
 #   * The odds, stock and rules are shown to members on each game page.
 #   * The admin sets prizes, odds, stock, limits and schedule. There is no
@@ -2919,8 +2919,8 @@ def issue_voucher(db, user_id, level):
 
 
 def prize_text(p):
-    if p["kind"] == "Balance":
-        return f"{money(p['value'])} Balance"
+    if p["kind"] == "POINTS":
+        return f"{money(p['value'])} points"
     if p["kind"] == "VOUCHER":
         return f"Level {p['value']} voucher"
     return ""
@@ -2949,8 +2949,8 @@ def games_hub():
     db = get_db()
     user = current_user()
     meta = (
-        ("SPIN", "🎰", "Spin for Balance, vouchers and prizes.", "spin_page"),
-        ("BRAIN", "🧠", "Answer questions and earn Balance for every correct answer.", "brain_page"),
+        ("SPIN", "🎰", "Spin for points, vouchers and prizes.", "spin_page"),
+        ("BRAIN", "🧠", "Answer questions and earn points for every correct answer.", "brain_page"),
         ("ENVELOPE", "✉️", "Open your envelope.", "envelope_page"),
     )
     cards = []
@@ -3031,10 +3031,10 @@ def spin_play():
 
     event_no = info["g"]["event_no"]
     amount, voucher = 0, ""
-    if pick["kind"] == "Balance":
+    if pick["kind"] == "POINTS":
         amount = pick["value"]
         credit(db, user["id"], amount, "SPIN", f"Spin & Win: {pick['label']}")
-        text = f"You won {money(amount)} in Balance!"
+        text = f"You won {money(amount)} in points!"
     elif pick["kind"] == "VOUCHER":
         voucher = issue_voucher(db, user["id"], pick["value"])
         text = (f"You won a Level {pick['value']} voucher! Code: {voucher}. "
@@ -3050,10 +3050,10 @@ def spin_play():
              amount, voucher)
     db.commit()
 
-    Balance = db.execute("SELECT Balance FROM users WHERE id=?",
-                        (user["id"],)).fetchone()["Balance"]
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
     return jsonify(ok=True, label=pick["label"], kind=pick["kind"],
-                   text=text, balance=money(Balance), left=info["left"] - 1)
+                   text=text, balance=money(points), left=info["left"] - 1)
 
 
 # ------------------------------------------------------- Brain Battle -------
@@ -3068,7 +3068,7 @@ def brain_page():
         "SELECT id FROM brain_rounds WHERE user_id=? AND status='OPEN' "
         "ORDER BY id DESC", (user["id"],)).fetchone()
     pool = db.execute(
-        "SELECT COUNT(*) AS n, COALESCE(MAX(Balance),0) AS mx "
+        "SELECT COUNT(*) AS n, COALESCE(MAX(points),0) AS mx "
         "FROM brain_questions WHERE enabled=1").fetchone()
     rounds = db.execute(
         "SELECT * FROM brain_rounds WHERE user_id=? ORDER BY id DESC LIMIT 10",
@@ -3145,7 +3145,7 @@ def brain_round(rid):
             a = _int(request.form.get(f"q{q['id']}"), 0, 0, 4)
             picked.append(f"{q['id']}:{a}")
             if a == q["correct"]:
-                score += q["Balance"]
+                score += q["points"]
                 right += 1
         begin_write(db)
         claimed = db.execute(
@@ -3158,7 +3158,7 @@ def brain_round(rid):
                 credit(db, user["id"], score, "BRAIN",
                        f"Brain Battle round #{rid}: {result}")
             log_play(db, user["id"], "BRAIN", rnd["event_no"], result,
-                     "Balance" if score else "NONE", score)
+                     "POINTS" if score else "NONE", score)
             db.commit()
             flash(f"You got {result} and earned {money(score)}.", "ok")
         else:
@@ -3227,21 +3227,21 @@ def envelope_open():
     if reward > 0:
         credit(db, user["id"], reward, "ENVELOPE",
                "Mystery Envelope.")
-    result = money(reward) + " Balance"
+    result = money(reward) + " points"
     if voucher:
         result += f" + Level {level} voucher"
     log_play(db, user["id"], "ENVELOPE", gm["event_no"], result,
-             "VOUCHER" if voucher else ("Balance" if reward else "NONE"),
+             "VOUCHER" if voucher else ("POINTS" if reward else "NONE"),
              reward, voucher)
     db.commit()
 
-    Balance = db.execute("SELECT Balance FROM users WHERE id=?",
-                        (user["id"],)).fetchone()["Balance"]
+    points = db.execute("SELECT points FROM users WHERE id=?",
+                        (user["id"],)).fetchone()["points"]
     text = f"Your envelope held {money(reward)}!"
     if voucher:
         text += (f" Bonus: a Level {level} voucher. Code: {voucher}. "
                  "Redeem it on the Upgrade page.")
-    return jsonify(ok=True, text=text, balance=money(Balance),
+    return jsonify(ok=True, text=text, balance=money(points),
                    voucher=voucher)
 
 
@@ -3339,10 +3339,10 @@ def admin_prize_save():
         return redirect(url_for("admin_games"))
 
     raw = f.get("value", "").strip()
-    if kind == "Balance":
+    if kind == "POINTS":
         value = parse_amount(raw, 1, ADMIN_ADD_MAX_CENTS)
         if value is None:
-            flash("Balance prizes need an amount in Rand, for example 20.00.",
+            flash("Points prizes need an amount in Rand, for example 20.00.",
                   "error")
             return redirect(url_for("admin_games"))
     elif kind == "VOUCHER":
@@ -3393,15 +3393,15 @@ def admin_question_add():
     f = request.form
     texts = [f.get(k, "").strip()[:200] for k in ("question", "a", "b", "c", "d")]
     correct = _int(f.get("correct"), 0, 0, 4)
-    Balance = parse_amount(f.get("Balance"), 0, ADMIN_ADD_MAX_CENTS)
-    if not all(texts) or correct not in (1, 2, 3, 4) or Balance is None:
+    points = parse_amount(f.get("points"), 0, ADMIN_ADD_MAX_CENTS)
+    if not all(texts) or correct not in (1, 2, 3, 4) or points is None:
         flash("Fill in the question, 4 answers, the correct answer and the "
-              "Balance in Rand.", "error")
+              "points in Rand.", "error")
         return redirect(url_for("admin_games"))
     db = get_db()
     db.execute(
-        "INSERT INTO brain_questions (question, a, b, c, d, correct, Balance) "
-        "VALUES (?,?,?,?,?,?,?)", (*texts, correct, Balance))
+        "INSERT INTO brain_questions (question, a, b, c, d, correct, points) "
+        "VALUES (?,?,?,?,?,?,?)", (*texts, correct, points))
     db.commit()
     flash("Question added.", "ok")
     return redirect(url_for("admin_games"))
@@ -3484,7 +3484,7 @@ GAMES_BODY = """
   {% if history %}
   <div class="game-history">
   <table>
-    <tr><th>Date</th><th>Game</th><th>Result</th><th>Balance</th><th>Voucher</th></tr>
+    <tr><th>Date</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
     {% for h in history %}
     <tr>
       <td>{{ h['created_at'][:16] }}</td>
@@ -3525,7 +3525,7 @@ SPIN_BODY = """
 <p class="muted small">Tap the button and watch the wheel turn. The server confirms your result.</p>
 </div><div>
 <div class="spin-prize" id="spinout" aria-live="polite">{{ 'Ready when you are!' if not info.error else info.error }}</div>
-<p class="muted">Plays left: <b id="left">{{ info.left }}</b><br>Balance balance: <b id="bal">{{ money(user['Balance']) }}</b></p>
+<p class="muted">Plays left: <b id="left">{{ info.left }}</b><br>Points balance: <b id="bal">{{ money(user['points']) }}</b></p>
 {% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}
 <p class="muted small">Good luck.</p>
 </div></div></div>
@@ -3561,9 +3561,9 @@ BRAIN_BODY = """
 .question-book .opt{background:#fffef8;color:#203044;border-color:#c9d6d5;box-shadow:0 2px 0 #dce4e2}.question-book .opt:hover{border-color:#198c78;background:#eafff8}
 @media(max-width:560px){.question-book{padding:18px 15px 18px 28px}.brain-hero{padding:18px!important}}
 </style>
-<div class="card brain-hero"><h1>🧠 Vedo Brain Battle</h1><p>Open your challenge book, choose your answers, and collect Balance for correct answers.</p><p><a href="{{ url_for('games_hub') }}" style="color:#bff8e9">← All games</a></p><p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span> <span class="small">{{ window }} · {{ limit_text }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p></div>
-<div class="card"><h2>📘 Your challenge book</h2><p>Each round has up to <b>{{ gm['questions_per_round'] }}</b> questions. Every correct answer earns Balance (up to {{ money(pool['mx']) }} per question). Incorrect answers earn no Balance; no Balance are deducted.</p><p class="muted">Plays left: <b>{{ info.left }}</b> · Questions available: {{ pool['n'] }}</p>{% if open_round %}<a class="btnlink" href="{{ url_for('brain_round', rid=open_round['id']) }}">Continue reading →</a>{% else %}<form method="post" action="{{ url_for('brain_start') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" {% if info.error %}disabled{% endif %}>📖 Open question book</button></form>{% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}{% endif %}</div>
-<div class="card"><h2>🏅 My completed rounds</h2>{% if rounds %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Correct</th><th>Balance earned</th><th>Status</th><th></th></tr>{% for r in rounds %}<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['correct_n'] if r['status']=='DONE' else '—' }}</td><td>{{ money(r['score']) }}</td><td>{{ r['status'] }}</td><td><a href="{{ url_for('brain_round', rid=r['id']) }}">{{ 'Review' if r['status']=='DONE' else 'Continue' }}</a></td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your results will be recorded here.</p>{% endif %}</div>
+<div class="card brain-hero"><h1>🧠 Vedo Brain Battle</h1><p>Open your challenge book, choose your answers, and collect points for correct answers.</p><p><a href="{{ url_for('games_hub') }}" style="color:#bff8e9">← All games</a></p><p><span class="badge {{ 'ok' if info.status == 'OPEN' else 'wait' }}">{{ status_text }}</span> <span class="small">{{ window }} · {{ limit_text }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p></div>
+<div class="card"><h2>📘 Your challenge book</h2><p>Each round has up to <b>{{ gm['questions_per_round'] }}</b> questions. Every correct answer earns points (up to {{ money(pool['mx']) }} per question). Incorrect answers earn no points; no points are deducted.</p><p class="muted">Plays left: <b>{{ info.left }}</b> · Questions available: {{ pool['n'] }}</p>{% if open_round %}<a class="btnlink" href="{{ url_for('brain_round', rid=open_round['id']) }}">Continue reading →</a>{% else %}<form method="post" action="{{ url_for('brain_start') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="primary" {% if info.error %}disabled{% endif %}>📖 Open question book</button></form>{% if info.error %}<p class="muted small">{{ info.error }}</p>{% endif %}{% endif %}</div>
+<div class="card"><h2>🏅 My completed rounds</h2>{% if rounds %}<div style="overflow-x:auto"><table><tr><th>Date</th><th>Correct</th><th>Points earned</th><th>Status</th><th></th></tr>{% for r in rounds %}<tr><td>{{ r['created_at'][:16] }}</td><td>{{ r['correct_n'] if r['status']=='DONE' else '—' }}</td><td>{{ money(r['score']) }}</td><td>{{ r['status'] }}</td><td><a href="{{ url_for('brain_round', rid=r['id']) }}">{{ 'Review' if r['status']=='DONE' else 'Continue' }}</a></td></tr>{% endfor %}</table></div>{% else %}<p class="muted">Your results will be recorded here.</p>{% endif %}</div>
 """
 
 BRAIN_ROUND_BODY = """
@@ -3575,7 +3575,7 @@ BRAIN_ROUND_BODY = """
 </style>
 <div class="card round-top"><h1>📘 Question Book · Round #{{ rnd['id'] }}</h1><p><a href="{{ url_for('brain_page') }}" style="color:#c5f7e9">← Back to Brain Battle</a></p>{% if rnd['status']=='DONE' %}<p>Round complete! You answered <b>{{ rnd['correct_n'] }} of {{ questions|length }}</b> correctly and earned <b>{{ money(rnd['score']) }}</b>.</p>{% else %}<p>Read each question and select one answer. Turn the page by submitting your answers.</p>{% endif %}</div>
 <form method="post" action="{{ url_for('brain_round', rid=rnd['id']) }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-{% for q in questions %}{% set mine = answers.get(q['id'], 0) %}<div class="book-wrap"><section class="question-book"><div style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:#25806e">PAGE {{ loop.index }} OF {{ questions|length }}</div><h2><span class="question-number">{{ loop.index }}</span>{{ q['question'] }}</h2><p class="muted small">Reward for correct answer: <b>{{ money(q['Balance']) }}</b></p>{% for n, text in [(1,q['a']),(2,q['b']),(3,q['c']),(4,q['d'])] %}<label class="opt{% if rnd['status']=='DONE' %}{{ ' right' if n==q['correct'] }}{{ ' wrong' if n==mine and n!=q['correct'] }}{% endif %}"><input type="radio" name="q{{ q['id'] }}" value="{{ n }}" {% if rnd['status']=='DONE' %}disabled{% if n==mine %} checked{% endif %}{% endif %}><span><b>{{ ['A','B','C','D'][n-1] }}.</b> {{ text }}</span></label>{% endfor %}</section></div>{% endfor %}
+{% for q in questions %}{% set mine = answers.get(q['id'], 0) %}<div class="book-wrap"><section class="question-book"><div style="font-size:11px;font-weight:900;letter-spacing:1.5px;color:#25806e">PAGE {{ loop.index }} OF {{ questions|length }}</div><h2><span class="question-number">{{ loop.index }}</span>{{ q['question'] }}</h2><p class="muted small">Reward for correct answer: <b>{{ money(q['points']) }}</b></p>{% for n, text in [(1,q['a']),(2,q['b']),(3,q['c']),(4,q['d'])] %}<label class="opt{% if rnd['status']=='DONE' %}{{ ' right' if n==q['correct'] }}{{ ' wrong' if n==mine and n!=q['correct'] }}{% endif %}"><input type="radio" name="q{{ q['id'] }}" value="{{ n }}" {% if rnd['status']=='DONE' %}disabled{% if n==mine %} checked{% endif %}{% endif %}><span><b>{{ ['A','B','C','D'][n-1] }}.</b> {{ text }}</span></label>{% endfor %}</section></div>{% endfor %}
 {% if rnd['status']=='OPEN' %}<button class="primary" style="display:block;margin:18px auto;padding:14px 26px">✓ Submit answers &amp; reveal score</button>{% else %}<a class="btnlink" href="{{ url_for('brain_page') }}">Back to game lobby</a>{% endif %}</form>
 """
 
@@ -3598,7 +3598,7 @@ ENVELOPE_BODY = """
 @media(max-width:420px){.env-stage{transform:scale(.9);margin:8px auto}.env-scene{padding-left:0;padding-right:0}}
 </style>
 <div class="card note"><h1>✉️ Vedo Mystery Envelope</h1><p class="muted"><a href="{{ url_for('games_hub') }}">← All games</a></p><p><span class="badge {{ 'ok' if info.status=='OPEN' else 'wait' }}">{{ status_text }}</span> <span class="muted small">{{ window }}{% if gm['min_level'] %} · Level {{ gm['min_level'] }}+{% endif %}</span></p><p>There’s a surprise waiting inside. Tap the envelope and open your reward letter.</p>
-<div class="env-scene"><div class="env-stage {% if claimed %}opened{% endif %}" id="envstage"><div class="real-envelope" id="env" role="img" aria-label="Mystery reward envelope"><div class="env-back"></div><div class="env-paper" id="envpaper"><div class="paper-small">VEDO REWARD LETTER</div><div class="paper-result" id="paperresult">YOUR SURPRISE<br>IS INSIDE</div></div><div class="env-front"></div><div class="env-flap"></div><div class="env-seal">V</div></div></div><div class="env-confetti" id="envconfetti">✦ ✉ ✦</div><div id="envout" aria-live="polite">{% if claimed %}<div class="flash ok">Already opened: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}<br>Voucher: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>{% else %}<p class="muted">Your sealed envelope is ready.</p>{% endif %}</div><button type="button" class="primary env-open-btn" id="envbtn" {% if info.error %}disabled{% endif %}>{{ 'Envelope opened' if claimed else '🎁 Open my envelope' }}</button><p class="muted">Balance balance: <b id="bal">{{ money(user['Balance']) }}</b></p>{% if info.error and not claimed %}<p class="muted small">{{ info.error }}</p>{% endif %}</div></div>
+<div class="env-scene"><div class="env-stage {% if claimed %}opened{% endif %}" id="envstage"><div class="real-envelope" id="env" role="img" aria-label="Mystery reward envelope"><div class="env-back"></div><div class="env-paper" id="envpaper"><div class="paper-small">VEDO REWARD LETTER</div><div class="paper-result" id="paperresult">YOUR SURPRISE<br>IS INSIDE</div></div><div class="env-front"></div><div class="env-flap"></div><div class="env-seal">V</div></div></div><div class="env-confetti" id="envconfetti">✦ ✉ ✦</div><div id="envout" aria-live="polite">{% if claimed %}<div class="flash ok">Already opened: <b>{{ claimed['result'] }}</b>{% if claimed['voucher'] %}<br>Voucher: <code>{{ claimed['voucher'] }}</code>{% endif %}</div>{% else %}<p class="muted">Your sealed envelope is ready.</p>{% endif %}</div><button type="button" class="primary env-open-btn" id="envbtn" {% if info.error %}disabled{% endif %}>{{ 'Envelope opened' if claimed else '🎁 Open my envelope' }}</button><p class="muted">Points balance: <b id="bal">{{ money(user['points']) }}</b></p>{% if info.error and not claimed %}<p class="muted small">{{ info.error }}</p>{% endif %}</div></div>
 </script>
 (function(){const btn=document.getElementById('envbtn'),stage=document.getElementById('envstage'),out=document.getElementById('envout'),paper=document.getElementById('paperresult'),confetti=document.getElementById('envconfetti'),csrf={{ csrf_token()|tojson }};if(!btn||!stage)return;
 {% if claimed %}btn.disabled=true;paper.textContent={{ claimed['result']|tojson }};{% else %}
@@ -3663,7 +3663,7 @@ ADMIN_GAMES_BODY = """
 
 <div class="card">
 <h2>Spin &amp; Win prizes</h2>
-<p class="muted small">Odds = weight compared with the other available prizes. Stock = the most members who can win it (empty = unlimited). For Balance prizes the value is Rand, for voucher prizes it is the level 1-7. Prizes with weight 0, stock used up or switched off are left out of the draw.</p>
+<p class="muted small">Odds = weight compared with the other available prizes. Stock = the most members who can win it (empty = unlimited). For points prizes the value is Rand, for voucher prizes it is the level 1-7. Prizes with weight 0, stock used up or switched off are left out of the draw.</p>
 {% for p in prizes %}
 <form method="post" action="{{ url_for('admin_prize_save') }}" class="prow">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
@@ -3672,7 +3672,7 @@ ADMIN_GAMES_BODY = """
 <select class="pwbox" style="width:130px" name="kind">
 {% for k, v in PRIZE_KINDS.items() %}<option value="{{ k }}" {{ 'selected' if p['kind'] == k }}>{{ v }}</option>{% endfor %}
 </select>
-<input class="pwbox" style="width:90px" name="value" value="{{ '%.2f'|format(p['value'] / 100) if p['kind'] == 'Balance' else p['value'] }}" placeholder="R / level">
+<input class="pwbox" style="width:90px" name="value" value="{{ '%.2f'|format(p['value'] / 100) if p['kind'] == 'POINTS' else p['value'] }}" placeholder="R / level">
 <input class="pwbox" style="width:80px" name="weight" type="number" min="0" value="{{ p['weight'] }}" title="Odds weight">
 <input class="pwbox" style="width:90px" name="stock" type="number" min="0" value="{{ p['stock'] if p['stock'] is not none else '' }}" placeholder="unlimited" title="Stock (max winners)">
 <label class="chk" style="margin:0"><input type="checkbox" name="enabled" value="1" {{ 'checked' if p['enabled'] }}> on</label>
@@ -3700,13 +3700,13 @@ ADMIN_GAMES_BODY = """
 <h2>Brain Battle questions</h2>
 {% if questions %}
 <table>
-<tr><th>#</th><th>Question</th><th>Answers</th><th>Balance</th><th>Status</th><th></th></tr>
+<tr><th>#</th><th>Question</th><th>Answers</th><th>Points</th><th>Status</th><th></th></tr>
 {% for q in questions %}
 <tr><td>{{ q['id'] }}</td><td>{{ q['question'] }}</td>
 <td class="muted small">
 {% for n, text in [(1, q['a']), (2, q['b']), (3, q['c']), (4, q['d'])] %}{% if n == q['correct'] %}<b class="pos">{{ n }}. {{ text }}</b>{% else %}{{ n }}. {{ text }}{% endif %}<br>{% endfor %}
 </td>
-<td>{{ money(q['Balance']) }}</td>
+<td>{{ money(q['points']) }}</td>
 <td><span class="badge {{ 'ok' if q['enabled'] else 'wait' }}">{{ 'on' if q['enabled'] else 'off' }}</span></td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_question_action', qid=q['id'], action='toggle') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="ghost">{{ 'Switch off' if q['enabled'] else 'Switch on' }}</button></form>
@@ -3727,7 +3727,7 @@ ADMIN_GAMES_BODY = """
 </div>
 <div class="two">
 <div><label>Correct answer</label><select name="correct"><option value="1">1</option><option value="2">2</option><option value="3">3</option><option value="4">4</option></select></div>
-<div><label>Balance for a correct answer (R)</label><input name="Balance" type="number" step="0.01" min="0" value="2.00" required></div>
+<div><label>Points for a correct answer (R)</label><input name="points" type="number" step="0.01" min="0" value="2.00" required></div>
 </div>
 <button class="primary">Add question</button>
 </form>
@@ -3737,7 +3737,7 @@ ADMIN_GAMES_BODY = """
 <h2>Winner records (latest 100)</h2>
 {% if records %}
 <table>
-<tr><th>Date</th><th>Member</th><th>Game</th><th>Result</th><th>Balance</th><th>Voucher</th></tr>
+<tr><th>Date</th><th>Member</th><th>Game</th><th>Result</th><th>Points</th><th>Voucher</th></tr>
 {% for r in records %}
 <tr class="{{ 'hl' if r['kind'] == 'ITEM' }}"><td>{{ r['created_at'][:16] }}</td><td>{{ r['username'] }}</td><td>{{ GAMES[r['game']] }}</td><td>{{ r['result'] }}{% if r['kind'] == 'ITEM' %} <span class="badge wait">item to hand over</span>{% endif %}</td>
 <td>{{ money(r['amount']) if r['amount'] > 0 else '-' }}</td>
@@ -4301,10 +4301,10 @@ label.chk input{width:auto;margin:0;}
 .prow{display:flex;gap:6px;flex-wrap:wrap;align-items:center;margin-bottom:8px;}
 
 
-/* ---------- compact Balance balance beside navigation tabs ---------- */
-.nav-Balance{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;padding:6px 10px;border:1px solid rgba(31,214,164,.3);border-radius:11px;background:rgba(31,214,164,.08);color:var(--ink);line-height:1.15;}
-.nav-Balance-label{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
-.nav-Balance strong{font-size:.78rem;color:#75f0c7;font-weight:800;}
+/* ---------- compact points balance beside navigation tabs ---------- */
+.nav-points{display:inline-flex;align-items:center;gap:7px;white-space:nowrap;padding:6px 10px;border:1px solid rgba(31,214,164,.3);border-radius:11px;background:rgba(31,214,164,.08);color:var(--ink);line-height:1.15;}
+.nav-points-label{font-size:.68rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.04em;}
+.nav-points strong{font-size:.78rem;color:#75f0c7;font-weight:800;}
 
 /* ---------- premium Vedo voucher promotion board ---------- */
 .voucher-promo{grid-column:1/-1;position:relative;isolation:isolate;display:grid;grid-template-columns:minmax(0,1.05fr) minmax(260px,.95fr);align-items:center;gap:20px;min-height:320px;padding:30px 34px;overflow:hidden;border:1px solid rgba(95,143,255,.24);border-radius:24px;background:radial-gradient(ellipse at 78% 45%,rgba(34,95,205,.28),transparent 48%),linear-gradient(115deg,#0b1427 0%,#101d39 58%,#0b1325 100%);box-shadow:0 18px 45px rgba(0,0,0,.22);}
@@ -4341,8 +4341,8 @@ label.chk input{width:auto;margin:0;}
 .gift-code{color:#fff;}
 .voucher-spark{position:absolute;color:#9dbdff;text-shadow:0 0 16px #4e85ff;font-size:2rem;}
 .spark-one{right:5%;top:8%;}.spark-two{left:7%;bottom:7%;font-size:1.5rem;}
-@media(max-width:850px){nav{flex-wrap:wrap}.nav-Balance{order:3;margin-left:auto}.voucher-promo{padding:25px;grid-template-columns:1fr minmax(230px,.8fr);gap:8px}.gift-card{width:85%;height:175px}.gift-main{margin-top:12px}.gift-emblem{width:56px;height:56px;font-size:2.1rem}.gift-value-main{font-size:1.7rem}}
-@media(max-width:620px){.voucher-promo{grid-template-columns:1fr;padding:24px 21px;gap:0}.voucher-copy h2{font-size:2rem}.voucher-art{min-height:220px;margin-top:8px}.gift-card{width:min(78%,290px);height:175px}.voucher-trust{align-items:flex-start}.nav-Balance{padding:5px 8px}.nav-Balance-label{font-size:.6rem}.nav-Balance strong{font-size:.72rem}}
+@media(max-width:850px){nav{flex-wrap:wrap}.nav-points{order:3;margin-left:auto}.voucher-promo{padding:25px;grid-template-columns:1fr minmax(230px,.8fr);gap:8px}.gift-card{width:85%;height:175px}.gift-main{margin-top:12px}.gift-emblem{width:56px;height:56px;font-size:2.1rem}.gift-value-main{font-size:1.7rem}}
+@media(max-width:620px){.voucher-promo{grid-template-columns:1fr;padding:24px 21px;gap:0}.voucher-copy h2{font-size:2rem}.voucher-art{min-height:220px;margin-top:8px}.gift-card{width:min(78%,290px);height:175px}.voucher-trust{align-items:flex-start}.nav-points{padding:5px 8px}.nav-points-label{font-size:.6rem}.nav-points strong{font-size:.72rem}}
 
 
 /* ---------- code-rendered, layered 3D Vedo dashboard benefit boards ---------- */
@@ -4384,7 +4384,7 @@ label.chk input{width:auto;margin:0;}
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
-<span class="nav-Balance" title="Your available Vedo Balance balance"><span class="nav-Balance-label">Balance</span><strong>{{ money(me['Balance']) }}</strong></span>
+<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Points</span><strong>{{ money(me['points']) }}</strong></span>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button>Log out<span class="uname"> ({{ me['username'] }})</span></button>
@@ -4878,10 +4878,10 @@ REWARDS_GUIDE_BODY = """
 """
 
 DASH_BODY = """
-{% set total = user['Balance'] + locked %}
-{% set pct = (user['Balance'] / total * 100) if total else 0 %}
+{% set total = user['points'] + locked %}
+{% set pct = (user['points'] / total * 100) if total else 0 %}
 {% set next_cost = UPGRADE_COST_CENTS[user['level'] + 1] if user['level'] < 7 else 0 %}
-{% set lvl_pct = ([(user['Balance'] / next_cost * 100)|int, 100]|min) if next_cost else 100 %}
+{% set lvl_pct = ([(user['points'] / next_cost * 100)|int, 100]|min) if next_cost else 100 %}
 
 <div class="dash">
 
@@ -4987,7 +4987,7 @@ CHECKIN_BODY = """
 <h2>Today's tasks - Level {{ user['level'] }}</h2>
 <p>Finish all <strong>{{ total }}</strong> tasks to earn today's <strong>{{ money(daily) }}</strong>.
 Tap to complete tasks.</p>
-<p class="muted">Balance: <b id="bal">{{ money(user['Balance']) }}</b></p>
+<p class="muted">Balance: <b id="bal">{{ money(user['points']) }}</b></p>
 <div class="progtxt"><span id="progtxt">{{ completed_n }} of {{ total }} tasks done</span><span>Earned today: <b id="earned">{{ money(earned) }}</b></span></div>
 <div class="bar"><b id="progbar" style="width:{{ pct }}%"></b></div>
 <div id="msg" style="margin-top:14px"></div>
@@ -5128,7 +5128,7 @@ CHECKIN_TASKS_BODY = """
   <h1>Level {{ user['level'] }} Tasks</h1>
   <p class="muted">Tap a voucher to complete each task. The reward is credited after the loading finishes.</p>
   <div class="voucher-summary">
-    <div><small>Available balance</small><strong id="bal">{{ money(user['Balance']) }}</strong></div>
+    <div><small>Available balance</small><strong id="bal">{{ money(user['points']) }}</strong></div>
     <div><small>Today's reward</small><strong>{{ money(daily) }}</strong></div>
     <div><small>Progress</small><strong id="progtxt">{{ completed_n }} / {{ total }} tasks</strong></div>
   </div>
@@ -5140,7 +5140,7 @@ CHECKIN_TASKS_BODY = """
 <button type="button" class="voucher-task{{ ' done' if t.done }}{{ ' blue-voucher' if user['level'] in (5, 6, 7) else '' }}" data-label="+{{ money(t.reward) }}"
  data-start="{{ url_for('checkin_start', n=t.no) }}" data-complete="{{ url_for('checkin_complete', n=t.no) }}" {% if t.done %}disabled{% endif %}>
  <span class="voucher-top"><b>VEDO<span class="voucher-dot">.</span></b><small>DIGITAL VOUCHER</small></span>
- <span class="voucher-main"><span class="voucher-symbol">V</span><span class="voucher-prize"><small>TASK {{ t.no }}</small><strong>{{ money(t.reward) }}</strong><small>Balance REWARD</small></span></span>
+ <span class="voucher-main"><span class="voucher-symbol">V</span><span class="voucher-prize"><small>TASK {{ t.no }}</small><strong>{{ money(t.reward) }}</strong><small>POINTS REWARD</small></span></span>
  <span class="voucher-bottom"><span>{{ 'REWARD CLAIMED ✓' if t.done else 'TAP VOUCHER TO COMPLETE' }}</span><b>{{ 'COMPLETED' if t.done else 'VDO · ' ~ '%02d'|format(t.no) }}</b></span>
  <span class="voucher-progress"></span>
 </button>
@@ -5332,7 +5332,7 @@ WITHDRAW_BODY = """
 <h1>Request a withdrawal</h1>
 <p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed by the admin; rejected requests are refunded.</p>
 <p class="muted">Processing time: up to 24 hours.</p>
-<h2>Available balance: {{ money(user['Balance']) }}</h2>
+<h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="action" value="request_withdrawal">
@@ -5406,16 +5406,16 @@ TEAM_BODY = """
 <h2>Team members ({{ members|length }})</h2>
 <div class="stats" style="margin-bottom:12px">
 <div class="stat"><b>{{ members|length }}</b><span>Members</span></div>
-<div class="stat"><b>{{ money(team_Balance) }}</b><span>Team total Balance</span></div>
+<div class="stat"><b>{{ money(team_points) }}</b><span>Team total points</span></div>
 <div class="stat"><b class="pos">{{ money(earned) }}</b><span>Referral rewards earned</span></div>
 </div>
 {% if members %}
 <table>
-<tr><th>Member</th><th>Level</th><th>Balance</th><th>Joined</th></tr>
+<tr><th>Member</th><th>Level</th><th>Points</th><th>Joined</th></tr>
 {% for m in members %}
 <tr><td>{{ mask_phone(m['username']) }}</td>
 <td><span class="badge">L{{ m['level'] }}</span></td>
-<td>{{ money(m['Balance']) }}</td>
+<td>{{ money(m['points']) }}</td>
 <td>{{ m['created_at'][:10] }}</td></tr>
 {% endfor %}
 </table>
@@ -5455,22 +5455,22 @@ UPGRADE_BODY = """
 {% endif %}
 <div class="card note">
 <h1>Level upgrade</h1>
-<p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['Balance']) }}</strong></p>
+<p>You are <strong>Level {{ user['level'] }}</strong>. Balance: <strong>{{ money(user['points']) }}</strong></p>
 {% if voucher_card %}
 <p>Your approved voucher is ready above. Enter the voucher number shown on the card to activate Level {{ voucher_card['level'] }}.</p>
 {% elif next_level %}
 {% set cost = UPGRADE_COST_CENTS[next_level] %}
-{% set pct = [(user['Balance'] / cost * 100)|int, 100]|min %}
-<p><strong>Balance needed to upgrade:</strong> {{ money(cost) }} to reach Level {{ next_level }}.
+{% set pct = [(user['points'] / cost * 100)|int, 100]|min %}
+<p><strong>Points needed to upgrade:</strong> {{ money(cost) }} to reach Level {{ next_level }}.
 Your daily check-in reward at that level will be {{ daily_reward(next_level) }}.</p>
 <div class="progtxt"><span>Your balance</span><span>{{ pct }}%</span></div>
 <div class="bar"><b style="width:{{ pct }}%"></b></div>
 <form method="post" onsubmit="return confirm('Upgrade to Level {{ next_level }}?');">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
-<button class="primary" {% if user['Balance'] < cost %}disabled{% endif %}>
+<button class="primary" {% if user['points'] < cost %}disabled{% endif %}>
 Upgrade to Level {{ next_level }}</button>
 </form>
-{% if user['Balance'] < cost %}
+{% if user['points'] < cost %}
 <p class="muted small" style="margin-top:10px">Not enough balance. Keep checking in to earn more, or <a href="{{ url_for('topup') }}">request a top-up</a>.</p>
 {% endif %}
 {% else %}
@@ -5487,7 +5487,7 @@ POTS_BODY = """
 <p class="muted">Lock part of your balance for 1 to 9 weeks and earn <b>simple interest at the
 annual rate shown below</b>. This is not a multiplier: interest = amount x annual rate x weeks / 52.
 Collect after the lock period ends. Closing a pot early returns your money but forfeits the interest.</p>
-<p>Available balance: <strong>{{ money(user['Balance']) }}</strong></p>
+<p>Available balance: <strong>{{ money(user['points']) }}</strong></p>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <label>Amount to lock (R) - minimum {{ money(POT_MIN_CENTS) }}</label>
@@ -5554,7 +5554,7 @@ PROFILE_BODY = """
 <div><dt>Bank Account  number</dt><dd>{{ member['serial_number'] }}</dd></div>
 <div><dt>Cellphone number</dt><dd>{{ member['phone'] or '-' }}{% if member['phone'] %} <span class="badge {{ 'ok' if member['phone_verified'] else 'wait' }}">{{ 'verified' if member['phone_verified'] else 'unverified' }}</span>{% endif %}</dd></div>
 <div><dt>Level</dt><dd>Level {{ member['level'] }}</dd></div>
-<div><dt>Balance</dt><dd>{{ money(member['Balance']) }}</dd></div>
+<div><dt>Balance</dt><dd>{{ money(member['points']) }}</dd></div>
 <div><dt>Referral code</dt><dd><code>{{ member['referral_code'] }}</code></dd></div>
 <div><dt>Referred by</dt><dd>{{ (mask_phone(referrer['username']) if is_self else referrer['username']) if referrer else '-' }}</dd></div>
 <div><dt>Joined</dt><dd>{{ member['created_at'][:16] }}</dd></div>
@@ -5803,7 +5803,7 @@ onsubmit="return confirm('Remove this member instruction?');">
 {% for u in users %}
 <tr><td>{{ u['id'] }}</td><td><a href="{{ url_for('admin_user_profile', user_id=u['id']) }}">{{ u['username'] }}</a>{% if u['is_admin'] %} <span class="badge">admin</span>{% endif %}</td>
 <td>{{ u['phone'] or '-' }}{% if u['phone'] and not u['phone_verified'] %} <span class="badge wait">unverified</span>{% endif %}</td>
-<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}L{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['Balance']) }}</td>
+<td>L{{ u['level'] }}</td><td>{% if u['selected_level'] %}L{{ u['selected_level'] }}{% else %}-{% endif %}</td><td>{{ money(u['points']) }}</td>
 <td>{{ u['referrer'] or '-' }}</td><td>{{ u['created_at'][:10] }}</td>
 <td>
 <form class="inline" method="post" action="{{ url_for('admin_add_balance', user_id=u['id']) }}"
@@ -5839,7 +5839,7 @@ onsubmit="return confirm('Set a new password for {{ u['username'] }}?');">
 <h2>Hidden admin records ({{ hidden_users|length }})</h2>
 <p class="muted small">These records are hidden only from the main admin list. User accounts and balances remain unchanged.</p>
 {% if hidden_users %}<table><tr><th>ID</th><th>Member</th><th>Level</th><th>Balance</th><th>Status</th><th>Restore</th></tr>
-{% for hu in hidden_users %}<tr><td>{{ hu['id'] }}</td><td>{{ hu['username'] }}</td><td>L{{ hu['level'] }}</td><td>{{ money(hu['Balance']) }}</td><td>{{ 'Admin locked' if hu['admin_locked'] else 'Hidden' }}</td><td>
+{% for hu in hidden_users %}<tr><td>{{ hu['id'] }}</td><td>{{ hu['username'] }}</td><td>L{{ hu['level'] }}</td><td>{{ money(hu['points']) }}</td><td>{{ 'Admin locked' if hu['admin_locked'] else 'Hidden' }}</td><td>
 <form method="post" action="{{ url_for('admin_record_control', record_type='user', record_id=hu['id'], action='restore') }}"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Restore to admin list</button></form></td></tr>{% endfor %}</table>
 {% else %}<p class="muted">No hidden member records.</p>{% endif %}
 </div>
