@@ -429,7 +429,7 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
-    bank_name TEXT NOT NULL DEFAULT 'DEMO',
+    bank_name TEXT NOT NULL DEFAULT 'System',
     account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
     status TEXT NOT NULL DEFAULT 'PENDING',
@@ -2815,7 +2815,7 @@ def admin_withdrawal(withdrawal_id, action):
         flash("This withdrawal was already processed.", "error")
         return redirect(url_for("admin"))
 
-    # Completing only changes the demo status. NO real money moves.
+    # Completing only changes the System status. NO real money moves.
     if action == "reject":
         credit(db, w["user_id"], w["amount"], "WITHDRAW_REFUND",
                f"Withdrawal #{withdrawal_id} rejected - refunded")
