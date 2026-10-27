@@ -5421,7 +5421,7 @@ WITHDRAW_BODY = """
 <h1>Request a withdrawal</h1>
 <p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed and rejected requests are refunded.</p>
 <p class="muted">Processing time: up to 24 hours.</p>
-<p class="muted"><strong>Withdrawal eligibility:</strong> {{ withdrawal_status }}</p><p class="muted">Rules: 7 days after the most recent admin-approved top-up; requests accepted Wednesdays and Fridays only.</p>
+<p class="muted"><strong>Withdrawal eligibility:</strong> {{ withdrawal_status }}</p><p class="muted">Rules: 7 days after the most recent approved top-up; requests accepted Wednesdays and Fridays only.</p>
 <p class="muted"><strong>Withdrawal fee:</strong> {{ WITHDRAWAL_FEE_PERCENT }}% of the requested amount. The fee and the amount you will receive are shown before you submit.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
