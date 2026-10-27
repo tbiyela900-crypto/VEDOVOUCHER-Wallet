@@ -302,6 +302,7 @@ ICONS = {
     "pots": '<rect x="4" y="10" width="16" height="10" rx="3"/><path d="M8 10V7a4 4 0 018 0v3"/>',
     "profile": '<circle cx="12" cy="8" r="4"/><path d="M4 21c0-4.4 3.6-7 8-7s8 2.6 8 7"/>',
     "admin": '<path d="M12 3l8 3v6c0 5-3.4 8-8 9-4.6-1-8-4-8-9V6z"/>',
+    "support": ('<path d="M21 11.5a8.4 8.4 0 01-.9 3.8 8.5 8.5 0 01-7.6 4.7 8.4 8.4 0 01-3.8-.9L3 21l1.9-5.7a8.4 8.4 0 01-.9-3.8 8.5 8.5 0 014.7-7.6 8.4 8.4 0 013.8-.9h.5a8.5 8.5 0 018 8z"/>'),
     "games": ('<rect x="3" y="8" width="18" height="13" rx="2"/>'
               '<path d="M12 8v13M3 13h18"/>'
               '<path d="M12 8c-3 0-4-4-1.5-4S12 8 12 8z"/>'
@@ -536,6 +537,18 @@ CREATE TABLE IF NOT EXISTS admin_posts (
     caption TEXT NOT NULL DEFAULT '',
     created_at TEXT NOT NULL
 );
+
+CREATE TABLE IF NOT EXISTS support_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    sender_is_admin INTEGER NOT NULL DEFAULT 0,
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL,
+    read_by_user INTEGER NOT NULL DEFAULT 0,
+    read_by_admin INTEGER NOT NULL DEFAULT 0
+);
+CREATE INDEX IF NOT EXISTS idx_support_messages_user_id_id
+    ON support_messages(user_id, id);
 
 CREATE TABLE IF NOT EXISTS user_instructions (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
@@ -1468,6 +1481,88 @@ def checkin_state(user):
 def rewards_guide():
     """Dedicated, readable Vedo rewards page opened from the dashboard promo."""
     return page(REWARDS_GUIDE_BODY)
+
+
+@app.route("/support", methods=["GET", "POST"])
+@login_required
+def support():
+    """Member-to-support chat. Admins can open member threads and reply."""
+    db = get_db()
+    me = current_user()
+    is_admin = bool(me["is_admin"])
+
+    if is_admin:
+        raw_user_id = request.args.get("user_id", "").strip()
+        selected_user = None
+        if raw_user_id:
+            try:
+                selected_id = int(raw_user_id)
+            except ValueError:
+                abort(404)
+            selected_user = db.execute(
+                "SELECT id, username, level FROM users WHERE id=? AND is_admin=0",
+                (selected_id,)).fetchone()
+            if selected_user is None:
+                abort(404)
+    else:
+        selected_user = {"id": me["id"], "username": me["username"], "level": me["level"]}
+
+    if request.method == "POST":
+        message = request.form.get("message", "").strip()
+        if not message:
+            flash("Write a message before sending.", "error")
+        elif len(message) > 2000:
+            flash("Messages must be 2,000 characters or fewer.", "error")
+        elif is_admin and selected_user is None:
+            flash("Choose a member conversation before replying.", "error")
+        else:
+            thread_user_id = selected_user["id"]
+            db.execute(
+                "INSERT INTO support_messages "
+                "(user_id, sender_is_admin, message, created_at, read_by_user, read_by_admin) "
+                "VALUES (?,?,?,?,?,?)",
+                (thread_user_id, 1 if is_admin else 0, message, now_iso(),
+                 0 if is_admin else 1, 1 if is_admin else 0))
+            db.commit()
+            flash("Reply sent." if is_admin else "Your message has been sent to Vedo Support.", "ok")
+        if is_admin and selected_user is None:
+            return redirect(url_for("support"))
+        return redirect(url_for("support", **({"user_id": selected_user["id"]} if is_admin else {})))
+
+    if is_admin:
+        # Inbox shows the latest message and unread member-message count per thread.
+        inbox = db.execute("""
+            SELECT u.id, u.username, u.level,
+                   (SELECT sm.message FROM support_messages sm
+                    WHERE sm.user_id=u.id ORDER BY sm.id DESC LIMIT 1) AS last_message,
+                   (SELECT sm.created_at FROM support_messages sm
+                    WHERE sm.user_id=u.id ORDER BY sm.id DESC LIMIT 1) AS last_at,
+                   (SELECT COUNT(*) FROM support_messages sm
+                    WHERE sm.user_id=u.id AND sm.sender_is_admin=0 AND sm.read_by_admin=0) AS unread
+            FROM users u
+            WHERE u.is_admin=0 AND EXISTS
+                (SELECT 1 FROM support_messages sm WHERE sm.user_id=u.id)
+            ORDER BY last_at DESC
+        """).fetchall()
+        messages = []
+        if selected_user:
+            db.execute("UPDATE support_messages SET read_by_admin=1 "
+                       "WHERE user_id=? AND sender_is_admin=0", (selected_user["id"],))
+            db.commit()
+            messages = db.execute(
+                "SELECT * FROM support_messages WHERE user_id=? ORDER BY id ASC",
+                (selected_user["id"],)).fetchall()
+        return page(SUPPORT_BODY, is_admin=True, selected_user=selected_user,
+                    inbox=inbox, messages=messages)
+
+    db.execute("UPDATE support_messages SET read_by_user=1 "
+               "WHERE user_id=? AND sender_is_admin=1", (me["id"],))
+    db.commit()
+    messages = db.execute(
+        "SELECT * FROM support_messages WHERE user_id=? ORDER BY id ASC",
+        (me["id"],)).fetchall()
+    return page(SUPPORT_BODY, is_admin=False, selected_user=selected_user,
+                inbox=[], messages=messages)
 
 
 @app.route("/dashboard")
@@ -3798,6 +3893,71 @@ ADMIN_GAMES_BODY = """
 # TEMPLATES
 # ============================================================================
 
+SUPPORT_BODY = """
+<div class="card note">
+{% if is_admin %}
+  {% if selected_user %}
+    <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
+      <div><h1>Help &amp; Support</h1><p class="muted">Private conversation with {{ selected_user['username']|e }} · Level {{ selected_user['level'] }}</p></div>
+      <a class="btnlink" href="{{ url_for('support') }}">Back to inbox</a>
+    </div>
+  {% else %}
+    <h1>Help &amp; Support inbox</h1>
+    <p class="muted">Member questions appear here. Open a conversation to reply privately.</p>
+  {% endif %}
+{% else %}
+  <h1>Help &amp; Support</h1>
+  <p class="muted">Have a question? Send Vedo Support a message. Replies will appear in this conversation.</p>
+{% endif %}
+</div>
+
+{% if is_admin and not selected_user %}
+<div class="card">
+  <h2>Member conversations</h2>
+  {% if inbox %}
+  <div style="display:grid;gap:10px">
+    {% for thread in inbox %}
+    <a href="{{ url_for('support', user_id=thread['id']) }}" style="display:block;padding:14px;border:1px solid var(--line);border-radius:14px;background:var(--s1);color:var(--ink);text-decoration:none">
+      <div style="display:flex;justify-content:space-between;gap:12px;align-items:center;flex-wrap:wrap">
+        <strong>{{ thread['username']|e }} · Level {{ thread['level'] }}</strong>
+        {% if thread['unread'] %}<span class="badge wait">{{ thread['unread'] }} new</span>{% endif %}
+      </div>
+      <p class="muted" style="margin:7px 0 0;overflow-wrap:anywhere">{{ thread['last_message']|e }}</p>
+      <small class="muted">{{ thread['last_at'] }}</small>
+    </a>
+    {% endfor %}
+  </div>
+  {% else %}<p class="muted">No messages yet. Member questions will appear here when someone contacts support.</p>{% endif %}
+</div>
+{% else %}
+<div class="card">
+  <h2>{{ 'Conversation' if is_admin else 'Message Vedo Support' }}</h2>
+  <div style="display:grid;gap:12px;margin:14px 0 20px">
+    {% if messages %}
+      {% for msg in messages %}
+      <div style="max-width:86%;justify-self:{{ 'end' if msg['sender_is_admin'] else 'start' }};padding:12px 14px;border-radius:16px;border:1px solid var(--line);background:{{ 'rgba(31,214,164,.12)' if msg['sender_is_admin'] else 'var(--s1)' }};overflow-wrap:anywhere">
+        <div style="font-size:.75rem;color:var(--muted);font-weight:700;margin-bottom:5px">{{ 'Vedo Support' if msg['sender_is_admin'] else ('You' if not is_admin else selected_user['username']|e) }}</div>
+        <div style="white-space:pre-wrap">{{ msg['message']|e }}</div>
+        <div style="font-size:.7rem;color:var(--muted);margin-top:7px">{{ msg['created_at'] }}</div>
+      </div>
+      {% endfor %}
+    {% else %}
+      <div style="padding:18px;border:1px dashed var(--line);border-radius:14px;text-align:center">
+        <strong>{{ 'No messages in this conversation yet.' if is_admin else 'How can we help you?' }}</strong>
+        <p class="muted" style="margin:6px 0 0">{{ 'Send a reply below to start the conversation.' if is_admin else 'Write your question below and the Vedo team will reply here.' }}</p>
+      </div>
+    {% endif %}
+  </div>
+  <form method="post" action="{{ url_for('support', user_id=selected_user['id']) if is_admin else url_for('support') }}">
+    <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+    <label for="support-message">Your message</label>
+    <textarea id="support-message" name="message" rows="4" maxlength="2000" required placeholder="Type your question here (up to 2,000 characters)"></textarea>
+    <button class="primary">{{ 'Send reply' if is_admin else 'Send message' }}</button>
+  </form>
+</div>
+{% endif %}
+"""
+
 BASE = """
 <!doctype html>
 <html lang="en">
@@ -4426,6 +4586,7 @@ label.chk input{width:auto;margin:0;}
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
+<a class="{{ 'active' if ep in ['support'] }}" href="{{ url_for('support') }}">{{ icon('support') }}Help &amp; Support</a>
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
@@ -5704,6 +5865,12 @@ ADMIN_BODY = """
 </div>
 
 <div class="card note">
+<h2>Help &amp; Support inbox</h2>
+<p class="muted">Read member questions and reply privately from one place.</p>
+<a class="btnlink" href="{{ url_for('support') }}">Open Support inbox</a>
+</div>
+
+<div class="card note">
 <h2>Phase 1 games</h2>
 <p class="muted">Spin &amp; Win, Brain Battle and Mystery Envelope: prizes, odds, stock, limits, schedule and winner records.</p>
 <a class="btnlink" href="{{ url_for('admin_games') }}">Open Games admin</a>
@@ -6028,4 +6195,3 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
-
