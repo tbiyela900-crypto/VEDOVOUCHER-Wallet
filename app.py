@@ -236,7 +236,7 @@ TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
 TOPUP_PANEL_SECONDS = 600       # the Top-up details tab stays open 10 minutes
 WITHDRAW_MIN_CENTS = 10000      # R100; withdrawals must be in R100 increments
-WITHDRAWAL_FEE_PERCENT = 20    # 20% transparent withdrawal fee
+WITHDRAWAL_FEE_PERCENT = 10    # 10% transparent withdrawal fee
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
@@ -2105,7 +2105,7 @@ def withdraw():
             return redirect(url_for("withdraw"))
         fee_cents = (cents * WITHDRAWAL_FEE_PERCENT) // 100
         payout_cents = cents - fee_cents
-        if not debit(db, user["id"], cents, "WITHDRAW", "Withdrawal request (pending; includes 20% fee)"):
+        if not debit(db, user["id"], cents, "WITHDRAW", "Withdrawal request (pending; includes 10% fee)"):
             db.rollback()
             flash("Insufficient play balance.", "error")
             return redirect(url_for("withdraw"))
@@ -2115,7 +2115,7 @@ def withdraw():
             (user["id"], cents, fee_cents, payout_cents, details["bank_name"], details["account_number"],
              details["account_holder"], now_iso()))
         db.commit()
-        flash(f"Withdrawal request created: {money(cents)} requested, {money(fee_cents)} fee (20%), payout {money(payout_cents)}. It will be reviewed.", "ok")
+        flash(f"Withdrawal request created: {money(cents)} requested, {money(fee_cents)} fee (10%), payout {money(payout_cents)}. It will be reviewed.", "ok")
         return redirect(url_for("withdraw"))
     withdrawals = db.execute(
         "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
@@ -2958,7 +2958,7 @@ def admin_withdrawal(withdrawal_id, action):
                f"Withdrawal #{withdrawal_id} rejected - refunded")
     db.commit()
     if action == "complete":
-        flash(f"Withdrawal #{withdrawal_id} approved. Recorded payout amount: {money(w['payout_amount'])} (after 20% fee). This app records status only; it does not transfer real money.", "ok")
+        flash(f"Withdrawal #{withdrawal_id} approved. Recorded payout amount: {money(w['payout_amount'])} (after 10% fee). This app records status only; it does not transfer real money.", "ok")
     else:
         flash(f"Withdrawal #{withdrawal_id} rejected. The full requested amount {money(w['amount'])} was refunded.", "ok")
     return redirect(url_for("admin"))
@@ -4836,11 +4836,11 @@ REWARDS_GUIDE_BODY = """
   <div class="withdrawal-rules-grid">
     <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">7</span><h3>7-day waiting period</h3><p>Your 7-day waiting period starts when an admin approves your top-up. You must finish the waiting period before requesting a withdrawal.</p></article>
     <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">W/F</span><h3>Wednesday &amp; Friday</h3><p>Withdrawal requests can be submitted on Wednesdays and Fridays only. If you become eligible on another day, wait for the next available withdrawal day.</p></article>
-    <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">20%</span><h3>20% withdrawal fee</h3><p>A fee equal to 20% of your requested amount is deducted. The remaining 80% is the payout amount before any separate bank charges, if applicable.</p></article>
+    <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">10%</span><h3>10% withdrawal fee</h3><p>A fee equal to 10% of your requested amount is deducted. The remaining 90% is the payout amount before any separate bank charges, if applicable.</p></article>
   </div>
   <div class="withdrawal-example-panel">
     <div><p class="benefits-kicker">PAYOUT EXAMPLES</p><h3>See what you receive</h3><p>Requests must be in R100 increments. Other amounts, such as R345 or R350, are not accepted.</p></div>
-    <div class="withdrawal-example-table-wrap"><table class="withdrawal-example-table"><thead><tr><th>Requested</th><th>20% fee</th><th>You receive</th></tr></thead><tbody><tr><td>R100</td><td>R20</td><td>R80</td></tr><tr><td>R200</td><td>R40</td><td>R160</td></tr><tr><td>R300</td><td>R60</td><td>R240</td></tr><tr><td>R400</td><td>R80</td><td>R320</td></tr><tr><td>R500</td><td>R100</td><td>R400</td></tr><tr><td>R1,000</td><td>R200</td><td>R800</td></tr></tbody></table></div>
+    <div class="withdrawal-example-table-wrap"><table class="withdrawal-example-table"><thead><tr><th>Requested</th><th>10% fee</th><th>You receive</th></tr></thead><tbody><tr><td>R100</td><td>R10</td><td>R90</td></tr><tr><td>R200</td><td>R20</td><td>R180</td></tr><tr><td>R300</td><td>R30</td><td>R270</td></tr><tr><td>R400</td><td>R40</td><td>R360</td></tr><tr><td>R500</td><td>R50</td><td>R450</td></tr><tr><td>R1,000</td><td>R100</td><td>R900</td></tr></tbody></table></div>
   </div>
   <div class="withdrawal-note-3d"><strong>Before you request:</strong> Save correct bank details, check your available balance, and review the fee and net payout shown on the Withdraw page. Requests are reviewed. This page explains the rules; it does not submit a withdrawal request.</div>
   <a class="withdrawal-cta-3d" href="{{ url_for('withdraw') }}">Go to Withdraw <span aria-hidden="true">→</span></a>
@@ -5151,6 +5151,7 @@ DASH_BODY = """
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
 <a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Savings pots</a>
 <a class="act" href="{{ url_for('checkin') }}"><span>{{ icon('checkin') }}</span>Daily check-in</a>
+<a class="act" href="{{ url_for('support') }}"><span>{{ icon('support') }}</span>Help &amp; Support</a>
 {% if user['is_admin'] %}<a class="act" href="{{ url_for('admin') }}"><span>{{ icon('admin') }}</span>Admin</a>{% endif %}
 </div>
 </section>
@@ -5591,7 +5592,7 @@ WITHDRAW_BODY = """
 <label for="withdraw_amount">Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
 <p class="muted">Choose R100, R200, R300, R400, and so on. Other amounts are not accepted.</p>
 <input id="withdraw_amount" name="amount" type="number" step="100" min="100" placeholder="e.g. 200" required>
-<p class="muted" id="withdrawal_fee_preview" aria-live="polite">Enter an amount to see the 20% fee and payout.</p>
+<p class="muted" id="withdrawal_fee_preview" aria-live="polite">Enter an amount to see the 10% fee and payout.</p>
 <button class="primary">Request withdrawal</button>
 </form>
 <script>
@@ -5605,8 +5606,8 @@ WITHDRAW_BODY = """
       preview.textContent = 'Withdrawal amounts must be R100, R200, R300, R400, and so on.';
       return;
     }
-    const fee = value * 0.20;
-    preview.textContent = 'Requested: R' + value.toFixed(2) + ' | 20% fee: R' + fee.toFixed(2) + ' | You receive: R' + (value-fee).toFixed(2);
+    const fee = value * 0.10;
+    preview.textContent = 'Requested: R' + value.toFixed(2) + ' | 10% fee: R' + fee.toFixed(2) + ' | You receive: R' + (value-fee).toFixed(2);
   }
   amount.addEventListener('input', update);
   update();
@@ -5618,7 +5619,7 @@ WITHDRAW_BODY = """
 <h2>Withdrawal history</h2>
 {% if withdrawals %}
 <table>
-<tr><th>Date</th><th>Requested</th><th>20% fee</th><th>Payout</th><th>Bank</th><th>Account holder</th><th>Status</th></tr>
+<tr><th>Date</th><th>Requested</th><th>10% fee</th><th>Payout</th><th>Bank</th><th>Account holder</th><th>Status</th></tr>
 {% for w in withdrawals %}
 <tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['amount']) }}</td>
 <td>{{ money(w['fee_amount']) }}</td><td>{{ money(w['payout_amount']) }}</td>
@@ -6058,7 +6059,7 @@ onsubmit="return confirm('Remove this member instruction?');">
 <h2>Withdrawal requests</h2>
 {% if withdrawals %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Requested</th><th>20% fee</th><th>Payout</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Requested</th><th>10% fee</th><th>Payout</th><th>Status</th><th>Action</th></tr>
 {% for w in withdrawals %}
 <tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['amount']) }}</td><td>{{ money(w['fee_amount']) }}</td><td>{{ money(w['payout_amount']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td>
