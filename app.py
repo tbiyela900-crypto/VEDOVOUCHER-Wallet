@@ -81,6 +81,7 @@ import sqlite3
 import string
 import time
 from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 from decimal import Decimal, ROUND_HALF_UP
 from functools import wraps
 
@@ -234,13 +235,14 @@ UPGRADE_COST_CENTS = {
 TOPUP_MIN_CENTS = 1000          # R10
 TOPUP_MAX_CENTS = 5000000       # R50,000
 TOPUP_PANEL_SECONDS = 600       # the Top-up details tab stays open 10 minutes
-WITHDRAW_MIN_CENTS = 1000       # R10
+WITHDRAW_MIN_CENTS = 10000      # R100; withdrawals must be in R100 increments
+WITHDRAWAL_FEE_PERCENT = 20    # 20% transparent withdrawal fee
 ADMIN_ADD_MAX_CENTS = 100000000  # R1,000,000 per admin balance addition
 
 DEFAULT_TOPUP_INSTRUCTIONS = (
     "Enter the amount and the reason for the top-up, then tap the level you "
-    "want. A tab with the top up details will open for 10 minutes. An admin "
-    "will review your request and approve or reject it."
+    "want. A tab with the top up details will open for 10 minutes. "
+    "Your request will be reviewed and approve or reject it."
 )
 
 # --- Savings pots ----------------------------------------------------------
@@ -429,6 +431,8 @@ CREATE TABLE IF NOT EXISTS withdrawals (
     id INTEGER PRIMARY KEY AUTOINCREMENT,
     user_id INTEGER NOT NULL REFERENCES users(id),
     amount INTEGER NOT NULL,
+    fee_amount INTEGER NOT NULL DEFAULT 0,
+    payout_amount INTEGER NOT NULL DEFAULT 0,
     bank_name TEXT NOT NULL DEFAULT 'DEMO',
     account_number TEXT NOT NULL DEFAULT 'N/A',
     account_holder TEXT NOT NULL DEFAULT 'N/A',
@@ -896,6 +900,10 @@ def init_db():
     # Same safe upgrade for the other tables.
     extra_columns = {
         "topups": {"level": "INTEGER NOT NULL DEFAULT 0"},
+        "withdrawals": {
+            "fee_amount": "INTEGER NOT NULL DEFAULT 0",
+            "payout_amount": "INTEGER NOT NULL DEFAULT 0",
+        },
         "vouchers": {"issued_to": "INTEGER"},
         "otps": {"code_plain": "TEXT NOT NULL DEFAULT ''"},
         # Older deployed databases may already have this table without the
@@ -919,6 +927,10 @@ def init_db():
                 db.execute(
                     f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
 
+    # Preserve the original full payout for historical requests created before
+    # the fee was introduced. New requests store their fee and net payout.
+    db.execute("UPDATE withdrawals SET payout_amount=amount "
+               "WHERE payout_amount=0 AND fee_amount=0")
     db.commit()
 
     admin_user = os.environ.get("ADMIN_USER", "admin")
@@ -1904,6 +1916,45 @@ def topup():
 # WITHDRAWALS
 # ============================================================================
 
+VEDO_LOCAL_TZ = ZoneInfo("Africa/Johannesburg")
+WITHDRAWAL_ALLOWED_WEEKDAYS = {2, 4}  # Wednesday and Friday
+
+
+def withdrawal_eligibility(db, user_id):
+    """Return latest approved top-up time and the next eligible local time.
+
+    The seven-day timer restarts from the most recent approved top-up.
+    Withdrawal requests are accepted only on Wednesdays and Fridays (South
+    African local time).
+    """
+    row = db.execute(
+        "SELECT decided_at FROM topups WHERE user_id=? AND status='APPROVED' "
+        "AND decided_at IS NOT NULL ORDER BY decided_at DESC, id DESC LIMIT 1",
+        (user_id,)).fetchone()
+    now_local = datetime.now(VEDO_LOCAL_TZ)
+    if not row:
+        return None, None, "No approved top-up has been recorded yet."
+
+    approved_at = _parse_ts(row["decided_at"]).astimezone(VEDO_LOCAL_TZ)
+    eligible_at = approved_at + timedelta(days=7)
+    start = max(now_local, eligible_at)
+    # Find the first Wednesday/Friday at or after both the seven-day point and now.
+    candidate_date = start.date()
+    for offset in range(8):
+        day = candidate_date + timedelta(days=offset)
+        if day.weekday() in WITHDRAWAL_ALLOWED_WEEKDAYS:
+            candidate = datetime.combine(day, start.timetz().replace(tzinfo=None),
+                                         tzinfo=VEDO_LOCAL_TZ)
+            if candidate < eligible_at:
+                candidate = eligible_at
+            if candidate.date().weekday() not in WITHDRAWAL_ALLOWED_WEEKDAYS:
+                continue
+            if candidate >= now_local:
+                return approved_at, eligible_at, candidate.strftime("%A, %d %B %Y at %H:%M")
+    # Defensive fallback; the loop should always find a Wednesday or Friday.
+    return approved_at, eligible_at, (now_local + timedelta(days=7)).strftime("%A, %d %B %Y")
+
+
 @app.route("/withdraw", methods=["GET", "POST"])
 @login_required
 def withdraw():
@@ -1932,6 +1983,19 @@ def withdraw():
             flash("Withdrawal bank details saved.", "ok")
             return redirect(url_for("withdraw"))
 
+        approved_at, eligible_at, next_withdrawal = withdrawal_eligibility(db, user["id"])
+        now_local = datetime.now(VEDO_LOCAL_TZ)
+        if not approved_at:
+            flash("Withdrawals unlock 7 days after an pproved top-up. No approved top-up was found for your account.", "error")
+            return redirect(url_for("withdraw"))
+        if now_local < eligible_at:
+            unlock = eligible_at.strftime("%A, %d %B %Y at %H:%M")
+            flash(f"Your 7-day withdrawal waiting period ends on {unlock}. You can request a withdrawal on a Wednesday or Friday after that time.", "error")
+            return redirect(url_for("withdraw"))
+        if now_local.weekday() not in WITHDRAWAL_ALLOWED_WEEKDAYS:
+            flash(f"Withdrawal requests are accepted only on Wednesdays and Fridays. Next available time: {next_withdrawal}.", "error")
+            return redirect(url_for("withdraw"))
+
         details = db.execute("SELECT * FROM withdrawal_details WHERE user_id=?",
                              (user["id"],)).fetchone()
         if not details:
@@ -1941,25 +2005,44 @@ def withdraw():
         if cents is None:
             flash(f"Enter a valid amount (minimum {money(WITHDRAW_MIN_CENTS)}).", "error")
             return redirect(url_for("withdraw"))
-        if not debit(db, user["id"], cents, "WITHDRAW", "Withdrawal request (pending)"):
+        if cents % 10000 != 0:
+            flash("Withdrawal amounts must be in R100 increments, for example R100, R200, R300 or R400. Amounts such as R345, R350 and R389 are not allowed.", "error")
+            return redirect(url_for("withdraw"))
+        fee_cents = (cents * WITHDRAWAL_FEE_PERCENT) // 100
+        payout_cents = cents - fee_cents
+        if not debit(db, user["id"], cents, "WITHDRAW", "Withdrawal request (pending; includes 20% fee)"):
             db.rollback()
             flash("Insufficient play balance.", "error")
             return redirect(url_for("withdraw"))
         db.execute(
-            "INSERT INTO withdrawals (user_id, amount, bank_name, account_number, account_holder, status, created_at) "
-            "VALUES (?,?,?,?,?, 'PENDING', ?)",
-            (user["id"], cents, details["bank_name"], details["account_number"],
+            "INSERT INTO withdrawals (user_id, amount, fee_amount, payout_amount, bank_name, account_number, account_holder, status, created_at) "
+            "VALUES (?,?,?,?,?,?,?, 'PENDING', ?)",
+            (user["id"], cents, fee_cents, payout_cents, details["bank_name"], details["account_number"],
              details["account_holder"], now_iso()))
         db.commit()
-        flash(f"Withdrawal request for {money(cents)} created. It will be reviewed.", "ok")
+        flash(f"Withdrawal request created: {money(cents)} requested, {money(fee_cents)} fee (20%), payout {money(payout_cents)}. It will be reviewed.", "ok")
         return redirect(url_for("withdraw"))
     withdrawals = db.execute(
         "SELECT * FROM withdrawals WHERE user_id=? ORDER BY id DESC",
         (user["id"],)).fetchall()
     details = db.execute("SELECT * FROM withdrawal_details WHERE user_id=?",
                          (user["id"],)).fetchone()
+    approved_at, eligible_at, next_withdrawal = withdrawal_eligibility(db, user["id"])
+    now_local = datetime.now(VEDO_LOCAL_TZ)
+    if not approved_at:
+        withdrawal_status = "A withdrawal becomes eligible 7 days after an approved top-up. No approved top-up has been recorded yet."
+    elif now_local < eligible_at:
+        withdrawal_status = ("Your 7-day waiting period ends on "
+                             + eligible_at.strftime("%A, %d %B %Y at %H:%M")
+                             + ". Withdrawal requests are accepted on Wednesdays and Fridays only.")
+    elif now_local.weekday() not in WITHDRAWAL_ALLOWED_WEEKDAYS:
+        withdrawal_status = "You are past the 7-day waiting period. The next withdrawal window is " + str(next_withdrawal) + "."
+    else:
+        withdrawal_status = "You are eligible to submit a withdrawal request today. Requests are accepted on Wednesdays and Fridays only."
     return page(WITHDRAW_BODY, user=user, withdrawals=withdrawals,
-                withdrawal_details=details, WITHDRAW_MIN_CENTS=WITHDRAW_MIN_CENTS)
+                withdrawal_details=details, WITHDRAW_MIN_CENTS=WITHDRAW_MIN_CENTS,
+                WITHDRAWAL_FEE_PERCENT=WITHDRAWAL_FEE_PERCENT,
+                withdrawal_status=withdrawal_status)
 
 
 # TEAM VIEW
@@ -2753,47 +2836,6 @@ def admin_topup(topup_id, action):
     return redirect(url_for("admin"))
 
 
-@app.route("/admin/withdrawal/<int:withdrawal_id>")
-@admin_required
-def admin_withdrawal_details(withdrawal_id):
-    db = get_db()
-    record = db.execute(
-        "SELECT w.*, u.username, u.phone, u.serial_number, u.level "
-        "FROM withdrawals w JOIN users u ON u.id=w.user_id WHERE w.id=?",
-        (withdrawal_id,)).fetchone()
-    if record is None:
-        abort(404)
-    return page("""
-<div class="card">
-<h1>Withdrawal information</h1>
-<p class="muted">Review the member and bank details before processing this request.</p>
-<dl class="kv">
-<div><dt>Withdrawal request ID</dt><dd>#{{ record['id'] }}</dd></div>
-<div><dt>Member username / cellphone</dt><dd>{{ record['username'] }}</dd></div>
-<div><dt>User ID</dt><dd>{{ record['user_id'] }}</dd></div>
-<div><dt>Registered cellphone</dt><dd>{{ record['phone'] or record['username'] }}</dd></div>
-<div><dt>Member level</dt><dd>Level {{ record['level'] }}</dd></div>
-<div><dt>Withdrawal amount</dt><dd><strong>{{ money(record['amount']) }}</strong></dd></div>
-<div><dt>Bank name</dt><dd>{{ record['bank_name'] or '-' }}</dd></div>
-<div><dt>Account holder</dt><dd>{{ record['account_holder'] or '-' }}</dd></div>
-<div><dt>Account number</dt><dd>{{ record['account_number'] or '-' }}</dd></div>
-<div><dt>Requested at</dt><dd>{{ record['created_at'] }}</dd></div>
-<div><dt>Status</dt><dd>{{ record['status'] }}</dd></div>
-<div><dt>Registered bank account number</dt><dd>{{ record['serial_number'] or '-' }}</dd></div>
-</dl>
-{% if record['status'] == 'PENDING' %}
-<div style="display:flex;gap:8px;flex-wrap:wrap;margin-top:18px">
-<form method="post" action="{{ url_for('admin_withdrawal', withdrawal_id=record['id'], action='complete') }}">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="success">Approve withdrawal</button></form>
-<form method="post" action="{{ url_for('admin_withdrawal', withdrawal_id=record['id'], action='reject') }}" onsubmit="return confirm('Reject this withdrawal request?');">
-<input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><button class="danger">Reject withdrawal</button></form>
-</div>
-{% endif %}
-<p style="margin-top:18px"><a href="{{ url_for('admin') }}">← Back to admin</a></p>
-</div>
-""", record=record)
-
-
 @app.route("/admin/withdrawal/<int:withdrawal_id>/<action>", methods=["POST"])
 @admin_required
 def admin_withdrawal(withdrawal_id, action):
@@ -2820,7 +2862,10 @@ def admin_withdrawal(withdrawal_id, action):
         credit(db, w["user_id"], w["amount"], "WITHDRAW_REFUND",
                f"Withdrawal #{withdrawal_id} rejected - refunded")
     db.commit()
-    flash(f"Withdrawal #{withdrawal_id} {new_status.lower()}.", "ok")
+    if action == "complete":
+        flash(f"Withdrawal #{withdrawal_id} approved. Recorded payout amount: {money(w['payout_amount'])} (after 20% fee). This app records status only; it does not transfer real money.", "ok")
+    else:
+        flash(f"Withdrawal #{withdrawal_id} rejected. The full requested amount {money(w['amount'])} was refunded.", "ok")
     return redirect(url_for("admin"))
 
 
@@ -3870,12 +3915,12 @@ tr.hl td{background:rgba(31,214,164,.08);}
 /* ---------- dashboard ---------- */
 .dash{display:grid;grid-template-columns:1fr 1.15fr;gap:16px;margin-bottom:16px;}
 .dash .card{margin-bottom:0;}
-.hero{border-radius:22px;padding:14px 18px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
+.hero{border-radius:26px;padding:24px;color:#eafff8;border:1px solid rgba(31,214,164,.35);
   background:
     radial-gradient(500px 220px at 100% 0%,rgba(31,214,164,.35),transparent 65%),
     linear-gradient(135deg,#0f766e 0%,#0b3d49 55%,#08242f 100%);}
 .hero-top{display:flex;justify-content:space-between;align-items:flex-start;gap:12px;}
-.hello{margin:0 0 6px;font-weight:600;opacity:.9;}
+.hello{margin:0 0 18px;font-weight:600;opacity:.9;}
 .lbl{margin:0 0 2px;font-size:.84rem;opacity:.75;}
 .balance{font-size:2.7rem;font-weight:800;letter-spacing:-1px;line-height:1.1;}
 .quick-links-label{align-self:flex-start;flex:none;padding:6px 9px;border:1px solid rgba(255,255,255,.22);border-radius:12px;background:rgba(3,12,18,.28);color:#d8fff5;font-size:.68rem;font-weight:900;letter-spacing:.12em;white-space:nowrap;}
@@ -4384,7 +4429,7 @@ label.chk input{width:auto;margin:0;}
 <a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
-<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Balance</span><strong>{{ money(me['points']) }}</strong></span>
+<span class="nav-points" title="Your available Vedo points balance"><span class="nav-points-label">Points</span><strong>{{ money(me['points']) }}</strong></span>
 <form method="post" action="{{ url_for('logout') }}">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <button>Log out<span class="uname"> ({{ me['username'] }})</span></button>
@@ -4620,6 +4665,24 @@ REWARDS_GUIDE_BODY = """
   {% for lv, amt in level_daily %}<tr><th data-label="Level"><span class="level-chip level-{{ lv }}">Level {{ lv }}</span></th><td data-label="First-day reward">{{ 'R{:,.0f}'.format(amt / 100) }}</td><td data-label="7-day total">{{ 'R{:,.0f}'.format(amt * 7 / 100) }}</td><td data-label="30-day total">{{ 'R{:,.0f}'.format(amt * 30 / 100) }}</td><td data-label="1-year total (365 days)">{{ 'R{:,.0f}'.format(amt * 365 / 100) }}</td></tr>{% endfor %}
   </tbody></table></div><p class="level-footnote">Estimates only, assuming the displayed example amount is earned every day. Actual rewards may vary and depend on active program rules, eligibility and completed activities.</p></div>
   <div class="level-benefit-footer"><div><span>▣</span><b>EARN MORE</b><small>Stay active and complete tasks</small></div><div><span>♟</span><b>GROW TOGETHER</b><small>Invite others and build your team</small></div><div><span>↗</span><b>BIGGER REWARDS</b><small>Check campaign rules and eligibility</small></div></div>
+</section>
+
+<section class="withdrawal-rewards-3d" aria-label="Withdrawal information">
+  <div class="withdrawal-rewards-header">
+    <div><p class="benefits-kicker">VEDO MARKET · WITHDRAWAL GUIDE</p><h2>Know your <span>payout</span></h2><p>Check the waiting period, withdrawal days and fee before requesting a payout.</p></div>
+    <div class="withdrawal-icon-3d" aria-hidden="true">R</div>
+  </div>
+  <div class="withdrawal-rules-grid">
+    <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">7</span><h3>7-day waiting period</h3><p>Your 7-day waiting period starts when an admin approves your top-up. You must finish the waiting period before requesting a withdrawal.</p></article>
+    <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">W/F</span><h3>Wednesday &amp; Friday</h3><p>Withdrawal requests can be submitted on Wednesdays and Fridays only. If you become eligible on another day, wait for the next available withdrawal day.</p></article>
+    <article class="withdrawal-rule-card"><span class="withdrawal-rule-icon" aria-hidden="true">20%</span><h3>20% withdrawal fee</h3><p>A fee equal to 20% of your requested amount is deducted. The remaining 80% is the payout amount before any separate bank charges, if applicable.</p></article>
+  </div>
+  <div class="withdrawal-example-panel">
+    <div><p class="benefits-kicker">PAYOUT EXAMPLES</p><h3>See what you receive</h3><p>Requests must be in R100 increments. Other amounts, such as R345 or R350, are not accepted.</p></div>
+    <div class="withdrawal-example-table-wrap"><table class="withdrawal-example-table"><thead><tr><th>Requested</th><th>20% fee</th><th>You receive</th></tr></thead><tbody><tr><td>R100</td><td>R20</td><td>R80</td></tr><tr><td>R200</td><td>R40</td><td>R160</td></tr><tr><td>R300</td><td>R60</td><td>R240</td></tr><tr><td>R400</td><td>R80</td><td>R320</td></tr><tr><td>R500</td><td>R100</td><td>R400</td></tr><tr><td>R1,000</td><td>R200</td><td>R800</td></tr></tbody></table></div>
+  </div>
+  <div class="withdrawal-note-3d"><strong>Before you request:</strong> Save correct bank details, check your available balance, and review the fee and net payout shown on the Withdraw page. Requests are reviewed by the admin. This page explains the rules; it does not submit a withdrawal request.</div>
+  <a class="withdrawal-cta-3d" href="{{ url_for('withdraw') }}">Go to Withdraw <span aria-hidden="true">→</span></a>
 </section>
 </div>
 <style>
@@ -4874,6 +4937,32 @@ REWARDS_GUIDE_BODY = """
     border-radius: 4px 4px 0 0;
   }
 }
+
+/* Withdrawal guide uses the same blue, raised-card rewards visual language. */
+.withdrawal-rewards-3d{margin:22px 0 12px;padding:clamp(14px,2.5vw,28px);border:1px solid #c7ddfa;border-radius:24px;background:linear-gradient(145deg,#f8fbff,#eaf3ff);box-shadow:0 8px 0 #d9e8fa;color:#142746;overflow:hidden}
+.withdrawal-rewards-header{display:flex;align-items:center;justify-content:space-between;gap:16px;margin-bottom:18px}
+.withdrawal-rewards-header h2{margin:4px 0 8px;font-size:clamp(1.45rem,3vw,2.2rem);line-height:1.1;color:#142746}
+.withdrawal-rewards-header h2 span{color:#176de4}
+.withdrawal-rewards-header p:last-child{margin:0;color:#4b6284;line-height:1.5}
+.withdrawal-icon-3d{display:grid;place-items:center;flex:0 0 auto;width:68px;height:68px;border-radius:20px;background:linear-gradient(145deg,#54dfff,#1472ec 65%,#123cba);box-shadow:0 6px 0 #0d49a9;color:#fff;font-size:2rem;font-weight:950;text-shadow:0 2px 0 #17499b}
+.withdrawal-rules-grid{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:14px}
+.withdrawal-rule-card{min-width:0;padding:18px;border:1px solid #d0e2fa;border-radius:18px;background:#fff;box-shadow:0 5px 0 #dceaff}
+.withdrawal-rule-icon{display:grid;place-items:center;width:44px;height:44px;margin-bottom:12px;border-radius:13px;background:linear-gradient(145deg,#5de4ff,#1472ec 68%,#143eb7);box-shadow:0 4px 0 #0e4ca9;color:#fff;font-weight:950;font-size:.9rem}
+.withdrawal-rule-card h3{margin:0 0 8px;font-size:1.02rem;color:#15386e}
+.withdrawal-rule-card p{margin:0;color:#4b6284;font-size:.9rem;line-height:1.55}
+.withdrawal-example-panel{display:grid;grid-template-columns:minmax(0,.85fr) minmax(0,1.15fr);gap:18px;align-items:start;margin-top:22px;padding:18px;border-radius:18px;background:#fff;border:1px solid #d0e2fa}
+.withdrawal-example-panel h3{margin:4px 0 8px;font-size:1.2rem;color:#15386e}
+.withdrawal-example-panel p:not(.benefits-kicker){margin:0;color:#4b6284;font-size:.9rem;line-height:1.55}
+.withdrawal-example-table-wrap{width:100%;overflow:hidden;border:1px solid #d8e6f8;border-radius:13px}
+.withdrawal-example-table{width:100%;border-collapse:collapse;color:#142746;font-variant-numeric:tabular-nums}
+.withdrawal-example-table th{padding:10px 8px;background:linear-gradient(#176de4,#073d9f);color:#fff;text-align:center;font-size:.78rem;text-transform:uppercase}
+.withdrawal-example-table td{padding:9px 8px;text-align:center;border-bottom:1px solid #d8e6f8;font-weight:800}
+.withdrawal-example-table tbody tr:last-child td{border-bottom:0}
+.withdrawal-example-table td:last-child{color:#087446}
+.withdrawal-note-3d{margin-top:16px;padding:13px 15px;border-left:4px solid #1976e8;border-radius:10px;background:#e2efff;color:#28496f;font-size:.88rem;line-height:1.55}
+.withdrawal-cta-3d{display:flex;align-items:center;justify-content:center;gap:10px;width:fit-content;max-width:100%;margin:17px auto 0;padding:12px 22px;border-radius:999px;background:linear-gradient(#2188ff,#0754c8);box-shadow:0 4px 0 #0b3f9b;color:#fff;text-decoration:none;font-weight:900}
+.withdrawal-cta-3d span{font-size:1.2rem}
+@media(max-width:700px){.withdrawal-rewards-3d{padding:14px;border-radius:18px}.withdrawal-rewards-header{align-items:flex-start}.withdrawal-icon-3d{width:52px;height:52px;border-radius:15px;font-size:1.6rem}.withdrawal-rules-grid{grid-template-columns:minmax(0,1fr);gap:11px}.withdrawal-rule-card{padding:14px}.withdrawal-rule-card p{font-size:.86rem}.withdrawal-example-panel{grid-template-columns:minmax(0,1fr);gap:13px;padding:13px}.withdrawal-example-table th{font-size:.7rem;padding:9px 4px}.withdrawal-example-table td{padding:8px 4px;font-size:.9rem}.withdrawal-cta-3d{width:100%;box-sizing:border-box}}
 </style>
 """
 
@@ -5330,25 +5419,48 @@ WITHDRAW_BODY = """
 
 <div class="card note">
 <h1>Request a withdrawal</h1>
-<p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed ; rejected requests are refunded.</p>
+<p class="muted">Choose an amount. Your saved bank details will be attached to this request. Requests are reviewed by the admin; rejected requests are refunded.</p>
 <p class="muted">Processing time: up to 24 hours.</p>
+<p class="muted"><strong>Withdrawal eligibility:</strong> {{ withdrawal_status }}</p><p class="muted">Rules: 7 days after the most recent admin-approved top-up; requests accepted Wednesdays and Fridays only.</p>
+<p class="muted"><strong>Withdrawal fee:</strong> {{ WITHDRAWAL_FEE_PERCENT }}% of the requested amount. The fee and the amount you will receive are shown before you submit.</p>
 <h2>Available balance: {{ money(user['points']) }}</h2>
 <form method="post">
 <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
 <input type="hidden" name="action" value="request_withdrawal">
 <label for="withdraw_amount">Amount (R) - minimum {{ money(WITHDRAW_MIN_CENTS) }}</label>
-<input id="withdraw_amount" name="amount" type="number" step="0.01" min="10" placeholder="e.g. 200.00" required>
+<p class="muted">Choose R100, R200, R300, R400, and so on. Other amounts are not accepted.</p>
+<input id="withdraw_amount" name="amount" type="number" step="100" min="100" placeholder="e.g. 200" required>
+<p class="muted" id="withdrawal_fee_preview" aria-live="polite">Enter an amount to see the 20% fee and payout.</p>
 <button class="primary">Request withdrawal</button>
 </form>
+<script>
+(function(){
+  const amount = document.getElementById('withdraw_amount');
+  const preview = document.getElementById('withdrawal_fee_preview');
+  if (!amount || !preview) return;
+  function update(){
+    const value = Number(amount.value);
+    if (!Number.isFinite(value) || value < 100 || Math.round(value) % 100 !== 0){
+      preview.textContent = 'Withdrawal amounts must be R100, R200, R300, R400, and so on.';
+      return;
+    }
+    const fee = value * 0.20;
+    preview.textContent = 'Requested: R' + value.toFixed(2) + ' | 20% fee: R' + fee.toFixed(2) + ' | You receive: R' + (value-fee).toFixed(2);
+  }
+  amount.addEventListener('input', update);
+  update();
+})();
+</script>
 </div>
 
 <div class="card">
 <h2>Withdrawal history</h2>
 {% if withdrawals %}
 <table>
-<tr><th>Date</th><th>Amount</th><th>Bank</th><th>Account holder</th><th>Status</th></tr>
+<tr><th>Date</th><th>Requested</th><th>20% fee</th><th>Payout</th><th>Bank</th><th>Account holder</th><th>Status</th></tr>
 {% for w in withdrawals %}
 <tr><td>{{ w['created_at'][:16] }}</td><td>{{ money(w['amount']) }}</td>
+<td>{{ money(w['fee_amount']) }}</td><td>{{ money(w['payout_amount']) }}</td>
 <td>{{ w['bank_name'] }}</td><td>{{ w['account_holder'] }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td></tr>
 {% endfor %}
@@ -5779,9 +5891,9 @@ onsubmit="return confirm('Remove this member instruction?');">
 <h2>Withdrawal requests</h2>
 {% if withdrawals %}
 <table>
-<tr><th>#</th><th>Date</th><th>User</th><th>Amount</th><th>Status</th><th>Action</th></tr>
+<tr><th>#</th><th>Date</th><th>User</th><th>Requested</th><th>20% fee</th><th>Payout</th><th>Status</th><th>Action</th></tr>
 {% for w in withdrawals %}
-<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td><a href="{{ url_for('admin_withdrawal_details', withdrawal_id=w['id']) }}" title="View withdrawal and bank details">{{ w['username'] }} (ID {{ w['user_id'] }})</a></td><td>{{ money(w['amount']) }}</td>
+<tr><td>{{ w['id'] }}</td><td>{{ w['created_at'][:16] }}</td><td>{{ w['username'] }}</td><td>{{ money(w['amount']) }}</td><td>{{ money(w['fee_amount']) }}</td><td>{{ money(w['payout_amount']) }}</td>
 <td><span class="badge {{ 'ok' if w['status']=='COMPLETED' else 'err' if w['status']=='REJECTED' else 'wait' }}">{{ w['status'] }}</span></td>
 <td>
 {% if w['status'] == 'PENDING' %}
