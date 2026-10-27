@@ -4681,7 +4681,7 @@ REWARDS_GUIDE_BODY = """
     <div><p class="benefits-kicker">PAYOUT EXAMPLES</p><h3>See what you receive</h3><p>Requests must be in R100 increments. Other amounts, such as R345 or R350, are not accepted.</p></div>
     <div class="withdrawal-example-table-wrap"><table class="withdrawal-example-table"><thead><tr><th>Requested</th><th>20% fee</th><th>You receive</th></tr></thead><tbody><tr><td>R100</td><td>R20</td><td>R80</td></tr><tr><td>R200</td><td>R40</td><td>R160</td></tr><tr><td>R300</td><td>R60</td><td>R240</td></tr><tr><td>R400</td><td>R80</td><td>R320</td></tr><tr><td>R500</td><td>R100</td><td>R400</td></tr><tr><td>R1,000</td><td>R200</td><td>R800</td></tr></tbody></table></div>
   </div>
-  <div class="withdrawal-note-3d"><strong>Before you request:</strong> Save correct bank details, check your available balance, and review the fee and net payout shown on the Withdraw page. Requests are reviewed by the admin. This page explains the rules; it does not submit a withdrawal request.</div>
+  <div class="withdrawal-note-3d"><strong>Before you request:</strong> Save correct bank details, check your available balance, and review the fee and net payout shown on the Withdraw page. Requests are reviewed. This page explains the rules; it does not submit a withdrawal request.</div>
   <a class="withdrawal-cta-3d" href="{{ url_for('withdraw') }}">Go to Withdraw <span aria-hidden="true">→</span></a>
 </section>
 </div>
