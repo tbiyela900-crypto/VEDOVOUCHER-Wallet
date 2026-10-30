@@ -5240,7 +5240,7 @@ DASH_BODY = """
 CHECKIN_BODY = """
 <div class="card note">
 <h1>Daily check-in</h1>
-{% if not checkins_open %}<div class="flash error">Daily check-ins are currently closed by the admin. You can view this page, but tasks cannot be started or completed.</div>{% endif %}
+{% if not checkins_open %}<div class="flash error">Daily check-ins are currently closed. You can view this page, but tasks cannot be started or completed.</div>{% endif %}
 <p class="muted"><a href="{{ url_for('dashboard') }}">&larr; Back to dashboard</a></p>
 {% if user['level'] == 0 %}
 <p>You are at <strong>Level 0</strong>. Top up and move up to Level 1 to start earning check-in rewards.</p>
