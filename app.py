@@ -782,6 +782,12 @@ def set_setting(db, key, value):
         (key, value))
 
 
+def checkins_are_open(db=None):
+    """Global admin-controlled switch for daily check-ins; open by default."""
+    db = db or get_db()
+    return get_setting(db, "checkins_open", "1") == "1"
+
+
 def add_tx(db, user_id, kind, amount_cents, note=""):
     """Write a ledger line (positive = credit, negative = debit)."""
     db.execute(
@@ -1602,6 +1608,7 @@ def checkin():
     """Check-in page: reward by level; tapping your own level opens the tasks."""
     db = get_db()
     user = current_user()
+    checkins_open = checkins_are_open(db)
 
     done, _streak = checkin_state(user)
     day = today().isoformat()
@@ -1624,11 +1631,13 @@ def checkin():
                 tasks=tasks, completed_n=len(paid),
                 earned=sum(paid.values()),
                 daily=daily_reward_cents(user["level"]),
-                wait=TASK_WAIT_SECONDS)
+                wait=TASK_WAIT_SECONDS, checkins_open=checkins_open)
 
 
 def _task_guard(user, n):
     """Return an error message if this task cannot be used, else None."""
+    if not checkins_are_open():
+        return "Daily check-ins are currently closed by the admin. Please check back later."
     if user["level"] == 0:
         return "Top up and move to Level 1 to start earning."
     done, _streak = checkin_state(user)
@@ -1644,6 +1653,9 @@ def _task_guard(user, n):
 def checkin_tasks():
     db = get_db()
     user = current_user()
+    if not checkins_are_open(db):
+        flash("Daily check-ins are currently closed by the admin. Please check back later.", "error")
+        return redirect(url_for("checkin"))
     if int(user["level"]) < 1:
         flash("Top up and move up to Level 1 to start earning check-in rewards.", "error")
         return redirect(url_for("checkin"))
@@ -2423,6 +2435,22 @@ def admin_user_profile(user_id):
 # ADMIN
 # ============================================================================
 
+@app.route("/admin/checkins", methods=["POST"])
+@admin_required
+def admin_checkins_toggle():
+    """Open or close daily check-ins for all members."""
+    action = request.form.get("action", "")
+    if action not in ("open", "close"):
+        abort(400)
+    db = get_db()
+    is_open = action == "open"
+    set_setting(db, "checkins_open", "1" if is_open else "0")
+    db.commit()
+    flash("Daily check-ins are now OPEN for members." if is_open
+          else "Daily check-ins are now CLOSED for members.", "ok")
+    return redirect(url_for("admin"))
+
+
 @app.route("/admin", methods=["GET", "POST"])
 @admin_required
 def admin():
@@ -2615,6 +2643,7 @@ def admin():
                 hidden_users=hidden_users, table_q=table_q, table_user_q=table_user_q,
                 activity_tables=activity_tables,
                 gd=global_details, specific_details=specific_details,
+                checkins_open=checkins_are_open(db),
                 instructions=get_setting(db, "topup_instructions",
                                          DEFAULT_TOPUP_INSTRUCTIONS))
 
@@ -5211,6 +5240,7 @@ DASH_BODY = """
 CHECKIN_BODY = """
 <div class="card note">
 <h1>Daily check-in</h1>
+{% if not checkins_open %}<div class="flash error">Daily check-ins are currently closed by the admin. You can view this page, but tasks cannot be started or completed.</div>{% endif %}
 <p class="muted"><a href="{{ url_for('dashboard') }}">&larr; Back to dashboard</a></p>
 {% if user['level'] == 0 %}
 <p>You are at <strong>Level 0</strong>. Top up and move up to Level 1 to start earning check-in rewards.</p>
@@ -5221,7 +5251,7 @@ CHECKIN_BODY = """
 <h2>Reward by level</h2>
 <div class="tiles">
 {% for l in LEVELS %}
-<button type="button" class="tile t{{ l }}{{ ' me' if l == user['level'] }}{{ ' pulse' if l == user['level'] and not done }}" data-level="{{ l }}">
+<button type="button" class="tile t{{ l }}{{ ' me' if l == user['level'] }}{{ ' pulse' if l == user['level'] and not done }}" data-level="{{ l }}" {{ 'disabled' if not checkins_open }}>
 <b>Level {{ l }}{% if l == user['level'] %} - your level{% endif %}</b><strong>{{ level_reward(l) }}</strong><span>{{ daily_reward(l) }} per day</span>
 </button>
 {% endfor %}
@@ -5838,6 +5868,20 @@ PROFILE_BODY = """
 """
 
 ADMIN_BODY = """
+<div class="card">
+<h2>Daily check-in control</h2>
+<p class="muted">Control whether members can access daily check-in tasks and earn their check-in rewards.</p>
+<p><strong>Status:</strong> <span class="{{ 'pos' if checkins_open else 'neg' }}">{{ 'OPEN — members can check in' if checkins_open else 'CLOSED — member check-ins are disabled' }}</span></p>
+<form method="post" action="{{ url_for('admin_checkins_toggle') }}" style="display:flex;gap:10px;flex-wrap:wrap">
+<input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
+{% if checkins_open %}
+<button class="danger" name="action" value="close" onclick="return confirm('Close daily check-ins for all members?');">Close check-ins</button>
+{% else %}
+<button class="primary" name="action" value="open">Open check-ins</button>
+{% endif %}
+</form>
+</div>
+
 <div class="card">
 <h2>Quick search: member number / ID or table name</h2>
 <p class="muted">Use the main Search box below for a cellphone/login number, user ID, bank number, or table name. Search only; no database rows can be deleted here.</p>
