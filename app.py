@@ -3993,17 +3993,24 @@ BASE = """
 <head>
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
-<meta name="theme-color" content="#050c13">
+<meta name="theme-color" content="#f5f7fb">
 <title>Vedo Invest</title>
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@400;500;600;700;800&display=swap" rel="stylesheet">
 <style>
-:root{
-  --bg:#050c13; --s1:#0b1721; --s2:#10212d; --s3:#152c3b; --line:#1a3140;
-  --ink:#e6f0f4; --muted:#7d95a3; --brand:#1fd6a4; --brand-d:#0f766e;
-  --blue:#2b7fff; --up:#27d69b; --down:#ff5c6c; --amber:#f2b84b; --violet:#8b7cf6;
-  --r:20px;
+ :root{
+  color-scheme:light;
+  --bg:#f5f7fb; --s1:#ffffff; --s2:#f1f5f9; --s3:#e7edf4; --line:#e2e8f0;
+  --ink:#172334; --muted:#64748b; --brand:#0f9f83; --brand-d:#087c69;
+  --blue:#2563eb; --up:#07865f; --down:#dc4254; --amber:#b7791f; --violet:#7057d9;
+  --r:18px;
+}
+:root[data-theme="dark"]{
+  color-scheme:dark;
+  --bg:#08111d; --s1:#101d2b; --s2:#17283a; --s3:#20364b; --line:#294057;
+  --ink:#edf4fb; --muted:#9aadc0; --brand:#36d6b0; --brand-d:#159b82;
+  --blue:#5795ff; --up:#35d6a0; --down:#ff6878; --amber:#f2bd59; --violet:#a394ff;
 }
 *{box-sizing:border-box;}
 html{-webkit-text-size-adjust:100%;}
@@ -4596,6 +4603,34 @@ label.chk input{width:auto;margin:0;}
 @media(max-width:600px){.benefits-heading{align-items:flex-start;gap:12px}.vedo-mark-3d{width:52px;height:52px;border-radius:15px;font-size:2rem}.benefits-grid{grid-template-columns:1fr}.team-panel{grid-column:auto}.benefit-3d{padding:18px}.calendar-3d{max-width:340px;margin-left:auto;margin-right:auto}.team-reward-list{grid-template-columns:1fr 1fr}.level-rewards-header{align-items:flex-start}.level-badge-3d{width:52px;height:52px;font-size:1.9rem}.level-chart-3d{padding:12px}.chart-area{grid-template-columns:36px 1fr;gap:5px;min-height:205px}.chart-bars{gap:4px;padding-left:1px;padding-right:5px}.chart-col{min-height:190px;gap:5px}.chart-col>strong{font-size:.49rem;letter-spacing:-.03em}.chart-col>span{font-size:.5rem}.chart-col>small{font-size:.45rem;letter-spacing:-.04em}.bar-3d{width:min(90%,32px)}.chart-ylabels{font-size:.49rem}.chart-title small{width:100%;margin-left:50px}.level-table-wrap{margin-top:22px}.level-rewards-table{min-width:0;width:100%;table-layout:fixed}.level-rewards-table th,.level-rewards-table td{white-space:normal!important;overflow-wrap:anywhere}.level-benefit-footer{grid-template-columns:1fr}.level-benefit-footer>div{border-right:0;border-bottom:1px solid #dce9f9;padding:8px}.level-benefit-footer>div:last-child{border-bottom:0}.benefits-disclaimer{font-size:.68rem}}
 @media(prefers-reduced-motion:reduce){.benefit-3d,.bar-3d,.vedo-mark-3d{transform:none}}
 
+/* Vedo professional theme system */
+body{background:var(--bg);color:var(--ink);transition:background .2s ease,color .2s ease}
+.top{background:color-mix(in srgb,var(--s1) 90%,transparent);border-color:var(--line)}
+.ticker{background:var(--s1);border-color:var(--line);color:var(--muted)}
+.tk{border-color:var(--line)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 28px rgba(15,23,42,.045)}
+.card.note{border-left:4px solid var(--brand)}
+.tabs a:hover,.tabs a.active,.auth-link:hover{background:var(--s2);color:var(--ink)}
+.tabs a.active{box-shadow:inset 0 -2px 0 var(--brand)}
+nav button,.theme-toggle{background:var(--s2);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:9px 12px;cursor:pointer;font:inherit;font-size:.84rem;font-weight:700;white-space:nowrap}
+nav button:hover,.theme-toggle:hover{border-color:var(--brand);color:var(--brand)}
+input,select,textarea{background:var(--s1);color:var(--ink);border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.025)}
+input:focus,select:focus,textarea:focus{outline:3px solid color-mix(in srgb,var(--brand) 18%,transparent);border-color:var(--brand)}
+button.primary{background:var(--brand);color:#fff;box-shadow:0 4px 12px color-mix(in srgb,var(--brand) 20%,transparent)}
+button.primary:hover{background:var(--brand-d);filter:none}
+code{background:var(--s2);color:var(--brand);border-color:var(--line)}
+table{border-color:var(--line)}
+th{background:var(--s2);color:var(--ink)}
+td,th{border-color:var(--line)}
+.tabbar{background:var(--s1);border-color:var(--line)}
+.tabbar a{color:var(--muted)}
+.tabbar a.active{color:var(--brand)}
+.flash{border-radius:12px}
+.logo{background:linear-gradient(135deg,#18b995,#3478e8);color:#fff;box-shadow:0 5px 14px rgba(15,159,131,.18)}
+.subnav .seg{background:var(--s1);border-color:var(--line)}
+.seg a.active{background:var(--brand);color:#fff}
+@media(max-width:760px){nav{gap:6px;flex-wrap:wrap}.tabs{order:5;width:100%;overflow-x:auto;padding:3px 0}.tabs a{white-space:nowrap}.theme-toggle{padding:8px 10px}main{margin-top:16px}.card{padding:18px}}
+
 </style>
 </head>
 <body>
@@ -4610,6 +4645,7 @@ label.chk input{width:auto;margin:0;}
 <header class="top">
 <nav>
 <a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>Vedo Invest</span></a>
+<button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch colour theme" title="Switch colour theme"><span id="themeIcon" aria-hidden="true">☾</span> <span id="themeLabel">Dark mode</span></button>
 {% if me %}
 <div class="tabs">
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
@@ -4668,6 +4704,32 @@ label.chk input{width:auto;margin:0;}
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
 {% endif %}
+<script>
+(function(){
+  const root=document.documentElement;
+  const button=document.getElementById('themeToggle');
+  const label=document.getElementById('themeLabel');
+  const icon=document.getElementById('themeIcon');
+  if(!button) return;
+  let saved='light';
+  try{saved=localStorage.getItem('vedo-theme')||'light';}catch(e){}
+  function apply(theme){
+    const dark=theme==='dark';
+    root.setAttribute('data-theme',dark?'dark':'light');
+    if(label) label.textContent=dark?'Light mode':'Dark mode';
+    if(icon) icon.textContent=dark?'☀':'☾';
+    button.setAttribute('aria-label',dark?'Switch to light theme':'Switch to dark theme');
+    const meta=document.querySelector('meta[name="theme-color"]');
+    if(meta) meta.setAttribute('content',dark?'#08111d':'#f5f7fb');
+  }
+  apply(saved);
+  button.addEventListener('click',function(){
+    const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
+    apply(next);
+    try{localStorage.setItem('vedo-theme',next);}catch(e){}
+  });
+})();
+</script>
 </body>
 </html>
 """
@@ -6240,4 +6302,5 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
 
