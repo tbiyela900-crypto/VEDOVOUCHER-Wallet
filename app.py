@@ -4603,34 +4603,72 @@ label.chk input{width:auto;margin:0;}
 @media(max-width:600px){.benefits-heading{align-items:flex-start;gap:12px}.vedo-mark-3d{width:52px;height:52px;border-radius:15px;font-size:2rem}.benefits-grid{grid-template-columns:1fr}.team-panel{grid-column:auto}.benefit-3d{padding:18px}.calendar-3d{max-width:340px;margin-left:auto;margin-right:auto}.team-reward-list{grid-template-columns:1fr 1fr}.level-rewards-header{align-items:flex-start}.level-badge-3d{width:52px;height:52px;font-size:1.9rem}.level-chart-3d{padding:12px}.chart-area{grid-template-columns:36px 1fr;gap:5px;min-height:205px}.chart-bars{gap:4px;padding-left:1px;padding-right:5px}.chart-col{min-height:190px;gap:5px}.chart-col>strong{font-size:.49rem;letter-spacing:-.03em}.chart-col>span{font-size:.5rem}.chart-col>small{font-size:.45rem;letter-spacing:-.04em}.bar-3d{width:min(90%,32px)}.chart-ylabels{font-size:.49rem}.chart-title small{width:100%;margin-left:50px}.level-table-wrap{margin-top:22px}.level-rewards-table{min-width:0;width:100%;table-layout:fixed}.level-rewards-table th,.level-rewards-table td{white-space:normal!important;overflow-wrap:anywhere}.level-benefit-footer{grid-template-columns:1fr}.level-benefit-footer>div{border-right:0;border-bottom:1px solid #dce9f9;padding:8px}.level-benefit-footer>div:last-child{border-bottom:0}.benefits-disclaimer{font-size:.68rem}}
 @media(prefers-reduced-motion:reduce){.benefit-3d,.bar-3d,.vedo-mark-3d{transform:none}}
 
-/* Vedo professional theme system */
-body{background:var(--bg);color:var(--ink);transition:background .2s ease,color .2s ease}
-.top{background:color-mix(in srgb,var(--s1) 90%,transparent);border-color:var(--line)}
-.ticker{background:var(--s1);border-color:var(--line);color:var(--muted)}
-.tk{border-color:var(--line)}
-.card{background:var(--s1);border:1px solid var(--line);border-radius:var(--r);box-shadow:0 8px 28px rgba(15,23,42,.045)}
-.card.note{border-left:4px solid var(--brand)}
-.tabs a:hover,.tabs a.active,.auth-link:hover{background:var(--s2);color:var(--ink)}
-.tabs a.active{box-shadow:inset 0 -2px 0 var(--brand)}
-nav button,.theme-toggle{background:var(--s2);border:1px solid var(--line);color:var(--ink);border-radius:12px;padding:9px 12px;cursor:pointer;font:inherit;font-size:.84rem;font-weight:700;white-space:nowrap}
+/* Vedo professional interface system */
+body{background:var(--bg);color:var(--ink);transition:background .2s,color .2s}
+.ticker{background:var(--s1);border-bottom:1px solid var(--line);color:var(--muted)}
+.tk{border-color:var(--line)}.tk b{color:var(--brand)}
+.top{background:color-mix(in srgb,var(--s1) 95%,transparent);border-color:var(--line);box-shadow:0 5px 22px rgba(15,23,42,.045)}
+nav{max-width:1280px;min-height:68px;gap:10px}
+.brand{font-size:1rem;letter-spacing:-.03em;white-space:nowrap}
+.logo{width:38px;height:38px;border-radius:12px;color:#fff;background:linear-gradient(145deg,#0e9f83,#087b70);box-shadow:0 5px 13px #0f9f832e}
+.tabs{gap:3px;align-items:center}
+.tabs a{padding:9px 10px;border:1px solid transparent;border-radius:10px;color:var(--muted);font-size:.8rem;font-weight:700;white-space:nowrap;transition:all .18s}
+.tabs a .ic{width:17px;height:17px}
+.tabs a:hover{background:var(--s2);color:var(--ink)}
+.tabs a.active{background:color-mix(in srgb,var(--brand) 10%,var(--s1));border-color:color-mix(in srgb,var(--brand) 24%,var(--line));color:var(--brand);box-shadow:none}
+.nav-points{display:flex;flex-direction:column;gap:1px;padding:7px 11px;border:1px solid var(--line);border-radius:11px;background:var(--s2);white-space:nowrap}
+.nav-points-label{font-size:.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em}
+.nav-points strong{font-size:.88rem;color:var(--ink)}
+nav button,.theme-toggle{background:var(--s2);border:1px solid var(--line);color:var(--ink);border-radius:10px;padding:9px 11px;cursor:pointer;font:inherit;font-size:.8rem;font-weight:700;white-space:nowrap}
 nav button:hover,.theme-toggle:hover{border-color:var(--brand);color:var(--brand)}
-input,select,textarea{background:var(--s1);color:var(--ink);border:1px solid var(--line);box-shadow:0 1px 2px rgba(15,23,42,.025)}
-input:focus,select:focus,textarea:focus{outline:3px solid color-mix(in srgb,var(--brand) 18%,transparent);border-color:var(--brand)}
-button.primary{background:var(--brand);color:#fff;box-shadow:0 4px 12px color-mix(in srgb,var(--brand) 20%,transparent)}
-button.primary:hover{background:var(--brand-d);filter:none}
-code{background:var(--s2);color:var(--brand);border-color:var(--line)}
-table{border-color:var(--line)}
-th{background:var(--s2);color:var(--ink)}
-td,th{border-color:var(--line)}
-.tabbar{background:var(--s1);border-color:var(--line)}
-.tabbar a{color:var(--muted)}
-.tabbar a.active{color:var(--brand)}
-.flash{border-radius:12px}
-.logo{background:linear-gradient(135deg,#18b995,#3478e8);color:#fff;box-shadow:0 5px 14px rgba(15,159,131,.18)}
-.subnav .seg{background:var(--s1);border-color:var(--line)}
-.seg a.active{background:var(--brand);color:#fff}
-@media(max-width:760px){nav{gap:6px;flex-wrap:wrap}.tabs{order:5;width:100%;overflow-x:auto;padding:3px 0}.tabs a{white-space:nowrap}.theme-toggle{padding:8px 10px}main{margin-top:16px}.card{padding:18px}}
-
+.theme-toggle{display:flex;align-items:center;gap:7px}
+.subnav{max-width:1280px;margin:12px auto 0;padding:0 20px}
+.subnav .seg{display:flex;gap:5px;width:max-content;max-width:100%;overflow-x:auto;padding:5px;border:1px solid var(--line);border-radius:12px;background:var(--s1)}
+.seg a{padding:8px 13px;border-radius:8px;color:var(--muted);font-size:.8rem;font-weight:700;text-decoration:none;white-space:nowrap}
+.seg a:hover{background:var(--s2);color:var(--ink)}.seg a.active{background:var(--brand);color:#fff}
+main{max-width:1180px;margin:28px auto 110px;padding:0 22px;min-height:55vh}
+h1,h2,h3,h4{color:var(--ink);letter-spacing:-.035em;line-height:1.22}
+h1{font-size:clamp(1.65rem,3vw,2.25rem);font-weight:800;margin:0 0 18px}
+h2{font-size:1.18rem;font-weight:800;margin:0 0 13px}
+h3{font-size:1rem;font-weight:800}
+p{line-height:1.62}.muted,.small{color:var(--muted)}
+.card{background:var(--s1);border:1px solid var(--line);border-radius:16px;padding:22px;box-shadow:0 8px 26px rgba(15,23,42,.035);margin:0 0 18px}
+.card.note{border-left:3px solid var(--brand)}
+.stats{gap:12px}.stat{background:var(--s2);border:1px solid var(--line);border-radius:13px;padding:15px}
+.stat b{font-size:1.25rem;color:var(--ink);font-weight:800}.stat span{color:var(--muted);font-size:.76rem;font-weight:600}
+.flash{border:1px solid var(--line);border-radius:12px;padding:13px 16px;box-shadow:none;margin:0 0 12px}
+input,select,textarea{width:100%;max-width:100%;min-height:43px;padding:10px 12px;border:1px solid var(--line);border-radius:10px;background:var(--s1);color:var(--ink);font:inherit;font-size:.9rem;box-shadow:none}
+textarea{min-height:100px;resize:vertical}
+input:focus,select:focus,textarea:focus{outline:3px solid color-mix(in srgb,var(--brand) 16%,transparent);border-color:var(--brand)}
+label{display:block;margin:13px 0 6px;color:var(--ink);font-size:.8rem;font-weight:700}
+button,.btnlink{font:inherit}
+button{border:1px solid var(--line);border-radius:10px;padding:10px 14px;background:var(--s2);color:var(--ink);font-size:.84rem;font-weight:700;cursor:pointer;transition:transform .15s,background .15s}
+button:hover,.btnlink:hover{transform:translateY(-1px)}button:disabled{opacity:.48;cursor:not-allowed;transform:none}
+button.primary,.btnlink{background:var(--brand);border:1px solid var(--brand);color:#fff;box-shadow:0 4px 12px color-mix(in srgb,var(--brand) 16%,transparent)}
+button.primary:hover,.btnlink:hover{background:var(--brand-d);color:#fff}
+button.success{background:#e8f7f1;border-color:#bce8d7;color:#087653}
+button.danger{background:#fff0f1;border-color:#ffd0d5;color:#b42336}
+:root[data-theme="dark"] button.success{background:#12382f;border-color:#245b4b;color:#70e0b7}
+:root[data-theme="dark"] button.danger{background:#3a2028;border-color:#63313e;color:#ff9aaa}
+.btnlink{display:inline-flex;align-items:center;justify-content:center;padding:10px 15px;border-radius:10px;text-decoration:none;font-size:.84rem;font-weight:750}
+code{background:var(--s2);color:var(--brand);border:1px solid var(--line);border-radius:7px;padding:3px 6px}
+table{width:100%;border-collapse:separate;border-spacing:0;border:1px solid var(--line);border-radius:12px;overflow:hidden;background:var(--s1);font-size:.82rem}
+th{background:var(--s2);color:var(--muted);font-size:.7rem;font-weight:800;letter-spacing:.045em;text-transform:uppercase}
+td,th{padding:11px 12px;border-bottom:1px solid var(--line);vertical-align:middle;text-align:left}
+tr:last-child td{border-bottom:0}
+tbody tr:hover td{background:color-mix(in srgb,var(--s2) 58%,var(--s1))}
+.badge{display:inline-flex;align-items:center;padding:5px 9px;border:1px solid var(--line);border-radius:99px;background:var(--s2);color:var(--ink);font-size:.7rem;font-weight:800}
+.tabbar{position:fixed;z-index:40;left:50%;bottom:12px;transform:translateX(-50%);width:min(760px,calc(100% - 28px));display:flex;justify-content:space-around;gap:3px;padding:8px 10px calc(8px + env(safe-area-inset-bottom));border:1px solid var(--line);border-radius:17px;background:color-mix(in srgb,var(--s1) 94%,transparent);box-shadow:0 12px 38px #0f172a21;backdrop-filter:blur(18px)}
+.tabbar a{display:flex;flex:1;min-width:0;align-items:center;justify-content:center;flex-direction:column;gap:4px;padding:5px 3px;border-radius:10px;color:var(--muted);text-decoration:none;font-size:.64rem;font-weight:750;white-space:nowrap}
+.tabbar a .ic{width:19px;height:19px}.tabbar a.active{color:var(--brand);background:color-mix(in srgb,var(--brand) 10%,var(--s1))}
+.pos{color:var(--up);font-weight:800}.neg{color:var(--down);font-weight:800}
+.inline{display:inline-flex;align-items:center;gap:6px;flex-wrap:wrap}.inline input{width:auto;min-width:90px}
+img{max-width:100%;height:auto}
+:focus-visible{outline:3px solid color-mix(in srgb,var(--brand) 45%,transparent);outline-offset:2px}
+@media(max-width:1100px){nav{flex-wrap:wrap;padding:10px 16px}.brand{margin-right:auto}.tabs{order:5;width:100%;overflow-x:auto;padding:3px 0 5px}.tabs a{flex:none}.nav-points{margin-left:auto}}
+@media(max-width:760px){main{margin:18px auto 112px;padding:0 14px}nav{gap:7px;padding:9px 12px}.brand{font-size:.95rem}.theme-toggle{padding:8px 10px}.theme-toggle #themeLabel{display:none}.tabs{gap:4px}.tabs a{padding:8px 10px;font-size:.77rem}.subnav{padding:0 14px;margin-top:10px}.card{padding:17px;border-radius:14px}.stats{grid-template-columns:repeat(2,minmax(0,1fr))}table{display:block;overflow-x:auto;white-space:nowrap;max-width:100%}.tabbar{bottom:calc(7px + env(safe-area-inset-bottom));width:calc(100% - 18px);padding:7px 5px}.tabbar a{font-size:.58rem}.tabbar a .ic{width:18px;height:18px}}
+@media(max-width:390px){.nav-points{padding:5px 8px}.nav-points strong{font-size:.76rem}.tabs a{padding:7px 8px}.tabbar a{font-size:.54rem}}
+@media(prefers-reduced-motion:reduce){*,*:before,*:after{scroll-behavior:auto!important;animation-duration:.01ms!important;animation-iteration-count:1!important;transition-duration:.01ms!important}}
 </style>
 </head>
 <body>
@@ -4647,12 +4685,13 @@ td,th{border-color:var(--line)}
 <a class="brand" href="{{ url_for('dashboard') if me else url_for('login') }}"><span class="logo">V</span><span>Vedo Invest</span></a>
 <button class="theme-toggle" id="themeToggle" type="button" aria-label="Switch colour theme" title="Switch colour theme"><span id="themeIcon" aria-hidden="true">☾</span> <span id="themeLabel">Dark mode</span></button>
 {% if me %}
-<div class="tabs">
-<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
+<div class="tabs" aria-label="Main navigation">
+<a class="{{ 'active' if ep == 'dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('home') }}Home</a>
+<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}Balance</a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
-<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
-<a class="{{ 'active' if ep in ['support'] }}" href="{{ url_for('support') }}">{{ icon('support') }}Help &amp; Support</a>
-<a class="{{ 'active' if ep in ['profile'] }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
+<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}Team</a>
+<a class="{{ 'active' if ep == 'support' }}" href="{{ url_for('support') }}">{{ icon('support') }}Support</a>
+<a class="{{ 'active' if ep == 'profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
 <span class="nav-points" title="Your available Vedo balance"><span class="nav-points-label">Balance</span><strong>{{ money(me['points']) }}</strong></span>
@@ -4695,13 +4734,14 @@ td,th{border-color:var(--line)}
 </main>
 
 {% if me %}
-<div class="tabbar">
-<a class="{{ 'active' if ep=='dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('home') }}Home</a>
-<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('withdraw') }}Withdraw</a>
-<a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
-<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}My Team</a>
-<a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
-{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
+<div class="tabbar" aria-label="Mobile navigation">
+<a class="{{ 'active' if ep=='dashboard' }}" href="{{ url_for('dashboard') }}">{{ icon('home') }}<span>Home</span></a>
+<a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}<span>Balance</span></a>
+<a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}<span>Games</span></a>
+<a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}<span>Team</span></a>
+<a class="{{ 'active' if ep=='support' }}" href="{{ url_for('support') }}">{{ icon('support') }}<span>Support</span></a>
+<a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}<span>Profile</span></a>
+{% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}<span>Admin</span></a>{% endif %}
 </div>
 {% endif %}
 <script>
@@ -4710,7 +4750,6 @@ td,th{border-color:var(--line)}
   const button=document.getElementById('themeToggle');
   const label=document.getElementById('themeLabel');
   const icon=document.getElementById('themeIcon');
-  if(!button) return;
   let saved='light';
   try{saved=localStorage.getItem('vedo-theme')||'light';}catch(e){}
   function apply(theme){
@@ -4723,6 +4762,7 @@ td,th{border-color:var(--line)}
     if(meta) meta.setAttribute('content',dark?'#08111d':'#f5f7fb');
   }
   apply(saved);
+  if(!button) return;
   button.addEventListener('click',function(){
     const next=root.getAttribute('data-theme')==='dark'?'light':'dark';
     apply(next);
@@ -6302,5 +6342,6 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
 
 
