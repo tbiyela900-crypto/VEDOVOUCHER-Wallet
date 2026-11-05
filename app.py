@@ -822,8 +822,25 @@ def pay_referral_bonus(db, user, new_level):
 
 
 def page(body, **ctx):
+    # Keep the chat badge visible across the whole website.
+    me = current_user()
+    unread_chat_count = 0
+    if me:
+        db = get_db()
+        if me["is_admin"]:
+            unread_chat_count = db.execute(
+                "SELECT COUNT(*) FROM support_messages "
+                "WHERE sender_is_admin=0 AND read_by_admin=0"
+            ).fetchone()[0]
+        else:
+            unread_chat_count = db.execute(
+                "SELECT COUNT(*) FROM support_messages "
+                "WHERE user_id=? AND sender_is_admin=1 AND read_by_user=0",
+                (me["id"],)
+            ).fetchone()[0]
     return render_template_string(
         "{% extends 'base' %}{% block body %}" + body + "{% endblock %}",
+        unread_chat_count=unread_chat_count,
         **ctx)
 
 
@@ -1487,6 +1504,26 @@ def checkin_state(user):
 def rewards_guide():
     """Dedicated, readable Vedo rewards page opened from the dashboard promo."""
     return page(REWARDS_GUIDE_BODY)
+
+
+@app.route("/support/unread-count")
+@login_required
+def support_unread_count():
+    """Return the current user's unread support-message count for the chat badge."""
+    db = get_db()
+    me = current_user()
+    if me["is_admin"]:
+        count = db.execute(
+            "SELECT COUNT(*) FROM support_messages "
+            "WHERE sender_is_admin=0 AND read_by_admin=0"
+        ).fetchone()[0]
+    else:
+        count = db.execute(
+            "SELECT COUNT(*) FROM support_messages "
+            "WHERE user_id=? AND sender_is_admin=1 AND read_by_user=0",
+            (me["id"],)
+        ).fetchone()[0]
+    return jsonify({"count": int(count)})
 
 
 @app.route("/support", methods=["GET", "POST"])
@@ -4629,6 +4666,11 @@ nav{max-width:1280px;min-height:68px;gap:10px}
 .tabs a{padding:9px 10px;border:1px solid transparent;border-radius:10px;color:var(--muted);font-size:.8rem;font-weight:700;white-space:nowrap;transition:all .18s}
 .tabs a .ic{width:17px;height:17px}
 .tabs a:hover{background:var(--s2);color:var(--ink)}
+.chat-nav-link{position:relative}
+.chat-unread{display:inline-flex;align-items:center;justify-content:center;min-width:18px;height:18px;padding:0 5px;margin-left:6px;border-radius:99px;background:#dc2626;color:#fff;font-size:.65rem;font-weight:900;line-height:1;vertical-align:middle}
+.chat-unread[hidden]{display:none!important}
+.tabbar .chat-unread{position:absolute;top:0;right:12%;min-width:16px;height:16px;margin:0;font-size:.58rem}
+
 .tabs a.active{background:color-mix(in srgb,var(--brand) 10%,var(--s1));border-color:color-mix(in srgb,var(--brand) 24%,var(--line));color:var(--brand);box-shadow:none}
 .nav-points{display:flex;flex-direction:column;gap:1px;padding:7px 11px;border:1px solid var(--line);border-radius:11px;background:var(--s2);white-space:nowrap}
 .nav-points-label{font-size:.62rem;color:var(--muted);font-weight:700;text-transform:uppercase;letter-spacing:.08em}
@@ -4704,7 +4746,7 @@ img{max-width:100%;height:auto}
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}Balance</a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}Team</a>
-<a class="{{ 'active' if ep == 'support' }}" href="{{ url_for('support') }}">{{ icon('support') }}Support</a>
+<a class="chat-nav-link {{ 'active' if ep == 'support' }}" href="{{ url_for('support') }}" aria-label="Chat and support{% if unread_chat_count %}, {{ unread_chat_count }} unread messages{% endif %}">{{ icon('support') }}Chat<span class="chat-unread" data-chat-unread {% if not unread_chat_count %}hidden{% endif %}>{{ unread_chat_count if unread_chat_count < 100 else '99+' }}</span></a>
 <a class="{{ 'active' if ep == 'profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
@@ -4753,12 +4795,31 @@ img{max-width:100%;height:auto}
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}<span>Balance</span></a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}<span>Games</span></a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}<span>Team</span></a>
-<a class="{{ 'active' if ep=='support' }}" href="{{ url_for('support') }}">{{ icon('support') }}<span>Support</span></a>
+<a class="chat-nav-link {{ 'active' if ep=='support' }}" href="{{ url_for('support') }}" aria-label="Chat and support{% if unread_chat_count %}, {{ unread_chat_count }} unread messages{% endif %}">{{ icon('support') }}<span>Chat</span><span class="chat-unread" data-chat-unread {% if not unread_chat_count %}hidden{% endif %}>{{ unread_chat_count if unread_chat_count < 100 else '99+' }}</span></a>
 <a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}<span>Profile</span></a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}<span>Admin</span></a>{% endif %}
 </div>
 {% endif %}
 <script>
+(function(){
+  const chatBadges=document.querySelectorAll('[data-chat-unread]');
+  if(chatBadges.length){
+    async function refreshChatBadge(){
+      try{
+        const response=await fetch('/support/unread-count',{credentials:'same-origin',headers:{'Accept':'application/json'}});
+        if(!response.ok)return;
+        const data=await response.json();
+        const count=Math.max(0,Number(data.count)||0);
+        chatBadges.forEach(function(badge){
+          badge.textContent=count>99?'99+':String(count);
+          badge.hidden=count===0;
+        });
+      }catch(e){}
+    }
+    refreshChatBadge();
+    window.setInterval(refreshChatBadge,15000);
+  }
+})();
 (function(){
   const root=document.documentElement;
   const button=document.getElementById('themeToggle');
