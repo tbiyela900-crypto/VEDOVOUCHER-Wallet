@@ -550,6 +550,30 @@ CREATE TABLE IF NOT EXISTS support_messages (
 CREATE INDEX IF NOT EXISTS idx_support_messages_user_id_id
     ON support_messages(user_id, id);
 
+CREATE TABLE IF NOT EXISTS chat_conversations (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    kind TEXT NOT NULL CHECK(kind IN ('support','direct','group')),
+    title TEXT NOT NULL DEFAULT '',
+    avatar TEXT NOT NULL DEFAULT '',
+    created_by INTEGER NOT NULL REFERENCES users(id),
+    created_at TEXT NOT NULL
+);
+CREATE TABLE IF NOT EXISTS chat_members (
+    conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    joined_at TEXT NOT NULL,
+    last_read_id INTEGER NOT NULL DEFAULT 0,
+    PRIMARY KEY(conversation_id,user_id)
+);
+CREATE TABLE IF NOT EXISTS chat_messages (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    conversation_id INTEGER NOT NULL REFERENCES chat_conversations(id) ON DELETE CASCADE,
+    sender_id INTEGER NOT NULL REFERENCES users(id),
+    message TEXT NOT NULL,
+    created_at TEXT NOT NULL
+);
+CREATE INDEX IF NOT EXISTS idx_chat_messages_conversation ON chat_messages(conversation_id,id);
+
 CREATE TABLE IF NOT EXISTS user_instructions (
     user_id INTEGER PRIMARY KEY REFERENCES users(id) ON DELETE CASCADE,
     text TEXT NOT NULL,
@@ -1032,6 +1056,27 @@ def init_db():
             DEFAULT_TOPUP_INSTRUCTIONS
         )
 
+    # One-time migration: preserve all existing Support messages in the new chat centre.
+    if not db.execute("SELECT 1 FROM settings WHERE key='chat_support_migrated'").fetchone():
+        admin_row = db.execute("SELECT id FROM users WHERE is_admin=1 ORDER BY id LIMIT 1").fetchone()
+        if admin_row:
+            old_threads = db.execute("SELECT DISTINCT user_id FROM support_messages").fetchall()
+            for thread in old_threads:
+                member_id = thread["user_id"]
+                cur = db.execute(
+                    "INSERT INTO chat_conversations(kind,title,created_by,created_at) VALUES('support','Andriane',?,?)",
+                    (admin_row["id"], now_iso()))
+                cid = cur.lastrowid
+                for uid in (member_id, admin_row["id"]):
+                    db.execute("INSERT OR IGNORE INTO chat_members(conversation_id,user_id,joined_at) VALUES(?,?,?)",
+                               (cid, uid, now_iso()))
+                old_msgs = db.execute("SELECT * FROM support_messages WHERE user_id=? ORDER BY id",
+                                       (member_id,)).fetchall()
+                for old in old_msgs:
+                    sender = admin_row["id"] if old["sender_is_admin"] else member_id
+                    db.execute("INSERT INTO chat_messages(conversation_id,sender_id,message,created_at) VALUES(?,?,?,?)",
+                               (cid, sender, old["message"], old["created_at"]))
+            set_setting(db, "chat_support_migrated", "1")
     db.commit()
     db.close()
 
@@ -1489,86 +1534,217 @@ def rewards_guide():
     return page(REWARDS_GUIDE_BODY)
 
 
-@app.route("/support", methods=["GET", "POST"])
+@app.route("/support")
 @login_required
 def support():
-    """Member-to-support chat. Admins can open member threads and reply."""
-    db = get_db()
-    me = current_user()
-    is_admin = bool(me["is_admin"])
+    """Compatibility route to the expanded Vedo chat centre."""
+    return redirect(url_for("chats"))
 
-    if is_admin:
-        raw_user_id = request.args.get("user_id", "").strip()
-        selected_user = None
-        if raw_user_id:
-            try:
-                selected_id = int(raw_user_id)
-            except ValueError:
-                abort(404)
-            selected_user = db.execute(
-                "SELECT id, username, level FROM users WHERE id=? AND is_admin=0",
-                (selected_id,)).fetchone()
-            if selected_user is None:
-                abort(404)
-    else:
-        selected_user = {"id": me["id"], "username": me["username"], "level": me["level"]}
 
-    if request.method == "POST":
-        message = request.form.get("message", "").strip()
-        if not message:
-            flash("Write a message before sending.", "error")
-        elif len(message) > 2000:
-            flash("Messages must be 2,000 characters or fewer.", "error")
-        elif is_admin and selected_user is None:
-            flash("Choose a member conversation before replying.", "error")
-        else:
-            thread_user_id = selected_user["id"]
-            db.execute(
-                "INSERT INTO support_messages "
-                "(user_id, sender_is_admin, message, created_at, read_by_user, read_by_admin) "
-                "VALUES (?,?,?,?,?,?)",
-                (thread_user_id, 1 if is_admin else 0, message, now_iso(),
-                 0 if is_admin else 1, 1 if is_admin else 0))
-            db.commit()
-            flash("Reply sent." if is_admin else "Your message has been sent to Vedo Support.", "ok")
-        if is_admin and selected_user is None:
-            return redirect(url_for("support"))
-        return redirect(url_for("support", **({"user_id": selected_user["id"]} if is_admin else {})))
 
-    if is_admin:
-        # Inbox shows the latest message and unread member-message count per thread.
-        inbox = db.execute("""
-            SELECT u.id, u.username, u.level,
-                   (SELECT sm.message FROM support_messages sm
-                    WHERE sm.user_id=u.id ORDER BY sm.id DESC LIMIT 1) AS last_message,
-                   (SELECT sm.created_at FROM support_messages sm
-                    WHERE sm.user_id=u.id ORDER BY sm.id DESC LIMIT 1) AS last_at,
-                   (SELECT COUNT(*) FROM support_messages sm
-                    WHERE sm.user_id=u.id AND sm.sender_is_admin=0 AND sm.read_by_admin=0) AS unread
-            FROM users u
-            WHERE u.is_admin=0 AND EXISTS
-                (SELECT 1 FROM support_messages sm WHERE sm.user_id=u.id)
-            ORDER BY last_at DESC
-        """).fetchall()
-        messages = []
-        if selected_user:
-            db.execute("UPDATE support_messages SET read_by_admin=1 "
-                       "WHERE user_id=? AND sender_is_admin=0", (selected_user["id"],))
-            db.commit()
-            messages = db.execute(
-                "SELECT * FROM support_messages WHERE user_id=? ORDER BY id ASC",
-                (selected_user["id"],)).fetchall()
-        return page(SUPPORT_BODY, is_admin=True, selected_user=selected_user,
-                    inbox=inbox, messages=messages)
+# ============================================================================
+# VEDO CHATS: official support, private member messages and groups
+# ============================================================================
+def _chat_member(db, cid, uid):
+    return db.execute("SELECT 1 FROM chat_members WHERE conversation_id=? AND user_id=?",
+                      (cid, uid)).fetchone() is not None
 
-    db.execute("UPDATE support_messages SET read_by_user=1 "
-               "WHERE user_id=? AND sender_is_admin=1", (me["id"],))
+
+def _ensure_support_chat(db, member_id):
+    row = db.execute("""SELECT c.id FROM chat_conversations c
+        JOIN chat_members m ON m.conversation_id=c.id
+        WHERE c.kind='support' AND m.user_id=?""", (member_id,)).fetchone()
+    if row:
+        return row["id"]
+    admin = db.execute("SELECT id FROM users WHERE is_admin=1 ORDER BY id LIMIT 1").fetchone()
+    if not admin:
+        raise RuntimeError("Vedo admin account is not configured.")
+    cur = db.execute("INSERT INTO chat_conversations(kind,title,created_by,created_at) VALUES('support','Andriane',?,?)",
+                     (admin["id"], now_iso()))
+    cid = cur.lastrowid
+    for uid in (member_id, admin["id"]):
+        db.execute("INSERT INTO chat_members(conversation_id,user_id,joined_at) VALUES(?,?,?)",
+                   (cid, uid, now_iso()))
     db.commit()
-    messages = db.execute(
-        "SELECT * FROM support_messages WHERE user_id=? ORDER BY id ASC",
-        (me["id"],)).fetchall()
-    return page(SUPPORT_BODY, is_admin=False, selected_user=selected_user,
-                inbox=[], messages=messages)
+    return cid
+
+
+def _chat_label(db, c, viewer_id):
+    if c["kind"] == "support": return "Andriane"
+    if c["kind"] == "group": return c["title"] or "Vedo Group"
+    other = db.execute("""SELECT u.username FROM chat_members m JOIN users u ON u.id=m.user_id
+        WHERE m.conversation_id=? AND m.user_id<>? LIMIT 1""",
+        (c["id"], viewer_id)).fetchone()
+    return other["username"] if other else "Private chat"
+
+
+@app.route("/uploads/<path:filename>")
+@login_required
+def uploaded_file(filename):
+    return send_from_directory(UPLOAD_DIR, filename)
+
+
+@app.route("/chats", methods=["GET", "POST"])
+@login_required
+def chats():
+    db, me = get_db(), current_user()
+    if not me["is_admin"]:
+        _ensure_support_chat(db, me["id"])
+    if request.method == "POST":
+        action = request.form.get("action", "")
+        if action == "send":
+            try: cid = int(request.form.get("conversation_id", ""))
+            except ValueError: abort(400)
+            if not _chat_member(db, cid, me["id"]): abort(403)
+            msg = request.form.get("message", "").strip()
+            if not msg or len(msg) > 2000:
+                flash("Messages must contain 1–2,000 characters.", "error")
+            else:
+                db.execute("INSERT INTO chat_messages(conversation_id,sender_id,message,created_at) VALUES(?,?,?,?)",
+                           (cid, me["id"], msg, now_iso()))
+                db.commit()
+            return redirect(url_for("chats", conversation_id=cid))
+        if action == "new_dm":
+            name = request.form.get("username", "").strip()
+            target = db.execute("SELECT id FROM users WHERE username=? AND is_admin=0", (name,)).fetchone()
+            if not target or target["id"] == me["id"]:
+                flash("Enter the exact registered cellphone number of another member.", "error")
+                return redirect(url_for("chats"))
+            found = db.execute("""SELECT c.id FROM chat_conversations c
+                JOIN chat_members a ON a.conversation_id=c.id AND a.user_id=?
+                JOIN chat_members b ON b.conversation_id=c.id AND b.user_id=?
+                WHERE c.kind='direct' LIMIT 1""", (me["id"], target["id"])).fetchone()
+            if found:
+                cid = found["id"]
+            else:
+                cur = db.execute("INSERT INTO chat_conversations(kind,created_by,created_at) VALUES('direct',?,?)",
+                                 (me["id"], now_iso()))
+                cid = cur.lastrowid
+                for uid in (me["id"], target["id"]):
+                    db.execute("INSERT INTO chat_members(conversation_id,user_id,joined_at) VALUES(?,?,?)",
+                               (cid, uid, now_iso()))
+                db.commit()
+            return redirect(url_for("chats", conversation_id=cid))
+        if action == "new_group":
+            title = request.form.get("group_name", "").strip()[:60]
+            if not title:
+                flash("Enter a group name.", "error")
+                return redirect(url_for("chats"))
+            cur = db.execute("INSERT INTO chat_conversations(kind,title,created_by,created_at) VALUES('group',?,?,?)",
+                             (title, me["id"], now_iso()))
+            cid = cur.lastrowid
+            ids = {me["id"]}
+            for name in [x.strip() for x in request.form.get("members", "").split(",") if x.strip()]:
+                row = db.execute("SELECT id FROM users WHERE username=? AND is_admin=0", (name,)).fetchone()
+                if row: ids.add(row["id"])
+            for uid in ids:
+                db.execute("INSERT INTO chat_members(conversation_id,user_id,joined_at) VALUES(?,?,?)",
+                           (cid, uid, now_iso()))
+            db.commit()
+            return redirect(url_for("chats", conversation_id=cid))
+        if action == "group_member":
+            try: cid = int(request.form.get("conversation_id", ""))
+            except ValueError: abort(400)
+            group = db.execute("SELECT * FROM chat_conversations WHERE id=? AND kind='group'", (cid,)).fetchone()
+            if not group or (group["created_by"] != me["id"] and not me["is_admin"]):
+                abort(403)
+            target_name = request.form.get("username", "").strip()
+            target = db.execute("SELECT id FROM users WHERE username=? AND is_admin=0", (target_name,)).fetchone()
+            if not target:
+                flash("That member username was not found.", "error")
+            elif request.form.get("operation") == "add":
+                db.execute("INSERT OR IGNORE INTO chat_members(conversation_id,user_id,joined_at) VALUES(?,?,?)",
+                           (cid, target["id"], now_iso()))
+                db.commit()
+                flash("Member added to the group.", "ok")
+            elif request.form.get("operation") == "remove":
+                if target["id"] == group["created_by"]:
+                    flash("The group creator cannot be removed.", "error")
+                else:
+                    db.execute("DELETE FROM chat_members WHERE conversation_id=? AND user_id=?",
+                               (cid, target["id"]))
+                    db.commit()
+                    flash("Member removed from the group.", "ok")
+            return redirect(url_for("chats", conversation_id=cid))
+        if action == "save_avatar" and me["is_admin"]:
+            upload = request.files.get("avatar")
+            if upload and upload.filename:
+                from werkzeug.utils import secure_filename
+                ext = os.path.splitext(secure_filename(upload.filename))[1].lower()
+                if ext not in (".png", ".jpg", ".jpeg", ".webp"):
+                    flash("Use a PNG, JPG or WEBP profile picture.", "error")
+                else:
+                    os.makedirs(UPLOAD_DIR, exist_ok=True)
+                    filename = "andriane_" + secrets.token_hex(8) + ext
+                    upload.save(os.path.join(UPLOAD_DIR, filename))
+                    set_setting(db, "andriane_avatar", filename)
+                    db.commit()
+                    flash("Andriane's profile picture has been updated.", "ok")
+            return redirect(url_for("chats"))
+        abort(400)
+
+    if me["is_admin"]:
+        for row in db.execute("SELECT id FROM users WHERE is_admin=0").fetchall():
+            _ensure_support_chat(db, row["id"])
+    convos = db.execute("""
+        SELECT c.*, (SELECT u.username FROM chat_members om JOIN users u ON u.id=om.user_id
+            WHERE om.conversation_id=c.id AND om.user_id<>? LIMIT 1) other_name,
+        (SELECT message FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY id DESC LIMIT 1) last_message,
+        (SELECT created_at FROM chat_messages x WHERE x.conversation_id=c.id ORDER BY id DESC LIMIT 1) last_at,
+        (SELECT COUNT(*) FROM chat_messages x WHERE x.conversation_id=c.id AND x.id>m.last_read_id AND x.sender_id<>?) unread
+        FROM chat_conversations c JOIN chat_members m ON m.conversation_id=c.id AND m.user_id=?
+        ORDER BY COALESCE(last_at,c.created_at) DESC
+    """, (me["id"], me["id"], me["id"])).fetchall()
+    selected_id = request.args.get("conversation_id", type=int)
+    selected, messages = None, []
+    if selected_id:
+        selected = db.execute("SELECT * FROM chat_conversations WHERE id=?", (selected_id,)).fetchone()
+        if not selected or not _chat_member(db, selected_id, me["id"]): abort(403)
+        last_id = db.execute("SELECT COALESCE(MAX(id),0) n FROM chat_messages WHERE conversation_id=?",
+                             (selected_id,)).fetchone()["n"]
+        db.execute("UPDATE chat_members SET last_read_id=? WHERE conversation_id=? AND user_id=?",
+                   (last_id, selected_id, me["id"]))
+        db.commit()
+        messages = db.execute("""SELECT x.*,u.username,u.is_admin FROM chat_messages x
+            JOIN users u ON u.id=x.sender_id WHERE x.conversation_id=? ORDER BY x.id""",
+            (selected_id,)).fetchall()
+    group_members = []
+    if selected and selected["kind"] == "group":
+        group_members = db.execute("""SELECT u.username,m.user_id FROM chat_members m
+            JOIN users u ON u.id=m.user_id WHERE m.conversation_id=? ORDER BY u.username""",
+            (selected["id"],)).fetchall()
+    return page(CHATS_BODY, conversations=convos, selected=selected, messages=messages,
+                me=me, selected_label=_chat_label(db, selected, me["id"]) if selected else "",
+                avatar=get_setting(db, "andriane_avatar", ""), group_members=group_members)
+
+
+
+@app.route("/chat-updates")
+@login_required
+def chat_updates():
+    db, me = get_db(), current_user()
+    cid = request.args.get("conversation_id", type=int)
+    after_id = request.args.get("after_id", default=0, type=int)
+    if not cid or not _chat_member(db, cid, me["id"]):
+        abort(403)
+    rows = db.execute("""SELECT x.id,x.sender_id,x.message,x.created_at,u.username,u.is_admin
+        FROM chat_messages x JOIN users u ON u.id=x.sender_id
+        WHERE x.conversation_id=? AND x.id>? ORDER BY x.id LIMIT 100""",
+        (cid, after_id)).fetchall()
+    return jsonify(messages=[dict(r) for r in rows])
+
+
+@app.route("/chat-unread")
+@login_required
+def chat_unread():
+    db, me = get_db(), current_user()
+    n = db.execute("""SELECT COUNT(*) n FROM chat_messages x
+        JOIN chat_members m ON m.conversation_id=x.conversation_id AND m.user_id=?
+        WHERE x.id>m.last_read_id AND x.sender_id<>?""", (me["id"], me["id"])).fetchone()["n"]
+    if not me["is_admin"]:
+        n += db.execute("SELECT COUNT(*) n FROM support_messages WHERE user_id=? AND sender_is_admin=1 AND read_by_user=0",
+                        (me["id"],)).fetchone()["n"]
+    return jsonify(unread=n)
 
 
 @app.route("/dashboard")
@@ -3928,7 +4104,7 @@ SUPPORT_BODY = """
   {% if selected_user %}
     <div style="display:flex;align-items:center;justify-content:space-between;gap:12px;flex-wrap:wrap">
       <div><h1>Help &amp; Support</h1><p class="muted">Private conversation with {{ selected_user['username']|e }} · Level {{ selected_user['level'] }}</p></div>
-      <a class="btnlink" href="{{ url_for('support') }}">Back to inbox</a>
+      <a class="btnlink" href="{{ url_for('chats') }}">Back to inbox</a>
     </div>
   {% else %}
     <h1>Help &amp; Support inbox</h1>
@@ -3977,13 +4153,75 @@ SUPPORT_BODY = """
       </div>
     {% endif %}
   </div>
-  <form method="post" action="{{ url_for('support', user_id=selected_user['id']) if is_admin else url_for('support') }}">
+  <form method="post" action="{{ url_for('support', user_id=selected_user['id']) if is_admin else url_for('chats') }}">
     <input type="hidden" name="csrf_token" value="{{ csrf_token() }}">
     <label for="support-message">Your message</label>
     <textarea id="support-message" name="message" rows="4" maxlength="2000" required placeholder="Type your question here (up to 2,000 characters)"></textarea>
     <button class="primary">{{ 'Send reply' if is_admin else 'Send message' }}</button>
   </form>
 </div>
+{% endif %}
+"""
+
+
+CHATS_BODY = """
+<style>
+.chat-shell{display:grid;grid-template-columns:minmax(230px,310px) 1fr;gap:15px;min-height:62vh}
+.chat-list,.chat-room{background:var(--s1);border:1px solid var(--line);border-radius:17px;overflow:hidden}
+.chat-list{padding:13px}.chat-list a{display:block;padding:12px;border-radius:12px;color:var(--ink);text-decoration:none;border:1px solid transparent}
+.chat-list a.current,.chat-list a:hover{background:var(--s2);border-color:var(--line)}
+.chat-room{display:flex;flex-direction:column;min-height:540px}
+.chat-head{padding:15px;border-bottom:1px solid var(--line);display:flex;align-items:center;gap:12px}
+.chat-avatar{width:42px;height:42px;border-radius:50%;object-fit:cover;background:var(--s2);display:grid;place-items:center;font-weight:800}
+.chat-log{padding:17px;display:flex;flex:1;flex-direction:column;gap:10px;max-height:55vh;overflow:auto}
+.chat-bubble{max-width:80%;padding:11px 14px;border-radius:15px;background:var(--s2);overflow-wrap:anywhere}
+.chat-bubble.mine{align-self:flex-end;background:rgba(31,214,164,.14);border:1px solid rgba(31,214,164,.25)}
+.chat-compose{padding:13px;border-top:1px solid var(--line);display:flex;gap:8px;align-items:end}
+.chat-compose textarea{margin:0;min-height:48px;flex:1}
+.chat-tools{display:grid;gap:10px;margin-bottom:14px}.chat-tools form{padding:12px;border:1px solid var(--line);border-radius:12px;background:var(--s1)}
+@media(max-width:760px){.chat-shell{grid-template-columns:1fr}.chat-list{max-height:240px;overflow:auto}.chat-room{min-height:420px}.chat-log{max-height:45vh}}
+</style>
+<div class="card note"><h1>Vedo Chats</h1><p class="muted">Official support, private member conversations and groups.</p></div>
+{% if me['is_admin'] %}
+<div class="chat-tools"><form method="post" enctype="multipart/form-data"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="save_avatar"><strong>Andriane profile picture</strong><div class="two"><input type="file" name="avatar" accept="image/png,image/jpeg,image/webp" required><button class="primary">Update picture</button></div></form></div>
+{% else %}
+<div class="chat-tools">
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="new_dm"><strong>Start private chat</strong><div class="two"><input name="username" placeholder="Member cellphone number" required><button class="primary">Start chat</button></div></form>
+<form method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="new_group"><strong>Create group</strong><div class="two"><input name="group_name" placeholder="Group name" required><input name="members" placeholder="Cellphone numbers, separated by commas"><button class="primary">Create group</button></div><small class="muted">You are automatically added as group creator.</small></form>
+</div>
+{% endif %}
+<div class="chat-shell"><aside class="chat-list"><h2 style="margin:4px 6px 12px">Conversations</h2>
+{% for c in conversations %}<a class="{{ 'current' if selected and selected['id']==c['id'] else '' }}" href="{{ url_for('chats',conversation_id=c['id']) }}">
+<strong>{% if c['kind']=='support' %}Andriane · Support{% elif c['kind']=='group' %}{{ c['title']|e }}{% else %}{{ c['other_name']|e if c['other_name'] else 'Private chat' }}{% endif %}</strong>
+<div class="muted" style="font-size:.82rem;margin-top:4px">{{ (c['last_message'] or 'Start a conversation')|e|truncate(54) }}</div>
+{% if c['unread'] %}<span class="badge wait">{{ c['unread'] }} new</span>{% endif %}</a>
+{% else %}<p class="muted">No conversations yet.</p>{% endfor %}
+</aside><section class="chat-room">
+{% if selected %}<header class="chat-head">
+{% if selected['kind']=='support' and avatar %}<img class="chat-avatar" src="{{ url_for('uploaded_file',filename=avatar) }}" alt="Andriane">{% else %}<div class="chat-avatar">{{ 'A' if selected['kind']=='support' else ('#' if selected['kind']=='group' else 'V') }}</div>{% endif %}
+<div><strong>{{ selected_label|e }}</strong><div class="muted" style="font-size:.8rem">{% if selected['kind']=='support' %}Official Vedo Support{% elif selected['kind']=='group' %}Group conversation{% else %}Private member chat{% endif %}</div></div></header>
+{% if selected['kind']=='group' and (selected['created_by']==me['id'] or me['is_admin']) %}
+<div style="padding:10px 14px;border-bottom:1px solid var(--line)">
+<details><summary style="cursor:pointer;font-weight:700">Manage group members ({{ group_members|length }})</summary>
+<div class="muted" style="font-size:.8rem;margin:8px 0">Current members: {% for gm in group_members %}{{ gm['username']|e }}{% if not loop.last %}, {% endif %}{% endfor %}</div>
+<form method="post" style="display:flex;gap:7px;flex-wrap:wrap;align-items:center"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="group_member"><input type="hidden" name="conversation_id" value="{{ selected['id'] }}"><input name="username" placeholder="Member cellphone number" required style="flex:1;min-width:140px"><button name="operation" value="add" class="primary">Add</button><button name="operation" value="remove" class="secondary">Remove</button></form>
+</details></div>
+{% endif %}
+<div class="chat-log" id="chatLog">{% for msg in messages %}<div class="chat-bubble {{ 'mine' if msg['sender_id']==me['id'] else '' }}"><strong style="font-size:.75rem">{{ 'You' if msg['sender_id']==me['id'] else ('Andriane' if msg['is_admin'] else msg['username']|e) }}</strong><div style="white-space:pre-wrap">{{ msg['message']|e }}</div><small class="muted">{{ msg['created_at'] }}</small></div>{% endfor %}</div>
+<form class="chat-compose" method="post"><input type="hidden" name="csrf_token" value="{{ csrf_token() }}"><input type="hidden" name="action" value="send"><input type="hidden" name="conversation_id" value="{{ selected['id'] }}"><textarea name="message" maxlength="2000" rows="2" placeholder="Write a message..." required></textarea><button class="primary">Send</button></form>
+{% else %}<div style="margin:auto;text-align:center;padding:28px"><h2>Select a conversation</h2><p class="muted">Choose a chat from the list to read and send messages.</p></div>{% endif %}
+</section></div>
+{% if selected %}
+<script>
+(()=>{const log=document.getElementById('chatLog');if(!log)return;
+let lastId={{ messages[-1]['id'] if messages else 0 }};
+log.scrollTop=log.scrollHeight;
+async function poll(){try{const r=await fetch({{ url_for('chat_updates')|tojson }}+'?conversation_id={{ selected['id'] }}&after_id='+lastId,{credentials:'same-origin'});if(!r.ok)return;const data=await r.json();
+for(const m of data.messages){lastId=Math.max(lastId,m.id);const b=document.createElement('div');b.className='chat-bubble'+(m.sender_id==={{ me['id'] }}?' mine':'');const who=document.createElement('strong');who.style.fontSize='.75rem';who.textContent=m.sender_id==={{ me['id'] }}?'You':(m.is_admin?'Andriane':m.username);const body=document.createElement('div');body.style.whiteSpace='pre-wrap';body.textContent=m.message;const time=document.createElement('small');time.className='muted';time.textContent=m.created_at;b.append(who,body,time);log.appendChild(b)}if(data.messages.length)log.scrollTop=log.scrollHeight;
+}catch(e){}}
+setInterval(poll,4000);
+})();
+</script>
 {% endif %}
 """
 
@@ -4690,7 +4928,7 @@ img{max-width:100%;height:auto}
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}Balance</a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}Games</a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}Team</a>
-<a class="{{ 'active' if ep == 'support' }}" href="{{ url_for('support') }}">{{ icon('support') }}Support</a>
+<a class="{{ 'active' if ep in ['support','chats'] }}" href="{{ url_for('chats') }}">{{ icon('support') }}Support</a>
 <a class="{{ 'active' if ep == 'profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}Profile</a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}Admin</a>{% endif %}
 </div>
@@ -4739,7 +4977,7 @@ img{max-width:100%;height:auto}
 <a class="{{ 'active' if ep in ['withdraw','topup','upgrade'] }}" href="{{ url_for('withdraw') }}">{{ icon('topup') }}<span>Balance</span></a>
 <a class="{{ 'active' if ep in ['games_hub','spin_page','brain_page','brain_round','envelope_page'] }}" href="{{ url_for('games_hub') }}">{{ icon('games') }}<span>Games</span></a>
 <a class="{{ 'active' if ep in ['team','pots'] }}" href="{{ url_for('team') }}">{{ icon('team') }}<span>Team</span></a>
-<a class="{{ 'active' if ep=='support' }}" href="{{ url_for('support') }}">{{ icon('support') }}<span>Support</span></a>
+<a class="{{ 'active' if ep=='support' }}" href="{{ url_for('chats') }}">{{ icon('support') }}<span>Support</span></a>
 <a class="{{ 'active' if ep=='profile' }}" href="{{ url_for('profile') }}">{{ icon('profile') }}<span>Profile</span></a>
 {% if me['is_admin'] %}<a class="{{ 'active' if ep in ['admin','admin_user_profile','admin_games'] }}" href="{{ url_for('admin') }}">{{ icon('admin') }}<span>Admin</span></a>{% endif %}
 </div>
@@ -4769,6 +5007,11 @@ img{max-width:100%;height:auto}
     try{localStorage.setItem('vedo-theme',next);}catch(e){}
   });
 })();
+</script>
+<script>
+(async()=>{const links=[...document.querySelectorAll('a[href*="/chats"]')];if(!links.length)return;
+async function check(){try{const r=await fetch("{{ url_for('chat_unread') }}");if(!r.ok)return;const d=await r.json();links.forEach(a=>{let b=a.querySelector('.chat-notice');if(d.unread>0){if(!b){b=document.createElement('span');b.className='chat-notice';b.style.cssText='display:inline-grid;place-items:center;min-width:17px;height:17px;padding:0 4px;border-radius:20px;background:#e5484d;color:#fff;font-size:10px;margin-left:5px';a.appendChild(b)}b.textContent=d.unread>99?'99+':d.unread}else if(b)b.remove()})}catch(e){}}
+check();setInterval(check,12000)})();
 </script>
 </body>
 </html>
@@ -5282,7 +5525,7 @@ DASH_BODY = """
 <a class="act" href="{{ url_for('upgrade') }}"><span>{{ icon('upgrade') }}</span>Upgrade</a>
 <a class="act" href="{{ url_for('pots') }}"><span>{{ icon('pots') }}</span>Savings pots</a>
 <a class="act" href="{{ url_for('checkin') }}"><span>{{ icon('checkin') }}</span>Daily check-in</a>
-<a class="act" href="{{ url_for('support') }}"><span>{{ icon('support') }}</span>Help &amp; Support</a>
+<a class="act" href="{{ url_for('chats') }}"><span>{{ icon('support') }}</span>Help &amp; Support</a>
 {% if user['is_admin'] %}<a class="act" href="{{ url_for('admin') }}"><span>{{ icon('admin') }}</span>Admin</a>{% endif %}
 </div>
 </section>
@@ -6014,7 +6257,7 @@ ADMIN_BODY = """
 <div class="card note">
 <h2>Help &amp; Support inbox</h2>
 <p class="muted">Read member questions and reply privately from one place.</p>
-<a class="btnlink" href="{{ url_for('support') }}">Open Support inbox</a>
+<a class="btnlink" href="{{ url_for('chats') }}">Open Support inbox</a>
 </div>
 
 <div class="card note">
@@ -6342,6 +6585,7 @@ if __name__ == "__main__":
     print("======================================")
     print("Open: http://127.0.0.1:5000\n")
     app.run(host="127.0.0.1", port=5000, debug=False)
+
 
 
 
